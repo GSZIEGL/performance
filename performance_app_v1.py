@@ -1,4 +1,4 @@
-# performance_app_v1_4_hu.py
+# performance_app_v2_0_hu.py
 # AI-assisted Performance Recommendation System - magyar Streamlit MVP
 # Upload -> standardizálás -> KPI-k -> szabályalapú insightok -> coach-friendly javaslatok -> Excel/Word/PDF export
 
@@ -7,9 +7,9 @@ from __future__ import annotations
 import html
 import io
 import re
+from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -41,7 +41,7 @@ except Exception:
 # Oldalbeállítás
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Performance Ajánlórendszer MVP",
+    page_title="Football Performance Intelligence V2",
     page_icon="⚽",
     layout="wide",
 )
@@ -87,6 +87,23 @@ st.markdown(
     }
     .wrap-table th { background: rgba(30, 64, 175, 0.60); font-weight: 800; }
     .wrap-table tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+    .priority-card {
+        border-radius: 16px;
+        padding: 16px 18px;
+        margin-bottom: 12px;
+        background: rgba(17, 24, 39, 0.78);
+        border-left: 7px solid #22c55e;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.10);
+    }
+    .micro-pill {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 10px;
+        background: rgba(59,130,246,.18);
+        border: 1px solid rgba(147,197,253,.22);
+        margin: 3px;
+        font-weight: 700;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -139,6 +156,14 @@ METRIC_LABELS = {
     "dec_count": "Lassítások",
     "acc_count": "Gyorsulások",
     "high_efforts": "Nagy intenzitású erőfeszítések",
+}
+
+PLAYSTYLE_OPTIONS = {
+    "Kiegyensúlyozott": "Általános, kiegyensúlyozott performance profil.",
+    "Pressing": "Magas intenzitás, sok gyorsulás/lassítás, erős munkasűrűség.",
+    "Transition": "Gyors átmenetek, magas sprint- és speed exposure igény.",
+    "Possession": "Stabil volumen, kontrollált intenzitás, fenntartható terhelés.",
+    "Low Block": "Rövidebb, robbanékony intenzív blokkok, kontrollált összterhelés.",
 }
 
 
@@ -475,6 +500,303 @@ def team_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
     return sorted(insights, key=lambda x: SEVERITY_RANK.get(x.severity, 9))[:8]
 
 
+
+# -----------------------------------------------------------------------------
+# V2 - Football Intelligence Layer
+# -----------------------------------------------------------------------------
+def pdf_safe_text(text: object) -> str:
+    """PDF exporthoz stabil magyar szöveg.
+    Cloud környezetben a hosszú ő/ű néha hibásan jelenik meg, ezért PDF-ben
+    rövid párra normalizáljuk. UI, Word és Excel exportban marad az eredeti.
+    """
+    if text is None or (isinstance(text, float) and pd.isna(text)):
+        return ""
+    text = str(text)
+    replacements = {"ő": "ö", "Ő": "Ö", "ű": "ü", "Ű": "Ü"}
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
+
+def day_label_from_delta(delta_days: int) -> str:
+    if delta_days == 0:
+        return "MD"
+    if delta_days < 0:
+        return f"MD{delta_days}"
+    return f"MD+{delta_days}"
+
+
+def detect_match_day(week_df: pd.DataFrame) -> Optional[pd.Timestamp]:
+    if week_df.empty:
+        return None
+    tmp = week_df.copy()
+    tmp["session_date_dt"] = pd.to_datetime(tmp["session_date"], errors="coerce")
+    matches = tmp[tmp["session_type"] == "Meccs"]
+    if not matches.empty:
+        # Ha több meccs van, a hét fő meccsének az utolsót vesszük.
+        return pd.to_datetime(matches["session_date_dt"].max())
+    return None
+
+
+def build_microcycle_table(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
+    week_df = df[df["week"] == selected_week].copy()
+    if week_df.empty:
+        return pd.DataFrame()
+    match_day = detect_match_day(week_df)
+    week_df["session_date_dt"] = pd.to_datetime(week_df["session_date"], errors="coerce")
+
+    agg_spec = {
+        "training_load": "sum",
+        "total_distance": "sum",
+        "sprint_distance": "sum",
+        "hsr_distance": "sum",
+        "distance_per_min": "mean",
+        "max_speed": "max",
+        "acc_count": "sum",
+        "dec_count": "sum",
+        "high_efforts": "sum",
+        "player_name": "nunique",
+    }
+    usable = {k: v for k, v in agg_spec.items() if k in week_df.columns}
+    daily = week_df.groupby(["session_date_dt", "session_type"], as_index=False).agg(usable)
+    daily = daily.rename(columns={"player_name": "játékosok"})
+    if match_day is not None:
+        daily["md_delta"] = (daily["session_date_dt"] - match_day).dt.days
+        daily["md_label"] = daily["md_delta"].apply(day_label_from_delta)
+    else:
+        daily["md_delta"] = np.nan
+        daily["md_label"] = "Nincs meccs"
+
+    # Napi load fallback: ahol nincs training_load, ott total_distance alapján értékelünk.
+    if "training_load" in daily.columns and not daily["training_load"].isna().all():
+        daily["load_index"] = daily["training_load"]
+        daily["load_index_label"] = "Terhelési pont"
+    elif "total_distance" in daily.columns:
+        daily["load_index"] = daily["total_distance"]
+        daily["load_index_label"] = "Össztáv"
+    else:
+        daily["load_index"] = np.nan
+        daily["load_index_label"] = "Nincs load mutató"
+    return daily.sort_values("session_date_dt")
+
+
+def microcycle_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
+    insights: List[Insight] = []
+    daily = build_microcycle_table(df, selected_week)
+    if daily.empty:
+        return insights
+    if "MD" not in daily["md_label"].values:
+        insights.append(Insight(
+            "Mikrociklus kontextus hiányzik", "INFORMÁCIÓ",
+            "Az aktuális héten nem található meccs típusú session, ezért az MD-napok nem értelmezhetők automatikusan.",
+            "Meccsnap nélkül a heti struktúrát csak általános terhelési trendként lehet értékelni.",
+            "Ha van mérkőzés, érdemes a session típusát 'Meccs'-ként jelölni, hogy a rendszer MD-1 / MD-2 / MD-3 logikával is tudjon gondolkodni.",
+            scope="Mikrociklus",
+        ))
+        return insights
+
+    train = daily[daily["session_type"] == "Edzés"].copy()
+    match = daily[daily["session_type"] == "Meccs"].copy()
+
+    # Speed exposure: történt-e értelmezhető sprintinger a meccs előtti napokban?
+    if not train.empty and "sprint_distance" in daily.columns and not match.empty:
+        match_sprint = match["sprint_distance"].mean()
+        max_training_sprint = train["sprint_distance"].max()
+        if pd.notna(match_sprint) and match_sprint > 0:
+            ratio = max_training_sprint / match_sprint if pd.notna(max_training_sprint) else 0
+            if ratio < 0.15:
+                insights.append(Insight(
+                    "Hiányzó speed exposure", "KRITIKUS",
+                    f"A héten nem látszik érdemi sprintinger: a legmagasabb edzésnapi sprintterhelés a meccs kb. {ratio:.0%}-a.",
+                    "Meccsigényhez képest alacsony lehetett a maximális sebességű inger, ami a felkészítés minőségét ronthatja.",
+                    "Érdemes lehet egy rövid, kontrollált speed exposure blokkot betervezni a megfelelő napon, ha a heti cél és a játékosállapot engedi.",
+                    scope="Mikrociklus",
+                ))
+            elif ratio < 0.30:
+                insights.append(Insight(
+                    "Alacsony speed exposure", "FIGYELMEZTETÉS",
+                    f"A legmagasabb edzésnapi sprintterhelés a meccs kb. {ratio:.0%}-a.",
+                    "Volt sprintinger, de a meccsigényhez képest visszafogott lehetett.",
+                    "Érdemes ellenőrizni, hogy ez tudatos frissítés vagy nem kívánt intenzitáshiány volt-e.",
+                    scope="Mikrociklus",
+                ))
+
+    # MD-2 túl magas load
+    md2 = daily[daily["md_label"] == "MD-2"]
+    md3_4 = daily[daily["md_label"].isin(["MD-3", "MD-4"])]
+    if not md2.empty and not md3_4.empty:
+        md2_load = md2["load_index"].sum()
+        peak_early = md3_4["load_index"].max()
+        if pd.notna(md2_load) and pd.notna(peak_early) and peak_early > 0 and md2_load > peak_early * 0.80:
+            insights.append(Insight(
+                "Magas MD-2 terhelés", "FIGYELMEZTETÉS",
+                "Az MD-2 nap terhelése közel volt a hét korábbi fő terhelési napjához.",
+                "A mérkőzés előtti 48 órában a túl magas load ronthatja a frissességet.",
+                "Érdemes lehet az MD-2 napot jobban kontrollálni, és a fő terhelési ingert inkább MD-3 / MD-4 környékére helyezni.",
+                scope="Mikrociklus",
+            ))
+
+    # MD-1 activation kontroll
+    md1 = daily[daily["md_label"] == "MD-1"]
+    if not md1.empty and not md2.empty:
+        md1_load = md1["load_index"].sum()
+        md2_load = md2["load_index"].sum()
+        if pd.notna(md1_load) and pd.notna(md2_load) and md2_load > 0 and md1_load > md2_load * 0.85:
+            insights.append(Insight(
+                "MD-1 activation túl erős lehet", "FIGYELMEZTETÉS",
+                "Az MD-1 load nem csökkent érdemben az MD-2 naphoz képest.",
+                "A meccs előtti aktiváció célja általában a frissítés, nem egy újabb nagy terhelési inger.",
+                "Érdemes lehet az MD-1 napot rövidebb, frissebb, idegrendszeri aktivációs jelleggel tartani.",
+                scope="Mikrociklus",
+            ))
+
+    # Pozitív taper insight, ha van adat és nincs túl magas MD-1/MD-2
+    if not md1.empty and not md3_4.empty:
+        md1_load = md1["load_index"].sum()
+        peak_early = md3_4["load_index"].max()
+        if pd.notna(md1_load) and pd.notna(peak_early) and peak_early > 0 and md1_load < peak_early * 0.45:
+            insights.append(Insight(
+                "Megfelelő tapering jel", "INFORMÁCIÓ",
+                "A meccs előtti nap terhelése jelentősen alacsonyabb volt a hét fő terhelési napjához képest.",
+                "Ez támogathatja a mérkőzésnapi frissességet.",
+                "Érdemes megtartani ezt a struktúrát, ha a mérkőzésnapi teljesítmény is visszaigazolja.",
+                scope="Mikrociklus",
+            ))
+
+    return insights
+
+
+def playstyle_insights(df: pd.DataFrame, selected_week: str, playstyle: str) -> List[Insight]:
+    insights: List[Insight] = []
+    if playstyle == "Kiegyensúlyozott":
+        return insights
+    current = df[df["week"] == selected_week]
+    train = current[current["session_type"] == "Edzés"]
+    match = current[current["session_type"] == "Meccs"]
+    if train.empty:
+        return insights
+
+    def mean_ratio(metric: str) -> Optional[float]:
+        if metric not in current.columns or match.empty:
+            return None
+        m = match[metric].mean()
+        t = train[metric].mean()
+        if pd.isna(m) or m == 0 or pd.isna(t):
+            return None
+        return t / m
+
+    intensity_ratio = mean_ratio("distance_per_min")
+    sprint_ratio = mean_ratio("sprint_distance")
+    effort_ratio = mean_ratio("high_efforts")
+
+    if playstyle == "Pressing":
+        if intensity_ratio is not None and intensity_ratio < 0.90:
+            insights.append(Insight(
+                "Pressing profil: intenzitáshiány", "FIGYELMEZTETÉS",
+                f"A heti edzésintenzitás a meccsintenzitás kb. {intensity_ratio:.0%}-a.",
+                "Pressing játékmodellnél fontos, hogy a csapat rendszeresen találkozzon magas munkasűrűségű helyzetekkel.",
+                "Érdemes lehet rövidebb, nagyobb nyomású játékokat vagy pressing-specifikus blokkokat használni.",
+                scope="Játékmodell",
+            ))
+        if effort_ratio is not None and effort_ratio < 0.75:
+            insights.append(Insight(
+                "Pressing profil: kevés nagy intenzitású erőfeszítés", "FIGYELMEZTETÉS",
+                f"A high effort profil a meccsigény kb. {effort_ratio:.0%}-a.",
+                "A sok gyorsulás, lassítás és ismételt intenzív akció kulcs a pressing identitáshoz.",
+                "Érdemes lehet növelni az ismételt intenzív akciókat tartalmazó gyakorlatok arányát.",
+                scope="Játékmodell",
+            ))
+
+    elif playstyle == "Transition":
+        if sprint_ratio is not None and sprint_ratio < 0.80:
+            insights.append(Insight(
+                "Transition profil: alacsony sprintinger", "FIGYELMEZTETÉS",
+                f"A heti sprintprofil a meccsigény kb. {sprint_ratio:.0%}-a.",
+                "Átmenetekre építő játékmodellben fontos a rendszeres nagysebességű inger.",
+                "Érdemes célzott átmeneti játékokat vagy nagy területű sprinthelyzeteket beépíteni.",
+                scope="Játékmodell",
+            ))
+
+    elif playstyle == "Possession":
+        if intensity_ratio is not None and intensity_ratio > 1.15:
+            insights.append(Insight(
+                "Possession profil: magas edzésintenzitás", "INFORMÁCIÓ",
+                f"Az edzésintenzitás meghaladta a meccsintenzitást: kb. {intensity_ratio:.0%}.",
+                "Ez lehet tudatos túlterhelés, de possession modellnél a kontrollált terhelés is fontos.",
+                "Érdemes ellenőrizni, hogy az intenzitás a játékelvek tanulását vagy inkább csak a fizikai terhelést szolgálta-e.",
+                scope="Játékmodell",
+            ))
+
+    elif playstyle == "Low Block":
+        if sprint_ratio is not None and sprint_ratio < 0.60:
+            insights.append(Insight(
+                "Low block profil: kevés átmeneti sprintinger", "FIGYELMEZTETÉS",
+                f"A sprintprofil a meccsigény kb. {sprint_ratio:.0%}-a.",
+                "Mélyebb védekezésnél is fontosak lehetnek a rövid, robbanékony átmenetek.",
+                "Érdemes lehet kontrollált kontra- és visszarendeződési szituációkat alkalmazni.",
+                scope="Játékmodell",
+            ))
+    return insights
+
+
+def build_weekly_summary(insights: List[Insight], selected_week: str, playstyle: str) -> str:
+    if not insights:
+        return f"A(z) {selected_week} hét fő mutatói alapján nem látható kiemelt kockázat. A játékmodell: {playstyle}."
+    critical = [i for i in insights if i.severity == "KRITIKUS"]
+    warning = [i for i in insights if i.severity == "FIGYELMEZTETÉS"]
+    info = [i for i in insights if i.severity == "INFORMÁCIÓ"]
+    main = critical[0] if critical else (warning[0] if warning else info[0])
+    second = None
+    for i in insights:
+        if i.title != main.title:
+            second = i
+            break
+    text = (
+        f"A(z) {selected_week} hét legfontosabb üzenete: {main.title.lower()}. "
+        f"{main.observation} {main.recommendation}"
+    )
+    if second is not None:
+        text += f" Második fontos téma: {second.title.lower()}."
+    text += f" A kiválasztott játékmodell: {playstyle}."
+    return text
+
+
+def top_coaching_priorities(insights: List[Insight], limit: int = 3) -> List[Dict[str, str]]:
+    ordered = sorted(insights, key=lambda x: SEVERITY_RANK.get(x.severity, 9))
+    selected = []
+    seen = set()
+    for ins in ordered:
+        if ins.title in seen:
+            continue
+        seen.add(ins.title)
+        selected.append({
+            "Cím": ins.title,
+            "Súlyosság": ins.severity,
+            "Teendő": ins.recommendation,
+            "Miért": ins.impact,
+        })
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def render_coaching_priorities(priorities: List[Dict[str, str]]) -> None:
+    if not priorities:
+        st.info("Nincs kiemelt edzői teendő az aktuális szűrés alapján.")
+        return
+    for idx, item in enumerate(priorities, start=1):
+        st.markdown(
+            f"""
+            <div class="priority-card">
+                <div style="font-size:1.05rem;font-weight:850;">{idx}. {html.escape(item.get('Cím', ''))}</div>
+                <div style="margin-top:6px;"><b>Teendő:</b><br>{html.escape(item.get('Teendő', ''))}</div>
+                <div style="margin-top:6px;"><b>Miért:</b><br>{html.escape(item.get('Miért', ''))}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def severity_icon(sev: str) -> str:
     if sev == "KRITIKUS":
         return "🔴"
@@ -745,8 +1067,8 @@ def insights_to_pdf_bytes(insights_df: pd.DataFrame, selected_week: str) -> Opti
     )
 
     story = [
-        Paragraph("Performance megállapítások és javaslatok", title_style),
-        Paragraph(f"Hét: {selected_week} · Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", meta_style),
+        Paragraph(pdf_safe_text("Performance megállapítások és javaslatok"), title_style),
+        Paragraph(pdf_safe_text(f"Hét: {selected_week} · Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}"), meta_style),
         Spacer(1, 0.25 * cm),
     ]
 
@@ -791,8 +1113,8 @@ def insights_to_pdf_bytes(insights_df: pd.DataFrame, selected_week: str) -> Opti
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Performance Ajánlórendszer – MVP")
-st.caption("Adatfeltöltés → KPI-k → szakmai megállapítások → edzői javaslatok")
+st.title("⚽ Football Performance Intelligence – V2.0")
+st.caption("Adatfeltöltés → mikrociklus értelmezés → játékmodell-logika → edzői prioritások → export")
 
 with st.sidebar:
     st.header("1) Adatfeltöltés")
@@ -825,6 +1147,8 @@ session_types = sorted(df["session_type"].dropna().unique().tolist())
 with st.sidebar:
     st.header("2) Szűrők")
     selected_week = st.selectbox("Hét", weeks, index=len(weeks) - 1 if weeks else 0)
+    selected_playstyle = st.selectbox("Játékmodell", list(PLAYSTYLE_OPTIONS.keys()), index=0)
+    st.caption(PLAYSTYLE_OPTIONS[selected_playstyle])
     selected_types = st.multiselect("Típus", session_types, default=session_types)
     selected_players = st.multiselect("Játékosok", players, default=players)
 
@@ -834,9 +1158,18 @@ filtered = df[
     & (df["player_name"].isin(selected_players))
 ]
 
+analysis_base_df = df[df["player_name"].isin(selected_players)]
+base_insights = team_insights(analysis_base_df, selected_week)
+micro_insights = microcycle_insights(analysis_base_df, selected_week)
+style_insights = playstyle_insights(analysis_base_df, selected_week, selected_playstyle)
+all_insights = sorted(base_insights + micro_insights + style_insights, key=lambda x: SEVERITY_RANK.get(x.severity, 9))[:12]
+coaching_priorities = top_coaching_priorities(all_insights, limit=3)
+weekly_summary_text = build_weekly_summary(all_insights, selected_week, selected_playstyle)
+
 # Tabok
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "Csapat áttekintő",
+tab1, tab_micro, tab2, tab3, tab4, tab5 = st.tabs([
+    "Vezetői áttekintő",
+    "Mikrociklus intelligencia",
     "Megállapítások és javaslatok",
     "Játékosmonitoring",
     "Adatminőség",
@@ -858,6 +1191,11 @@ with tab1:
     with col4:
         load = filtered["training_load"].sum() if "training_load" in filtered.columns else np.nan
         metric_card("Terhelési pont", f"{load:,.0f}" if pd.notna(load) else "—")
+
+    st.markdown("### Heti vezetői összefoglaló")
+    st.info(weekly_summary_text)
+    st.markdown("### Top 3 edzői teendő")
+    render_coaching_priorities(coaching_priorities)
 
     weekly = aggregate_weekly(df[df["session_type"].isin(selected_types)])
     st.markdown("### Heti trendek")
@@ -893,11 +1231,79 @@ with tab1:
     else:
         st.info("Nincs elérhető edzés-meccs összehasonlító mutató.")
 
+
+with tab_micro:
+    st.subheader("Mikrociklus intelligencia")
+    st.caption("A rendszer a meccsnaphoz viszonyítva értelmezi a heti struktúrát: MD-4, MD-3, MD-2, MD-1, MD, MD+1.")
+
+    micro_df = build_microcycle_table(analysis_base_df, selected_week)
+    if micro_df.empty:
+        st.info("Nincs elérhető mikrociklus adat az aktuális szűrésre.")
+    else:
+        match_day = detect_match_day(analysis_base_df[analysis_base_df["week"] == selected_week])
+        if match_day is not None:
+            st.markdown(
+                f"<span class='micro-pill'>Meccsnap: {match_day.strftime('%Y-%m-%d')}</span>"
+                f"<span class='micro-pill'>Játékmodell: {html.escape(selected_playstyle)}</span>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.warning("Az aktuális héten nincs automatikusan azonosítható meccsnap.")
+
+        show_cols = [
+            "session_date_dt", "md_label", "session_type", "load_index", "total_distance",
+            "distance_per_min", "sprint_distance", "hsr_distance", "max_speed", "dec_count", "játékosok"
+        ]
+        show_cols = [c for c in show_cols if c in micro_df.columns]
+        show_micro = micro_df[show_cols].copy()
+        if "session_date_dt" in show_micro.columns:
+            show_micro["session_date_dt"] = show_micro["session_date_dt"].dt.strftime("%Y-%m-%d")
+        show_micro = show_micro.rename(columns={
+            "session_date_dt": "Dátum",
+            "md_label": "MD-nap",
+            "session_type": "Típus",
+            "load_index": "Load index",
+            "total_distance": "Össztáv",
+            "distance_per_min": "Táv/perc",
+            "sprint_distance": "Sprinttáv",
+            "hsr_distance": "Nagy sebességű táv",
+            "max_speed": "Max sebesség",
+            "dec_count": "Lassítások",
+            "játékosok": "Játékosok",
+        })
+        st.dataframe(show_micro, use_container_width=True, hide_index=True)
+
+        chart_cols = available_metric_options(micro_df, ["load_index", "sprint_distance", "distance_per_min", "max_speed", "dec_count"])
+        if chart_cols:
+            metric = st.selectbox("Mikrociklus grafikon mutató", chart_cols, format_func=lambda x: "Load index" if x == "load_index" else metric_name(x))
+            fig = px.bar(
+                micro_df,
+                x="md_label",
+                y=metric,
+                color="session_type",
+                hover_data=["session_date_dt"],
+                title=f"Mikrociklus profil: {'Load index' if metric == 'load_index' else metric_name(metric)}",
+            )
+            fig.update_layout(xaxis_title="Meccsnaphoz viszonyított nap", yaxis_title="Load index" if metric == "load_index" else metric_name(metric), legend_title="Típus")
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("### Mikrociklus megállapítások")
+        if micro_insights:
+            render_insight_cards(micro_insights)
+        else:
+            st.success("A mikrociklus struktúrában nem látszik kiemelt figyelmeztetés az aktuális szabályok alapján.")
+
 with tab2:
     st.subheader("Megállapítások és javaslatok")
     st.caption("Szabályalapú performance motor: AI nélkül is ad szakmai következtetést és javaslatot.")
 
-    insights = team_insights(df[df["player_name"].isin(selected_players)], selected_week)
+    insights = all_insights
+
+    st.markdown("### Heti összefoglaló")
+    st.info(weekly_summary_text)
+
+    st.markdown("### Top 3 edzői teendő")
+    render_coaching_priorities(coaching_priorities)
 
     st.markdown("### Coach-friendly insight kártyák")
     render_insight_cards(insights)
@@ -1023,4 +1429,4 @@ with tab5:
 
 
 st.divider()
-st.caption("MVP V1.4 HU – magyar coach-friendly insight kártyák + javított ékezetes PDF export + Excel/Word/PDF riport.")
+st.caption("V2.0 HU – Football Intelligence Layer: mikrociklus, játékmodell, top edzői prioritások, magyar exportok.")
