@@ -1,4 +1,4 @@
-# performance_app_v1_3_hu.py
+# performance_app_v1_4_hu.py
 # AI-assisted Performance Recommendation System - magyar Streamlit MVP
 # Upload -> standardizálás -> KPI-k -> szabályalapú insightok -> coach-friendly javaslatok -> Excel/Word/PDF export
 
@@ -28,8 +28,12 @@ try:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
 except Exception:
     SimpleDocTemplate = None
+    pdfmetrics = None
+    TTFont = None
 
 
 # -----------------------------------------------------------------------------
@@ -652,9 +656,49 @@ def insights_to_word_bytes(insights_df: pd.DataFrame, selected_week: str) -> Opt
     return output.getvalue()
 
 
+def _register_pdf_font() -> Tuple[str, str]:
+    """ReportLab alapfontjai nem kezelik jól a magyar ékezeteket.
+    Ezért megpróbálunk DejaVuSans betűtípust regisztrálni, ami Streamlit Cloudon
+    és Linuxon általában elérhető. Ha nem található, visszaesünk Helvetica-ra.
+    """
+    if pdfmetrics is None or TTFont is None:
+        return "Helvetica", "Helvetica-Bold"
+
+    font_candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf",
+        "/usr/local/share/fonts/DejaVuSans.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+    ]
+    bold_candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
+        "/usr/local/share/fonts/DejaVuSans-Bold.ttf",
+        "C:/Windows/Fonts/arialbd.ttf",
+    ]
+
+    normal_path = next((fp for fp in font_candidates if Path(fp).exists()), None)
+    bold_path = next((fp for fp in bold_candidates if Path(fp).exists()), None)
+
+    if not normal_path:
+        return "Helvetica", "Helvetica-Bold"
+
+    try:
+        pdfmetrics.registerFont(TTFont("DejaVuSans", normal_path))
+        if bold_path:
+            pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
+            return "DejaVuSans", "DejaVuSans-Bold"
+        return "DejaVuSans", "DejaVuSans"
+    except Exception:
+        return "Helvetica", "Helvetica-Bold"
+
+
 def insights_to_pdf_bytes(insights_df: pd.DataFrame, selected_week: str) -> Optional[bytes]:
     if SimpleDocTemplate is None:
         return None
+
+    font_name, font_bold = _register_pdf_font()
+
     output = io.BytesIO()
     doc = SimpleDocTemplate(
         output,
@@ -665,34 +709,71 @@ def insights_to_pdf_bytes(insights_df: pd.DataFrame, selected_week: str) -> Opti
         bottomMargin=0.8 * cm,
     )
     styles = getSampleStyleSheet()
-    title_style = styles["Title"]
-    normal = ParagraphStyle("NormalWrapped", parent=styles["Normal"], fontSize=7, leading=9)
-    header = ParagraphStyle("HeaderWrapped", parent=styles["Normal"], fontSize=7, leading=9, textColor=colors.white)
+
+    title_style = ParagraphStyle(
+        "MagyarCim",
+        parent=styles["Title"],
+        fontName=font_bold,
+        fontSize=17,
+        leading=21,
+        spaceAfter=10,
+    )
+    meta_style = ParagraphStyle(
+        "MagyarMeta",
+        parent=styles["Normal"],
+        fontName=font_name,
+        fontSize=9,
+        leading=11,
+    )
+    normal = ParagraphStyle(
+        "MagyarNormalWrapped",
+        parent=styles["Normal"],
+        fontName=font_name,
+        fontSize=7,
+        leading=9,
+        wordWrap="CJK",
+    )
+    header = ParagraphStyle(
+        "MagyarHeaderWrapped",
+        parent=styles["Normal"],
+        fontName=font_bold,
+        fontSize=7,
+        leading=9,
+        textColor=colors.white,
+        wordWrap="CJK",
+    )
 
     story = [
         Paragraph("Performance megállapítások és javaslatok", title_style),
-        Paragraph(f"Hét: {selected_week} · Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles["Normal"]),
+        Paragraph(f"Hét: {selected_week} · Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", meta_style),
         Spacer(1, 0.25 * cm),
     ]
 
     cols = ["Súlyosság", "Terület", "Megállapítás", "Mit látunk?", "Miért fontos?", "Javaslat"]
     cols = [c for c in cols if c in insights_df.columns]
-    table_data = [[Paragraph(str(c), header) for c in cols]]
+
+    def safe_paragraph(value, style):
+        text = "" if pd.isna(value) else str(value)
+        return Paragraph(html.escape(text).replace("\n", "<br/>",), style)
+
+    table_data = [[safe_paragraph(c, header) for c in cols]]
     for _, row in insights_df.iterrows():
-        table_data.append([Paragraph(html.escape(str(row.get(c, ""))), normal) for c in cols])
+        table_data.append([safe_paragraph(row.get(c, ""), normal) for c in cols])
 
     col_widths_map = {
-        "Súlyosság": 2.5 * cm,
+        "Súlyosság": 2.6 * cm,
         "Terület": 2.0 * cm,
-        "Megállapítás": 3.6 * cm,
-        "Mit látunk?": 6.1 * cm,
-        "Miért fontos?": 6.1 * cm,
-        "Javaslat": 7.1 * cm,
+        "Megállapítás": 3.8 * cm,
+        "Mit látunk?": 6.0 * cm,
+        "Miért fontos?": 6.0 * cm,
+        "Javaslat": 7.2 * cm,
     }
     table = Table(table_data, colWidths=[col_widths_map.get(c, 3 * cm) for c in cols], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), font_bold),
+        ("FONTNAME", (0, 1), (-1, -1), font_name),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#BFBFBF")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F9FC")]),
@@ -941,4 +1022,4 @@ with tab5:
 
 
 st.divider()
-st.caption("MVP V1.3 HU – magyar coach-friendly insight kártyák + sortöréses export + Excel/Word/PDF riport.")
+st.caption("MVP V1.4 HU – magyar coach-friendly insight kártyák + javított ékezetes PDF export + Excel/Word/PDF riport.")
