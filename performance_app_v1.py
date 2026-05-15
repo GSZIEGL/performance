@@ -41,7 +41,7 @@ except Exception:
 # Oldalbeállítás
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Football Performance Intelligence V2",
+    page_title="Football Performance Intelligence V2.5",
     page_icon="⚽",
     layout="wide",
 )
@@ -103,6 +103,30 @@ st.markdown(
         border: 1px solid rgba(147,197,253,.22);
         margin: 3px;
         font-weight: 700;
+    }
+
+    .score-card {
+        border-radius: 18px;
+        padding: 18px 20px;
+        margin-bottom: 14px;
+        background: linear-gradient(135deg, rgba(15,23,42,.92), rgba(30,41,59,.82));
+        border: 1px solid rgba(148,163,184,.22);
+        box-shadow: 0 8px 24px rgba(0,0,0,.14);
+    }
+    .score-number {
+        font-size: 2.4rem;
+        font-weight: 900;
+        line-height: 1;
+    }
+    .score-label {
+        color: rgba(226,232,240,.86);
+        font-weight: 800;
+        margin-top: 6px;
+    }
+    .mini-muted {
+        color: rgba(226,232,240,.72);
+        font-size: .92rem;
+        line-height: 1.35;
     }
     </style>
     """,
@@ -797,6 +821,438 @@ def render_coaching_priorities(priorities: List[Dict[str, str]]) -> None:
         )
 
 
+
+# -----------------------------------------------------------------------------
+# V2.5 - Performance Memory + Readiness + Adaptive Intelligence
+# -----------------------------------------------------------------------------
+MEMORY_FILE = Path("performance_memory_v25.csv")
+
+
+def score_to_label(score: float) -> str:
+    if pd.isna(score):
+        return "Nincs elég adat"
+    if score >= 80:
+        return "Jó meccskészültség"
+    if score >= 65:
+        return "Elfogadható, figyelendő"
+    if score >= 50:
+        return "Közepes kockázat"
+    return "Alacsony readiness"
+
+
+def score_to_color(score: float) -> str:
+    if pd.isna(score):
+        return "#94a3b8"
+    if score >= 80:
+        return "#22c55e"
+    if score >= 65:
+        return "#84cc16"
+    if score >= 50:
+        return "#f59e0b"
+    return "#ef4444"
+
+
+def trend_label(values: List[float], tolerance: float = 0.03) -> str:
+    clean = [v for v in values if pd.notna(v)]
+    if len(clean) < 3:
+        return "nincs elég adat"
+    first, last = clean[0], clean[-1]
+    if first == 0:
+        return "nincs elég adat"
+    change = (last - first) / abs(first)
+    if change > tolerance:
+        return "emelkedő"
+    if change < -tolerance:
+        return "csökkenő"
+    return "stabil"
+
+
+def classify_week_context(weekly_row: pd.Series, history: pd.DataFrame) -> str:
+    if history.empty or len(history) < 3:
+        return "Tanuló hét"
+    load = weekly_row.get("training_load", np.nan)
+    sprint = weekly_row.get("sprint_distance", np.nan)
+    intensity = weekly_row.get("distance_per_min", np.nan)
+
+    hist_load = history["training_load"].dropna() if "training_load" in history.columns else pd.Series(dtype=float)
+    hist_sprint = history["sprint_distance"].dropna() if "sprint_distance" in history.columns else pd.Series(dtype=float)
+
+    if len(hist_load) >= 3 and pd.notna(load):
+        load_mean = hist_load.mean()
+        if load_mean > 0:
+            load_ratio = load / load_mean
+            if load_ratio > 1.18:
+                return "Terhelésépítő / overload hét"
+            if load_ratio < 0.82:
+                return "Recovery / alulterhelt hét"
+
+    if len(hist_sprint) >= 3 and pd.notna(sprint):
+        sprint_mean = hist_sprint.mean()
+        if sprint_mean > 0 and sprint / sprint_mean < 0.75:
+            return "Intenzitáshiányos hét"
+
+    if pd.notna(intensity) and "distance_per_min" in history.columns:
+        int_hist = history["distance_per_min"].dropna()
+        if len(int_hist) >= 3 and int_hist.mean() > 0 and intensity / int_hist.mean() > 1.12:
+            return "Intenzitásfókuszú hét"
+
+    return "Normál hét"
+
+
+def build_weekly_fingerprints(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "week" not in df.columns:
+        return pd.DataFrame()
+
+    agg_spec = {
+        "training_load": "sum",
+        "total_distance": "sum",
+        "sprint_distance": "sum",
+        "hsr_distance": "sum",
+        "distance_per_min": "mean",
+        "max_speed": "max",
+        "acc_count": "sum",
+        "dec_count": "sum",
+        "high_efforts": "sum",
+        "duration_min": "sum",
+        "hrv": "mean",
+        "player_name": "nunique",
+    }
+    usable = {k: v for k, v in agg_spec.items() if k in df.columns}
+    weekly = df.groupby("week", as_index=False).agg(usable)
+    weekly = weekly.rename(columns={"player_name": "players"})
+
+    # Csak edzésekből külön load profil, ha van elég adat.
+    train = df[df["session_type"] == "Edzés"].copy()
+    if not train.empty:
+        train_agg = train.groupby("week", as_index=False).agg({
+            k: v for k, v in usable.items() if k != "player_name"
+        })
+        train_agg = train_agg.add_prefix("train_")
+        train_agg = train_agg.rename(columns={"train_week": "week"})
+        weekly = weekly.merge(train_agg, on="week", how="left")
+
+    # Meccsprofil külön.
+    match = df[df["session_type"] == "Meccs"].copy()
+    if not match.empty:
+        match_agg = match.groupby("week", as_index=False).agg({
+            k: v for k, v in usable.items() if k != "player_name"
+        })
+        match_agg = match_agg.add_prefix("match_")
+        match_agg = match_agg.rename(columns={"match_week": "week"})
+        weekly = weekly.merge(match_agg, on="week", how="left")
+
+    weekly = weekly.sort_values("week").reset_index(drop=True)
+
+    # Rolling baseline-ok.
+    for metric in ["training_load", "sprint_distance", "distance_per_min", "max_speed", "dec_count", "high_efforts"]:
+        if metric in weekly.columns:
+            weekly[f"{metric}_rolling4"] = weekly[metric].rolling(4, min_periods=2).mean()
+            weekly[f"{metric}_change"] = weekly[metric].pct_change()
+
+    contexts = []
+    for idx, row in weekly.iterrows():
+        contexts.append(classify_week_context(row, weekly.iloc[:idx]))
+    weekly["periodizacios_tipus"] = contexts
+    return weekly
+
+
+def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: str) -> Tuple[int, Dict[str, float], List[str]]:
+    daily = build_microcycle_table(df, selected_week)
+    weekly = build_weekly_fingerprints(df)
+    current_week = weekly[weekly["week"] == selected_week]
+    if current_week.empty:
+        return 50, {}, ["Nincs elég adat a readiness számításhoz."]
+
+    score = 75.0
+    components = {}
+    reasons = []
+
+    row = current_week.iloc[0]
+
+    # 1. Load trend komponens
+    load_change = row.get("training_load_change", np.nan)
+    if pd.notna(load_change):
+        if load_change > 0.25:
+            score -= 12
+            reasons.append("A heti terhelés jelentősen nőtt az előző héthez képest.")
+        elif load_change < -0.30:
+            score -= 6
+            reasons.append("A heti terhelés jelentősen visszaesett, ami alulterheltséget is jelezhet.")
+        else:
+            score += 4
+        components["load_trend"] = max(0, min(100, 80 - abs(load_change) * 60))
+    else:
+        components["load_trend"] = 55
+
+    # 2. Speed exposure
+    match = daily[daily["session_type"] == "Meccs"] if not daily.empty else pd.DataFrame()
+    train = daily[daily["session_type"] == "Edzés"] if not daily.empty else pd.DataFrame()
+    speed_component = 60
+    if not match.empty and not train.empty and "sprint_distance" in daily.columns:
+        match_sprint = match["sprint_distance"].mean()
+        max_train_sprint = train["sprint_distance"].max()
+        if pd.notna(match_sprint) and match_sprint > 0 and pd.notna(max_train_sprint):
+            ratio = max_train_sprint / match_sprint
+            speed_component = min(100, ratio / 0.35 * 100)
+            if ratio < 0.15:
+                score -= 15
+                reasons.append("A héten alig látszik speed exposure a meccsigényhez képest.")
+            elif ratio < 0.30:
+                score -= 7
+                reasons.append("A speed exposure visszafogott volt.")
+            else:
+                score += 5
+    components["speed_exposure"] = max(0, min(100, speed_component))
+
+    # 3. Taper / MD-1 / MD-2 kontroll
+    taper_component = 65
+    if not daily.empty and "MD" in daily["md_label"].values:
+        md1 = daily[daily["md_label"] == "MD-1"]
+        md2 = daily[daily["md_label"] == "MD-2"]
+        md34 = daily[daily["md_label"].isin(["MD-3", "MD-4"])]
+        if not md1.empty and not md34.empty:
+            peak_early = md34["load_index"].max()
+            md1_load = md1["load_index"].sum()
+            if pd.notna(peak_early) and peak_early > 0 and pd.notna(md1_load):
+                ratio = md1_load / peak_early
+                taper_component = max(0, min(100, (1.0 - ratio) * 130))
+                if ratio > 0.65:
+                    score -= 10
+                    reasons.append("Az MD-1 terhelés magas lehetett a frissességhez képest.")
+                elif ratio < 0.45:
+                    score += 6
+        if not md2.empty and not md34.empty:
+            peak_early = md34["load_index"].max()
+            md2_load = md2["load_index"].sum()
+            if pd.notna(peak_early) and peak_early > 0 and pd.notna(md2_load) and md2_load / peak_early > 0.80:
+                score -= 8
+                reasons.append("Az MD-2 terhelés közel volt a hét fő terhelési napjához.")
+    components["tapering"] = max(0, min(100, taper_component))
+
+    # 4. Játékmodell illeszkedés
+    playstyle_component = 70
+    current = df[df["week"] == selected_week]
+    cur_train = current[current["session_type"] == "Edzés"]
+    cur_match = current[current["session_type"] == "Meccs"]
+    if not cur_train.empty and not cur_match.empty:
+        def ratio(metric):
+            if metric not in current.columns:
+                return np.nan
+            m = cur_match[metric].mean()
+            t = cur_train[metric].mean()
+            return t / m if pd.notna(m) and m > 0 and pd.notna(t) else np.nan
+
+        int_ratio = ratio("distance_per_min")
+        spr_ratio = ratio("sprint_distance")
+        eff_ratio = ratio("high_efforts")
+
+        if playstyle == "Pressing":
+            vals = [v for v in [int_ratio / 0.90 if pd.notna(int_ratio) else np.nan,
+                                eff_ratio / 0.75 if pd.notna(eff_ratio) else np.nan] if pd.notna(v)]
+        elif playstyle == "Transition":
+            vals = [spr_ratio / 0.80] if pd.notna(spr_ratio) else []
+        elif playstyle == "Possession":
+            vals = [1.0 - max(0, (int_ratio - 1.15)) if pd.notna(int_ratio) else np.nan]
+            vals = [v for v in vals if pd.notna(v)]
+        elif playstyle == "Low Block":
+            vals = [spr_ratio / 0.60] if pd.notna(spr_ratio) else []
+        else:
+            vals = [1.0]
+
+        if vals:
+            playstyle_component = max(0, min(100, np.mean([min(1.15, v) for v in vals]) * 85))
+            if playstyle_component < 60:
+                score -= 8
+                reasons.append(f"A heti profil nem illeszkedik elég jól a(z) {playstyle} játékmodellhez.")
+            elif playstyle_component > 80:
+                score += 3
+
+    components["playstyle_fit"] = max(0, min(100, playstyle_component))
+
+    # 5. Readiness végső skála
+    score = int(max(0, min(100, round(score))))
+    if not reasons:
+        reasons.append("A readiness fő komponensei stabilnak tűnnek.")
+    return score, components, reasons
+
+
+def build_pattern_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
+    insights: List[Insight] = []
+    weekly = build_weekly_fingerprints(df)
+    if weekly.empty or selected_week not in weekly["week"].values:
+        return insights
+
+    idx = weekly.index[weekly["week"] == selected_week][0]
+    hist = weekly.iloc[max(0, idx-5):idx+1].copy()
+
+    if len(hist) < 3:
+        insights.append(Insight(
+            "Kevés történeti adat", "INFORMÁCIÓ",
+            "A multi-week mintázatokhoz legalább 3 hét adat szükséges.",
+            "Kevesebb adat mellett a rendszer inkább óvatos heti következtetéseket tud adni.",
+            "Érdemes több heti adatot egy fájlban feltölteni vagy használni a performance memory funkciót.",
+            scope="Memory",
+        ))
+        return insights
+
+    # Sprint trend
+    if "sprint_distance" in hist.columns:
+        label = trend_label(hist["sprint_distance"].tolist())
+        if label == "csökkenő":
+            insights.append(Insight(
+                "Többhetes sprintcsökkenés", "FIGYELMEZTETÉS",
+                "Az elmúlt hetek sprintprofilja csökkenő mintázatot mutat.",
+                "A tartós speed exposure hiány hosszabb távon ronthatja a maximális sebesség és intenzitás fenntartását.",
+                "Érdemes célzottan megvizsgálni, hogy tudatos terheléscsökkentésről vagy nem kívánt intenzitáshiányról van-e szó.",
+                scope="Memory",
+            ))
+
+    # Load trend
+    if "training_load" in hist.columns:
+        label = trend_label(hist["training_load"].tolist())
+        if label == "emelkedő":
+            insights.append(Insight(
+                "Többhetes terhelésnövekedés", "FIGYELMEZTETÉS",
+                "Az elmúlt hetek terhelési profilja emelkedő mintázatot mutat.",
+                "A folyamatos load növekedés hasznos lehet építő periódusban, de frissességi problémát is okozhat.",
+                "Érdemes ellenőrizni, hogy a növekvő terhelés illeszkedik-e a periodizációs célhoz.",
+                scope="Memory",
+            ))
+
+    # Max speed trend
+    if "max_speed" in hist.columns:
+        label = trend_label(hist["max_speed"].tolist(), tolerance=0.02)
+        if label == "csökkenő":
+            insights.append(Insight(
+                "Max sebesség csökkenő trend", "INFORMÁCIÓ",
+                "Az elmúlt hetek maximális sebességprofilja enyhén csökkenő mintázatot mutat.",
+                "Ez lehet edzéstartalom-függő, de jelezhet neuromuszkuláris frissességi problémát is.",
+                "Érdemes ellenőrizni, hogy volt-e megfelelő maximális sebességű inger a hetekben.",
+                scope="Memory",
+            ))
+
+    return insights
+
+
+def memory_file_exists() -> bool:
+    return MEMORY_FILE.exists()
+
+
+def load_memory_df() -> pd.DataFrame:
+    if not MEMORY_FILE.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(MEMORY_FILE, parse_dates=["start_time"])
+    except Exception:
+        return pd.DataFrame()
+
+
+def save_to_memory(df: pd.DataFrame) -> Tuple[bool, str]:
+    try:
+        existing = load_memory_df()
+        combined = pd.concat([existing, df], ignore_index=True) if not existing.empty else df.copy()
+        # Duplikáció minimalizálása.
+        key_cols = [c for c in ["player_name", "start_time", "session_type", "session_name", "total_distance", "training_load"] if c in combined.columns]
+        if key_cols:
+            combined = combined.drop_duplicates(subset=key_cols, keep="last")
+        combined.to_csv(MEMORY_FILE, index=False, encoding="utf-8-sig")
+        return True, f"Memory mentve: {len(combined)} sor."
+    except Exception as exc:
+        return False, f"Memory mentés sikertelen: {exc}"
+
+
+def merge_with_memory(current_df: pd.DataFrame, use_memory: bool) -> pd.DataFrame:
+    if not use_memory:
+        return current_df
+    mem = load_memory_df()
+    if mem.empty:
+        return current_df
+    combined = pd.concat([mem, current_df], ignore_index=True)
+    key_cols = [c for c in ["player_name", "start_time", "session_type", "session_name", "total_distance", "training_load"] if c in combined.columns]
+    if key_cols:
+        combined = combined.drop_duplicates(subset=key_cols, keep="last")
+    # Dátummezők visszaállítása.
+    if "start_time" in combined.columns:
+        combined["start_time"] = pd.to_datetime(combined["start_time"], errors="coerce")
+        combined["session_date"] = combined["start_time"].dt.date
+        combined["week"] = combined["start_time"].dt.to_period("W").astype(str)
+    return combined
+
+
+def build_adaptive_recommendations(
+    insights: List[Insight],
+    readiness_score: int,
+    periodization_type: str,
+    pattern_insights: List[Insight],
+    playstyle: str
+) -> List[Dict[str, str]]:
+    recs = []
+
+    if readiness_score < 55:
+        recs.append({
+            "Cím": "Readiness elsődleges figyelem",
+            "Súlyosság": "KRITIKUS",
+            "Teendő": "A következő edzésterhelést érdemes óvatosan kezelni, és a frissességi jeleket külön figyelni.",
+            "Miért": "A match readiness score alacsony, több komponens egyszerre jelezhet terhelési vagy frissességi problémát.",
+        })
+    elif readiness_score < 70:
+        recs.append({
+            "Cím": "Readiness kontroll",
+            "Súlyosság": "FIGYELMEZTETÉS",
+            "Teendő": "Tarts kontrollált intenzitást, és csak célzottan terheld a hiányzó elemeket.",
+            "Miért": "A readiness közepes tartományban van, ezért a túlzott korrekció is kockázatos lehet.",
+        })
+
+    if "overload" in periodization_type.lower() or "terhelésépítő" in periodization_type.lower():
+        recs.append({
+            "Cím": "Overload hét kontrollja",
+            "Súlyosság": "FIGYELMEZTETÉS",
+            "Teendő": "Ellenőrizd, hogy a magasabb terhelés tervezett-e, és legyen meg a következő frissítő blokk.",
+            "Miért": "Terhelésépítő héten a következő napok/frissítés minősége kulcsfontosságú.",
+        })
+    elif "recovery" in periodization_type.lower() or "alulterhelt" in periodization_type.lower():
+        recs.append({
+            "Cím": "Recovery vagy alulterhelés értelmezése",
+            "Súlyosság": "INFORMÁCIÓ",
+            "Teendő": "Döntsd el, hogy tudatos regenerációs hét volt-e, vagy nem kívánt terhelésvesztés.",
+            "Miért": "Az alacsony load lehet hasznos frissítés, de tartósan teljesítményvesztést is okozhat.",
+        })
+
+    for ins in pattern_insights:
+        if ins.severity in ["KRITIKUS", "FIGYELMEZTETÉS"]:
+            recs.append({
+                "Cím": ins.title,
+                "Súlyosság": ins.severity,
+                "Teendő": ins.recommendation,
+                "Miért": ins.impact,
+            })
+
+    # Alap insightokból pótoljuk 3 elemre.
+    for item in top_coaching_priorities(insights, limit=5):
+        if len(recs) >= 3:
+            break
+        if item["Cím"] not in [r["Cím"] for r in recs]:
+            recs.append(item)
+
+    return recs[:3]
+
+
+def render_score_card(title: str, score: int, subtitle: str, reasons: List[str]) -> None:
+    color = score_to_color(score)
+    reason_html = "<br>".join([f"• {html.escape(str(r))}" for r in reasons[:4]])
+    st.markdown(
+        f"""
+        <div class="score-card">
+            <div class="score-number" style="color:{color};">{score}/100</div>
+            <div class="score-label">{html.escape(title)}</div>
+            <div class="mini-muted">{html.escape(subtitle)}</div>
+            <div class="mini-muted" style="margin-top:10px;">{reason_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def severity_icon(sev: str) -> str:
     if sev == "KRITIKUS":
         return "🔴"
@@ -1113,8 +1569,8 @@ def insights_to_pdf_bytes(insights_df: pd.DataFrame, selected_week: str) -> Opti
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Football Performance Intelligence – V2.0")
-st.caption("Adatfeltöltés → mikrociklus értelmezés → játékmodell-logika → edzői prioritások → export")
+st.title("⚽ Football Performance Intelligence – V2.5")
+st.caption("Adatfeltöltés → memory → readiness → periodizáció → mintázatok → adaptív edzői ajánlások")
 
 with st.sidebar:
     st.header("1) Adatfeltöltés")
@@ -1152,23 +1608,42 @@ with st.sidebar:
     selected_types = st.multiselect("Típus", session_types, default=session_types)
     selected_players = st.multiselect("Játékosok", players, default=players)
 
+    st.header("3) Performance memory")
+    use_memory = st.checkbox("Korábbi mentett adatok bevonása", value=False)
+    save_current_to_memory = st.button("Aktuális feltöltés mentése memoryba", use_container_width=True)
+
 filtered = df[
     (df["week"] == selected_week)
     & (df["session_type"].isin(selected_types))
     & (df["player_name"].isin(selected_players))
 ]
 
-analysis_base_df = df[df["player_name"].isin(selected_players)]
+if save_current_to_memory:
+    ok, msg = save_to_memory(df)
+    if ok:
+        st.sidebar.success(msg)
+    else:
+        st.sidebar.error(msg)
+
+analysis_df_full = merge_with_memory(df, use_memory)
+analysis_base_df = analysis_df_full[analysis_df_full["player_name"].isin(selected_players)]
 base_insights = team_insights(analysis_base_df, selected_week)
 micro_insights = microcycle_insights(analysis_base_df, selected_week)
 style_insights = playstyle_insights(analysis_base_df, selected_week, selected_playstyle)
-all_insights = sorted(base_insights + micro_insights + style_insights, key=lambda x: SEVERITY_RANK.get(x.severity, 9))[:12]
-coaching_priorities = top_coaching_priorities(all_insights, limit=3)
+pattern_insights = build_pattern_insights(analysis_base_df, selected_week)
+readiness_score, readiness_components, readiness_reasons = calculate_readiness_score(analysis_base_df, selected_week, selected_playstyle)
+weekly_fingerprints = build_weekly_fingerprints(analysis_base_df)
+current_fp = weekly_fingerprints[weekly_fingerprints["week"] == selected_week]
+periodization_type = current_fp["periodizacios_tipus"].iloc[0] if not current_fp.empty and "periodizacios_tipus" in current_fp.columns else "Nincs elég adat"
+all_insights = sorted(base_insights + micro_insights + style_insights + pattern_insights, key=lambda x: SEVERITY_RANK.get(x.severity, 9))[:16]
+coaching_priorities = build_adaptive_recommendations(all_insights, readiness_score, periodization_type, pattern_insights, selected_playstyle)
 weekly_summary_text = build_weekly_summary(all_insights, selected_week, selected_playstyle)
+weekly_summary_text += f" Readiness: {readiness_score}/100 ({score_to_label(readiness_score)}). Periodizációs besorolás: {periodization_type}."
 
 # Tabok
-tab1, tab_micro, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab_intel, tab_micro, tab2, tab3, tab4, tab5 = st.tabs([
     "Vezetői áttekintő",
+    "Intelligence cockpit",
     "Mikrociklus intelligencia",
     "Megállapítások és javaslatok",
     "Játékosmonitoring",
@@ -1194,7 +1669,15 @@ with tab1:
 
     st.markdown("### Heti vezetői összefoglaló")
     st.info(weekly_summary_text)
-    st.markdown("### Top 3 edzői teendő")
+    r1, r2, r3 = st.columns(3)
+    with r1:
+        st.metric("Match readiness", f"{readiness_score}/100", score_to_label(readiness_score))
+    with r2:
+        st.metric("Periodizáció", periodization_type)
+    with r3:
+        mem_weeks = analysis_base_df["week"].nunique() if "week" in analysis_base_df.columns else 0
+        st.metric("Elemzett hetek", mem_weeks)
+    st.markdown("### Top 3 adaptív edzői teendő")
     render_coaching_priorities(coaching_priorities)
 
     weekly = aggregate_weekly(df[df["session_type"].isin(selected_types)])
@@ -1230,6 +1713,75 @@ with tab1:
         st.dataframe(prof, use_container_width=True, hide_index=True)
     else:
         st.info("Nincs elérhető edzés-meccs összehasonlító mutató.")
+
+
+
+with tab_intel:
+    st.subheader("Intelligence cockpit")
+    st.caption("V2.5: readiness score, periodizáció, performance memory, multi-week mintázatok és adaptív ajánlások.")
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        render_score_card(
+            "Match readiness",
+            readiness_score,
+            score_to_label(readiness_score),
+            readiness_reasons,
+        )
+    with c2:
+        st.markdown("### Readiness komponensek")
+        if readiness_components:
+            comp_df = pd.DataFrame([
+                {"Komponens": k, "Pont": round(v, 1)}
+                for k, v in readiness_components.items()
+            ])
+            fig = px.bar(comp_df, x="Komponens", y="Pont", range_y=[0, 100], title="Readiness komponensek")
+            fig.update_layout(xaxis_title="", yaxis_title="Pont")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Nincs elég adat a komponensekhez.")
+
+    st.markdown("### Periodizációs besorolás")
+    st.info(f"Az aktuális hét besorolása: **{periodization_type}**")
+
+    st.markdown("### Weekly fingerprint / performance memory")
+    if weekly_fingerprints.empty:
+        st.info("Nincs elég heti adat a fingerprint táblához.")
+    else:
+        show_cols = [
+            "week", "periodizacios_tipus", "players", "training_load", "total_distance",
+            "sprint_distance", "distance_per_min", "max_speed", "dec_count"
+        ]
+        show_cols = [c for c in show_cols if c in weekly_fingerprints.columns]
+        fp_show = weekly_fingerprints[show_cols].copy()
+        fp_show = fp_show.rename(columns={
+            "week": "Hét",
+            "periodizacios_tipus": "Periodizáció",
+            "players": "Játékosok",
+            "training_load": "Terhelési pont",
+            "total_distance": "Össztáv",
+            "sprint_distance": "Sprinttáv",
+            "distance_per_min": "Táv/perc",
+            "max_speed": "Max sebesség",
+            "dec_count": "Lassítások",
+        })
+        st.dataframe(fp_show, use_container_width=True, hide_index=True)
+
+        trend_metric_options = [c for c in ["training_load", "sprint_distance", "distance_per_min", "max_speed", "dec_count"] if c in weekly_fingerprints.columns]
+        if trend_metric_options:
+            tm = st.selectbox("Memory trend mutató", trend_metric_options, format_func=metric_name)
+            fig = px.line(weekly_fingerprints, x="week", y=tm, markers=True, title=f"Multi-week trend: {metric_name(tm)}")
+            fig.update_layout(xaxis_title="Hét", yaxis_title=metric_name(tm))
+            st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("### Multi-week mintázatok")
+    if pattern_insights:
+        render_insight_cards(pattern_insights)
+    else:
+        st.success("Nem látható kiemelt többhetes negatív mintázat az aktuális adatok alapján.")
+
+    st.markdown("### Adaptív ajánlórendszer")
+    render_coaching_priorities(coaching_priorities)
 
 
 with tab_micro:
@@ -1302,7 +1854,7 @@ with tab2:
     st.markdown("### Heti összefoglaló")
     st.info(weekly_summary_text)
 
-    st.markdown("### Top 3 edzői teendő")
+    st.markdown("### Top 3 adaptív edzői teendő")
     render_coaching_priorities(coaching_priorities)
 
     st.markdown("### Coach-friendly insight kártyák")
@@ -1408,6 +1960,12 @@ with tab4:
     with c4:
         metric_card("Típusok", ", ".join(session_types))
 
+    st.markdown("### Performance memory állapot")
+    mem_df = load_memory_df()
+    if mem_df.empty:
+        st.info("Nincs még mentett lokális memory adat.")
+    else:
+        st.success(f"Mentett memory: {len(mem_df)} sor, {mem_df['week'].nunique() if 'week' in mem_df.columns else 'ismeretlen'} hét.")
     st.markdown("### Automatikus oszlopmapping")
     map_df = pd.DataFrame([
         {"standard mező": k, "forrás oszlop": v if v is not None else "NINCS"}
@@ -1429,4 +1987,4 @@ with tab5:
 
 
 st.divider()
-st.caption("V2.0 HU – Football Intelligence Layer: mikrociklus, játékmodell, top edzői prioritások, magyar exportok.")
+st.caption("V2.5 HU – Performance memory, readiness scoring, periodizáció, multi-week mintázatok, adaptív ajánlórendszer.")
