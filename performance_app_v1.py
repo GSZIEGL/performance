@@ -41,7 +41,7 @@ except Exception:
 # Oldalbeállítás
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Football Performance Intelligence V2.5",
+    page_title="Football Performance Intelligence V3",
     page_icon="⚽",
     layout="wide",
 )
@@ -128,6 +128,13 @@ st.markdown(
         font-size: .92rem;
         line-height: 1.35;
     }
+
+    .hero-box {border-radius:24px;padding:24px 28px;margin-bottom:20px;background:radial-gradient(circle at top left,rgba(34,197,94,.22),transparent 34%),radial-gradient(circle at bottom right,rgba(59,130,246,.24),transparent 30%),linear-gradient(135deg,rgba(2,6,23,.96),rgba(15,23,42,.88));border:1px solid rgba(148,163,184,.22);box-shadow:0 18px 45px rgba(0,0,0,.28)}
+    .hero-title {font-size:2.1rem;font-weight:950;letter-spacing:-.04em;margin-bottom:4px}.hero-sub{color:rgba(226,232,240,.78);font-size:1.02rem;line-height:1.45}
+    .premium-kpi{border-radius:20px;padding:18px;background:linear-gradient(145deg,rgba(15,23,42,.94),rgba(30,41,59,.78));border:1px solid rgba(148,163,184,.20);box-shadow:0 10px 28px rgba(0,0,0,.18);min-height:120px}
+    .premium-kpi-label{color:rgba(226,232,240,.72);font-size:.86rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.premium-kpi-value{font-size:2rem;font-weight:950;margin-top:8px;line-height:1}.premium-kpi-note{color:rgba(226,232,240,.70);font-size:.86rem;margin-top:9px}
+    .risk-high{border-left:8px solid #ef4444!important}.risk-medium{border-left:8px solid #f59e0b!important}.risk-low{border-left:8px solid #22c55e!important}
+    .section-chip{display:inline-block;padding:5px 11px;border-radius:999px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.25);color:#bbf7d0;font-weight:850;margin:2px 4px 8px 0}
     </style>
     """,
     unsafe_allow_html=True,
@@ -141,6 +148,7 @@ STANDARD_COLUMNS = {
     "player_name": ["Játékos neve", "Player", "Player Name", "Name", "Név"],
     "session_type": ["Típus", "Type", "Session Type", "Edzés/Meccs"],
     "session_name": ["Szakasz neve", "Session", "Session Name"],
+    "position": ["Poszt", "Position", "Player Position", "Role"],
     "start_time": ["Kezdési idő", "Start Time", "Start", "Dátum", "Date"],
     "end_time": ["Befejezési idő", "End Time", "End"],
     "duration": ["Időtartam", "Duration", "Time"],
@@ -1533,6 +1541,7 @@ def insights_to_pdf_bytes(insights_df: pd.DataFrame, selected_week: str) -> Opti
 
     def safe_paragraph(value, style):
         text = "" if pd.isna(value) else str(value)
+        text = pdf_safe_text(text)
         return Paragraph(html.escape(text).replace("\n", "<br/>",), style)
 
     table_data = [[safe_paragraph(c, header) for c in cols]]
@@ -1566,11 +1575,90 @@ def insights_to_pdf_bytes(insights_df: pd.DataFrame, selected_week: str) -> Opti
     return output.getvalue()
 
 
+
+# -----------------------------------------------------------------------------
+# V3 - Premium visualization + Player Risk + Positional layer + improved PDF
+# -----------------------------------------------------------------------------
+POSITION_GROUPS = {
+    "Kapus": ["gk", "kapus", "goalkeeper"],
+    "Belső védő": ["cb", "belső védő", "center back", "centre back"],
+    "Szélső védő": ["fb", "wb", "szélső védő", "fullback", "wingback"],
+    "Középpályás": ["cm", "dm", "am", "középpályás", "midfielder"],
+    "Szélső": ["winger", "szélső", "wide"],
+    "Csatár": ["st", "cf", "csatár", "striker", "forward"],
+}
+
+def infer_position_group(value: object) -> str:
+    if value is None or pd.isna(value): return "Ismeretlen"
+    text = str(value).lower().strip()
+    for group, keys in POSITION_GROUPS.items():
+        if any(k in text for k in keys): return group
+    return str(value).strip() if str(value).strip() else "Ismeretlen"
+
+def add_position_group(df: pd.DataFrame) -> pd.DataFrame:
+    out=df.copy(); out["position_group"] = out["position"].apply(infer_position_group) if "position" in out.columns else "Ismeretlen"; return out
+
+def calculate_player_risk(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
+    pw=player_weekly(df)
+    if pw.empty or selected_week not in pw["week"].values: return pd.DataFrame()
+    weeks=sorted(pw["week"].dropna().unique().tolist()); idx=weeks.index(selected_week)
+    cur=pw[pw["week"]==selected_week].copy(); hist=pw[pw["week"].isin(weeks[max(0,idx-4):idx])].copy(); rows=[]
+    for _, row in cur.iterrows():
+        player=row["player_name"]; hp=hist[hist["player_name"]==player]; score=20; reasons=[]
+        for metric, hi, lo, lab in [("training_load",.30,-.35,"Terhelési pont"),("dec_count",.35,-.40,"Lassítás"),("sprint_distance",.45,-.45,"Sprinttáv")]:
+            if metric in row.index and metric in hp.columns:
+                v=row.get(metric,np.nan); base=hp[metric].mean()
+                if pd.notna(v) and pd.notna(base) and base!=0:
+                    d=(v-base)/base
+                    if d>hi: score+=18; reasons.append(f"{lab}: +{d:.0%} a saját átlaghoz képest")
+                    elif d<lo: score+=8; reasons.append(f"{lab}: {d:.0%} a saját átlaghoz képest")
+        if "max_speed" in row.index and "max_speed" in hp.columns:
+            v=row.get("max_speed",np.nan); base=hp["max_speed"].max()
+            if pd.notna(v) and pd.notna(base) and base>0 and (v-base)/base < -.06:
+                score+=14; reasons.append(f"Max sebesség: {(v-base)/base:.0%} a saját csúcshoz képest")
+        score=int(max(0,min(100,score))); level="Magas" if score>=70 else ("Közepes" if score>=45 else "Alacsony")
+        rows.append({"Játékos":player,"Típus":row.get("session_type",""),"Risk score":score,"Kockázati szint":level,"Fő okok":"; ".join(reasons[:3]) if reasons else "Nincs jelentős eltérés a saját előzményhez képest."})
+    res=pd.DataFrame(rows); return res.sort_values("Risk score",ascending=False) if not res.empty else res
+
+def render_premium_kpi(label: str, value: str, note: str="", color: str="#22c55e") -> None:
+    st.markdown(f"""<div class='premium-kpi'><div class='premium-kpi-label'>{html.escape(label)}</div><div class='premium-kpi-value' style='color:{color};'>{html.escape(str(value))}</div><div class='premium-kpi-note'>{html.escape(note)}</div></div>""", unsafe_allow_html=True)
+
+def render_hero(selected_week: str, selected_playstyle: str, readiness_score: int, periodization_type: str) -> None:
+    color=score_to_color(readiness_score) if "score_to_color" in globals() else "#22c55e"; label=score_to_label(readiness_score) if "score_to_label" in globals() else ""
+    st.markdown(f"""<div class='hero-box'><div class='hero-title'>Football Performance Intelligence</div><div class='hero-sub'><span class='section-chip'>Hét: {html.escape(str(selected_week))}</span><span class='section-chip'>Játékmodell: {html.escape(str(selected_playstyle))}</span><span class='section-chip'>Readiness: <b style='color:{color};'>{readiness_score}/100</b> - {html.escape(label)}</span><span class='section-chip'>Periodizáció: {html.escape(str(periodization_type))}</span></div></div>""", unsafe_allow_html=True)
+
+def render_risk_cards(risk_df: pd.DataFrame, limit: int=5) -> None:
+    if risk_df.empty: st.info("Nincs elég adat játékosszintű risk engine számításhoz."); return
+    for _, row in risk_df.head(limit).iterrows():
+        level=row.get("Kockázati szint","Alacsony"); css="risk-high" if level=="Magas" else ("risk-medium" if level=="Közepes" else "risk-low")
+        st.markdown(f"""<div class='insight-card {css}'><div class='insight-title'>{html.escape(str(row.get('Játékos','')))} · {html.escape(str(level))} kockázat · {row.get('Risk score',0)}/100</div><div class='insight-label'>Fő okok</div><div class='insight-text'>{html.escape(str(row.get('Fő okok','')))}</div></div>""", unsafe_allow_html=True)
+
+def build_premium_pdf_bytes(insights_df: pd.DataFrame, selected_week: str, readiness_score: int, periodization_type: str, weekly_summary_text: str, coaching_priorities: List[Dict[str,str]], risk_df: pd.DataFrame, playstyle: str) -> Optional[bytes]:
+    if SimpleDocTemplate is None: return None
+    font_name,font_bold=_register_pdf_font(); output=io.BytesIO(); doc=SimpleDocTemplate(output,pagesize=landscape(A4),rightMargin=.8*cm,leftMargin=.8*cm,topMargin=.8*cm,bottomMargin=.8*cm)
+    styles=getSampleStyleSheet(); title=ParagraphStyle("V3Title",parent=styles["Title"],fontName=font_bold,fontSize=21,leading=25,textColor=colors.HexColor("#0F172A")); h2=ParagraphStyle("V3H2",parent=styles["Heading2"],fontName=font_bold,fontSize=13,leading=16,textColor=colors.HexColor("#1F4E78")); body=ParagraphStyle("V3Body",parent=styles["Normal"],fontName=font_name,fontSize=8.5,leading=11); small=ParagraphStyle("V3Small",parent=styles["Normal"],fontName=font_name,fontSize=7,leading=9); header=ParagraphStyle("V3Header",parent=styles["Normal"],fontName=font_bold,fontSize=7,leading=9,textColor=colors.white)
+    def P(v,style=body): return Paragraph(html.escape(pdf_safe_text(v)).replace("\n","<br/>",),style)
+    story=[P("Football Performance Intelligence - V3 riport",title),P(f"Hét: {selected_week} · Játékmodell: {playstyle} · Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}",body),Spacer(1,.25*cm)]
+    exec_data=[[P("Match readiness",header),P("Periodizáció",header),P("Vezetői összefoglaló",header)],[P(f"{readiness_score}/100 - {score_to_label(readiness_score)}",body),P(periodization_type,body),P(weekly_summary_text,body)]]
+    et=Table(exec_data,colWidths=[5*cm,5*cm,16.5*cm]); et.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#0F172A")),("BACKGROUND",(0,1),(-1,1),colors.HexColor("#F1F5F9")),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),6),("RIGHTPADDING",(0,0),(-1,-1),6),("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6)])); story += [et,Spacer(1,.35*cm),P("Top adaptív edzői teendők",h2)]
+    if coaching_priorities:
+        data=[[P("#",header),P("Téma",header),P("Teendő",header),P("Miért fontos?",header)]]
+        for i,it in enumerate(coaching_priorities[:3],1): data.append([P(str(i),small),P(it.get("Cím",""),small),P(it.get("Teendő",""),small),P(it.get("Miért",""),small)])
+        t=Table(data,colWidths=[.8*cm,5*cm,10.5*cm,10.2*cm],repeatRows=1); t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1F4E78")),("GRID",(0,0),(-1,-1),.25,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)])); story.append(t)
+    if risk_df is not None and not risk_df.empty:
+        story += [Spacer(1,.35*cm),P("Top játékos risk lista",h2)]; cols=["Játékos","Risk score","Kockázati szint","Fő okok"]; data=[[P(c,header) for c in cols]]
+        for _,r in risk_df.head(8).iterrows(): data.append([P(r.get(c,""),small) for c in cols])
+        rt=Table(data,colWidths=[5.2*cm,2.3*cm,3.2*cm,15.8*cm],repeatRows=1); rt.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#7F1D1D")),("GRID",(0,0),(-1,-1),.25,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#FFF7ED")]),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)])); story.append(rt)
+    story += [Spacer(1,.35*cm),P("Insight tábla",h2)]; cols=["Súlyosság","Terület","Megállapítás","Mit látunk?","Miért fontos?","Javaslat"]; cols=[c for c in cols if c in insights_df.columns]; data=[[P(c,header) for c in cols]]
+    for _,r in insights_df.iterrows(): data.append([P(r.get(c,""),small) for c in cols])
+    widths={"Súlyosság":2.5*cm,"Terület":2*cm,"Megállapítás":3.7*cm,"Mit látunk?":5.7*cm,"Miért fontos?":5.7*cm,"Javaslat":6.9*cm}; tab=Table(data,colWidths=[widths.get(c,3*cm) for c in cols],repeatRows=1); tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1F4E78")),("GRID",(0,0),(-1,-1),.25,colors.HexColor("#BFBFBF")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F7F9FC")]),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)])); story.append(tab)
+    doc.build(story); return output.getvalue()
+
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Football Performance Intelligence – V2.5")
-st.caption("Adatfeltöltés → memory → readiness → periodizáció → mintázatok → adaptív edzői ajánlások")
+st.title("⚽ Football Performance Intelligence – V3")
+st.caption("Premium performance cockpit → readiness → risk engine → posztlogika → cool export")
 
 with st.sidebar:
     st.header("1) Adatfeltöltés")
@@ -1590,6 +1678,7 @@ with st.sidebar:
 
 raw_df = sheets[selected_sheet]
 df, mapping, missing_core = standardize_dataframe(raw_df)
+df = add_position_group(df)
 
 if missing_core:
     st.error(f"Hiányzó alapmezők: {', '.join(missing_core)}")
@@ -1639,12 +1728,17 @@ all_insights = sorted(base_insights + micro_insights + style_insights + pattern_
 coaching_priorities = build_adaptive_recommendations(all_insights, readiness_score, periodization_type, pattern_insights, selected_playstyle)
 weekly_summary_text = build_weekly_summary(all_insights, selected_week, selected_playstyle)
 weekly_summary_text += f" Readiness: {readiness_score}/100 ({score_to_label(readiness_score)}). Periodizációs besorolás: {periodization_type}."
+player_risk_df = calculate_player_risk(analysis_base_df, selected_week)
+high_risk_count = int((player_risk_df["Kockázati szint"] == "Magas").sum()) if not player_risk_df.empty else 0
+medium_risk_count = int((player_risk_df["Kockázati szint"] == "Közepes").sum()) if not player_risk_df.empty else 0
 
 # Tabok
-tab1, tab_intel, tab_micro, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab_premium, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.tabs([
     "Vezetői áttekintő",
+    "Premium cockpit",
     "Intelligence cockpit",
     "Mikrociklus intelligencia",
+    "Player risk engine",
     "Megállapítások és javaslatok",
     "Játékosmonitoring",
     "Adatminőség",
@@ -1696,7 +1790,7 @@ with tab1:
             markers=True,
             title=f"Heti trend: {metric_name(chart_metric)}",
         )
-        fig.update_layout(xaxis_title="Hét", yaxis_title=metric_name(chart_metric), legend_title="Típus")
+        fig.update_layout(xaxis_title="Hét", yaxis_title=metric_name(chart_metric), legend_title="Típus", template="plotly_dark")
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Nincs elérhető trendmutató.")
@@ -1715,6 +1809,40 @@ with tab1:
         st.info("Nincs elérhető edzés-meccs összehasonlító mutató.")
 
 
+
+
+with tab_premium:
+    st.subheader("Premium cockpit")
+    st.caption("Cool vezetői nézet: readiness, risk, load, sprint, periodizáció és top teendők egy képernyőn.")
+    render_hero(selected_week, selected_playstyle, readiness_score, periodization_type)
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        render_premium_kpi("Match readiness", f"{readiness_score}/100", score_to_label(readiness_score), score_to_color(readiness_score))
+    with k2:
+        render_premium_kpi("Magas risk játékos", str(high_risk_count), "Player risk engine alapján", "#ef4444" if high_risk_count else "#22c55e")
+    with k3:
+        mem_weeks = analysis_base_df["week"].nunique() if "week" in analysis_base_df.columns else 0
+        render_premium_kpi("Elemzett hetek", str(mem_weeks), "Memory + aktuális feltöltés", "#38bdf8")
+    with k4:
+        render_premium_kpi("Periodizáció", periodization_type, "Automatikus heti besorolás", "#a78bfa")
+    st.markdown("### Readiness komponensek")
+    if readiness_components:
+        comp_df = pd.DataFrame([{"Komponens": k, "Pont": round(v, 1)} for k, v in readiness_components.items()])
+        fig = px.bar(comp_df, x="Komponens", y="Pont", range_y=[0, 100], title="Readiness komponensek")
+        fig.update_layout(xaxis_title="", yaxis_title="Pont", template="plotly_dark")
+        st.plotly_chart(fig, use_container_width=True)
+    st.markdown("### Top adaptív edzői teendők")
+    render_coaching_priorities(coaching_priorities)
+    st.markdown("### Top player risk")
+    render_risk_cards(player_risk_df, limit=5)
+    if weekly_fingerprints is not None and not weekly_fingerprints.empty:
+        st.markdown("### Multi-week performance fingerprint")
+        trend_metric_options = [c for c in ["training_load", "sprint_distance", "distance_per_min", "max_speed", "dec_count"] if c in weekly_fingerprints.columns]
+        if trend_metric_options:
+            tm = st.selectbox("Premium trend mutató", trend_metric_options, format_func=metric_name)
+            fig = px.line(weekly_fingerprints, x="week", y=tm, markers=True, title=f"Performance memory trend: {metric_name(tm)}")
+            fig.update_layout(xaxis_title="Hét", yaxis_title=metric_name(tm), template="plotly_dark")
+            st.plotly_chart(fig, use_container_width=True)
 
 with tab_intel:
     st.subheader("Intelligence cockpit")
@@ -1845,6 +1973,21 @@ with tab_micro:
         else:
             st.success("A mikrociklus struktúrában nem látszik kiemelt figyelmeztetés az aktuális szabályok alapján.")
 
+
+with tab_risk:
+    st.subheader("Player risk engine")
+    st.caption("Játékosszintű, többhetes eltérésalapú risk scoring: load spike, sprintprofil, lassítások, max sebesség.")
+    if player_risk_df.empty:
+        st.info("Nincs elég adat a játékosszintű risk engine-hez. Legalább több hét játékosszintű adat kell hozzá.")
+    else:
+        render_risk_cards(player_risk_df, limit=8)
+        st.markdown("### Risk tábla")
+        st.dataframe(player_risk_df, use_container_width=True, hide_index=True)
+        fig = px.bar(player_risk_df.head(20), x="Játékos", y="Risk score", color="Kockázati szint", title="Játékos risk score")
+        fig.update_layout(xaxis_title="Játékos", yaxis_title="Risk score", xaxis_tickangle=-45, template="plotly_dark")
+        st.plotly_chart(fig, use_container_width=True)
+        st.download_button("⬇️ Player risk export CSV", data=player_risk_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"player_risk_{_safe_filename_week(selected_week)}.csv", mime="text/csv", use_container_width=True)
+
 with tab2:
     st.subheader("Megállapítások és javaslatok")
     st.caption("Szabályalapú performance motor: AI nélkül is ad szakmai következtetést és javaslatot.")
@@ -1922,6 +2065,10 @@ with tab2:
             )
         else:
             st.info("PDF exporthoz add hozzá a requirements.txt fájlhoz: reportlab")
+    st.markdown("#### Premium V3 PDF export")
+    premium_pdf = build_premium_pdf_bytes(insight_export_df, selected_week, readiness_score, periodization_type, weekly_summary_text, coaching_priorities, player_risk_df, selected_playstyle)
+    if premium_pdf is not None:
+        st.download_button("⬇️ Premium V3 PDF riport", data=premium_pdf, file_name=f"premium_performance_riport_{safe_week}.pdf", mime="application/pdf", use_container_width=True)
 
 with tab3:
     st.subheader("Játékosmonitoring")
@@ -1936,7 +2083,7 @@ with tab3:
             metric = st.selectbox("Játékos rangsor mutató", rank_options, format_func=metric_name, index=0)
             rank = pw_current.groupby("player_name", as_index=False)[metric].sum().sort_values(metric, ascending=False)
             fig = px.bar(rank.head(25), x="player_name", y=metric, title=f"Játékosrangsor: {metric_name(metric)}")
-            fig.update_layout(xaxis_title="Játékos", yaxis_title=metric_name(metric), xaxis_tickangle=-45)
+            fig.update_layout(xaxis_title="Játékos", yaxis_title=metric_name(metric), xaxis_tickangle=-45, template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("### Játékos heti összesítő tábla")
