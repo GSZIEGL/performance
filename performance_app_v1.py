@@ -41,7 +41,7 @@ except Exception:
 # Oldalbeállítás
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Football Performance Intelligence V3",
+    page_title="Football Performance Intelligence V3.1",
     page_icon="⚽",
     layout="wide",
 )
@@ -135,6 +135,50 @@ st.markdown(
     .premium-kpi-label{color:rgba(226,232,240,.72);font-size:.86rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.premium-kpi-value{font-size:2rem;font-weight:950;margin-top:8px;line-height:1}.premium-kpi-note{color:rgba(226,232,240,.70);font-size:.86rem;margin-top:9px}
     .risk-high{border-left:8px solid #ef4444!important}.risk-medium{border-left:8px solid #f59e0b!important}.risk-low{border-left:8px solid #22c55e!important}
     .section-chip{display:inline-block;padding:5px 11px;border-radius:999px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.25);color:#bbf7d0;font-weight:850;margin:2px 4px 8px 0}
+
+    .intro-card {
+        border-radius: 22px;
+        padding: 22px 24px;
+        margin-bottom: 16px;
+        background: linear-gradient(135deg, rgba(15,23,42,.95), rgba(30,41,59,.82));
+        border: 1px solid rgba(148,163,184,.24);
+        box-shadow: 0 12px 34px rgba(0,0,0,.20);
+    }
+    .intro-card h2, .intro-card h3 {
+        margin-top: 0;
+        margin-bottom: 8px;
+    }
+    .intro-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 14px;
+    }
+    .feature-box {
+        border-radius: 18px;
+        padding: 16px 18px;
+        background: rgba(15,23,42,.72);
+        border: 1px solid rgba(148,163,184,.18);
+    }
+    .feature-title {
+        font-weight: 900;
+        font-size: 1.02rem;
+        margin-bottom: 6px;
+        color: #bfdbfe;
+    }
+    .feature-text {
+        color: rgba(226,232,240,.82);
+        line-height: 1.45;
+        font-size: .94rem;
+    }
+    .export-panel {
+        border-radius: 22px;
+        padding: 20px;
+        background: radial-gradient(circle at top right, rgba(34,197,94,.16), transparent 35%),
+                    linear-gradient(135deg, rgba(2,6,23,.94), rgba(15,23,42,.86));
+        border: 1px solid rgba(148,163,184,.24);
+        margin-bottom: 18px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1654,11 +1698,219 @@ def build_premium_pdf_bytes(insights_df: pd.DataFrame, selected_week: str, readi
     widths={"Súlyosság":2.5*cm,"Terület":2*cm,"Megállapítás":3.7*cm,"Mit látunk?":5.7*cm,"Miért fontos?":5.7*cm,"Javaslat":6.9*cm}; tab=Table(data,colWidths=[widths.get(c,3*cm) for c in cols],repeatRows=1); tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1F4E78")),("GRID",(0,0),(-1,-1),.25,colors.HexColor("#BFBFBF")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F7F9FC")]),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)])); story.append(tab)
     doc.build(story); return output.getvalue()
 
+
+# -----------------------------------------------------------------------------
+# V3.1 - Magyar demo oldal + Executive Export Center
+# -----------------------------------------------------------------------------
+def render_system_intro_page() -> None:
+    st.markdown(
+        """
+        <div class="intro-card">
+            <h2>⚽ Football Performance Intelligence Platform</h2>
+            <div class="hero-sub">
+                Automatikus heti teljesítményintelligencia futballcsapatok számára.
+                Ez nem egyszerű GPS dashboard, hanem egy döntéstámogató performance engine,
+                amely football kontextusban értelmezi a terhelési adatokat.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### Mit csinálunk?")
+    st.markdown(
+        """
+        A rendszer a feltöltött GPS / terhelési adatokat automatikusan feldolgozza, majd
+        edzői nyelvre fordítja: kiemeli a legfontosabb heti megállapításokat,
+        figyelmeztet a problémás mintázatokra, és javaslatokat ad a következő döntésekhez.
+        """
+    )
+
+    st.markdown("### Mitől extra?")
+    st.markdown(
+        """
+        Nem csak számokat és grafikonokat mutat. A rendszer figyelembe veszi a mikrociklust,
+        a meccsnaphoz viszonyított terhelést, a játékmodellt, a többhetes mintázatokat,
+        a játékosok egyéni eltéréseit és a match readiness állapotot.
+        """
+    )
+
+    st.markdown(
+        """
+        <div class="intro-grid">
+            <div class="feature-box">
+                <div class="feature-title">1. Mikrociklus intelligencia</div>
+                <div class="feature-text">MD-4 / MD-3 / MD-2 / MD-1 logika, tapering, speed exposure és heti struktúra értékelése.</div>
+            </div>
+            <div class="feature-box">
+                <div class="feature-title">2. Match readiness score</div>
+                <div class="feature-text">0–100-as meccskészültségi pontszám load trend, frissesség, speed exposure és játékmodell alapján.</div>
+            </div>
+            <div class="feature-box">
+                <div class="feature-title">3. Player risk engine</div>
+                <div class="feature-text">Automatikusan jelzi, ha egy játékos terhelése, sprintprofilja vagy max sebessége eltér a saját múltjától.</div>
+            </div>
+            <div class="feature-box">
+                <div class="feature-title">4. Performance memory</div>
+                <div class="feature-text">Többhetes történetet épít, trendeket keres, és nem csak az aktuális hetet nézi elszigetelten.</div>
+            </div>
+            <div class="feature-box">
+                <div class="feature-title">5. Coaching priorities</div>
+                <div class="feature-text">Nem 40 figyelmeztetést ad, hanem kiemeli a hét 3 legfontosabb edzői teendőjét.</div>
+            </div>
+            <div class="feature-box">
+                <div class="feature-title">6. Executive export</div>
+                <div class="feature-text">Egy kattintással vezetőedzői PDF / Word / Excel riport készül magyar nyelven.</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### Kinek készült?")
+    st.markdown(
+        """
+        Elsősorban NB2 / NB3 kluboknak, akadémiáknak, utánpótlás elitműhelyeknek
+        és olyan stáboknak, ahol van GPS adat, de nincs külön analyst vagy sport scientist csapat.
+        """
+    )
+
+    st.markdown("### Egy mondatban")
+    st.success("A rendszer analyst gondolkodást ad a stábnak, de nem kell hozzá külön analyst csapat.")
+
+
+def build_executive_summary_df(
+    selected_week: str,
+    selected_playstyle: str,
+    readiness_score: int,
+    periodization_type: str,
+    weekly_summary_text: str,
+    high_risk_count: int,
+    medium_risk_count: int,
+) -> pd.DataFrame:
+    return pd.DataFrame([
+        {"Elem": "Hét", "Érték": selected_week},
+        {"Elem": "Játékmodell", "Érték": selected_playstyle},
+        {"Elem": "Match readiness", "Érték": f"{readiness_score}/100 – {score_to_label(readiness_score)}"},
+        {"Elem": "Periodizáció", "Érték": periodization_type},
+        {"Elem": "Magas risk játékosok", "Érték": str(high_risk_count)},
+        {"Elem": "Közepes risk játékosok", "Érték": str(medium_risk_count)},
+        {"Elem": "Heti vezetői összefoglaló", "Érték": weekly_summary_text},
+    ])
+
+
+def build_executive_excel_bytes(
+    executive_df: pd.DataFrame,
+    insights_df: pd.DataFrame,
+    priorities_df: pd.DataFrame,
+    risk_df: pd.DataFrame,
+    weekly_fingerprints: pd.DataFrame,
+) -> bytes:
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        executive_df.to_excel(writer, index=False, sheet_name="Vezetői összefoglaló")
+        insights_df.to_excel(writer, index=False, sheet_name="Insightok")
+        priorities_df.to_excel(writer, index=False, sheet_name="Edzői teendők")
+        if risk_df is not None and not risk_df.empty:
+            risk_df.to_excel(writer, index=False, sheet_name="Player risk")
+        if weekly_fingerprints is not None and not weekly_fingerprints.empty:
+            weekly_fingerprints.to_excel(writer, index=False, sheet_name="Memory trendek")
+
+        from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        for ws in writer.book.worksheets:
+            ws.freeze_panes = "A2"
+            header_fill = PatternFill("solid", fgColor="0F172A")
+            header_font = Font(color="FFFFFF", bold=True)
+            thin = Side(style="thin", color="CBD5E1")
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                cell.border = Border(top=thin, left=thin, right=thin, bottom=thin)
+
+            for row in ws.iter_rows(min_row=2):
+                max_lines = 1
+                for cell in row:
+                    cell.alignment = Alignment(vertical="top", wrap_text=True)
+                    cell.border = Border(top=thin, left=thin, right=thin, bottom=thin)
+                    text = str(cell.value or "")
+                    max_lines = max(max_lines, min(8, len(text) // 45 + 1))
+                ws.row_dimensions[row[0].row].height = max(24, max_lines * 16)
+
+            for idx, col_cells in enumerate(ws.columns, start=1):
+                values = [str(c.value or "") for c in col_cells[:80]]
+                width = min(68, max(14, max(len(v) for v in values[:80]) + 2))
+                if ws.title in ["Insightok", "Edzői teendők"]:
+                    width = min(60, max(width, 28))
+                ws.column_dimensions[get_column_letter(idx)].width = width
+
+    return output.getvalue()
+
+
+def build_executive_word_bytes(
+    executive_df: pd.DataFrame,
+    priorities_df: pd.DataFrame,
+    insights_df: pd.DataFrame,
+    risk_df: pd.DataFrame,
+    selected_week: str,
+) -> Optional[bytes]:
+    if Document is None:
+        return None
+    doc = Document()
+    section = doc.sections[0]
+    section.left_margin = Inches(0.6)
+    section.right_margin = Inches(0.6)
+    section.top_margin = Inches(0.6)
+    section.bottom_margin = Inches(0.6)
+
+    doc.add_heading("Football Performance Intelligence – vezetői riport", level=1)
+    doc.add_paragraph(f"Hét: {selected_week}")
+    doc.add_paragraph(f"Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+    doc.add_heading("Vezetői összefoglaló", level=2)
+    for _, row in executive_df.iterrows():
+        p = doc.add_paragraph()
+        p.add_run(f"{row.get('Elem', '')}: ").bold = True
+        p.add_run(str(row.get("Érték", "")))
+
+    doc.add_heading("Top edzői teendők", level=2)
+    for idx, row in priorities_df.iterrows():
+        doc.add_heading(f"{idx + 1}. {row.get('Cím', '')}", level=3)
+        p = doc.add_paragraph()
+        p.add_run("Teendő: ").bold = True
+        p.add_run(str(row.get("Teendő", "")))
+        p = doc.add_paragraph()
+        p.add_run("Miért fontos: ").bold = True
+        p.add_run(str(row.get("Miért", "")))
+
+    if risk_df is not None and not risk_df.empty:
+        doc.add_heading("Top player risk", level=2)
+        for _, row in risk_df.head(8).iterrows():
+            p = doc.add_paragraph()
+            p.add_run(f"{row.get('Játékos', '')} – {row.get('Kockázati szint', '')} ({row.get('Risk score', '')}/100): ").bold = True
+            p.add_run(str(row.get("Fő okok", "")))
+
+    doc.add_heading("Insightok", level=2)
+    for _, row in insights_df.iterrows():
+        doc.add_heading(str(row.get("Megállapítás", "")), level=3)
+        for label in ["Súlyosság", "Terület", "Mit látunk?", "Miért fontos?", "Javaslat"]:
+            if label in insights_df.columns:
+                p = doc.add_paragraph()
+                p.add_run(f"{label}: ").bold = True
+                p.add_run(str(row.get(label, "")))
+
+    output = io.BytesIO()
+    doc.save(output)
+    return output.getvalue()
+
+
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Football Performance Intelligence – V3")
-st.caption("Premium performance cockpit → readiness → risk engine → posztlogika → cool export")
+st.title("⚽ Football Performance Intelligence – V3.1")
+st.caption("Magyar vezetői demo → football intelligence → executive export center")
 
 with st.sidebar:
     st.header("1) Adatfeltöltés")
@@ -1733,9 +1985,11 @@ high_risk_count = int((player_risk_df["Kockázati szint"] == "Magas").sum()) if 
 medium_risk_count = int((player_risk_df["Kockázati szint"] == "Közepes").sum()) if not player_risk_df.empty else 0
 
 # Tabok
-tab1, tab_premium, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.tabs([
+tab_intro, tab1, tab_premium, tab_export, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.tabs([
+    "Mi ez a rendszer?",
     "Vezetői áttekintő",
     "Premium cockpit",
+    "Executive export center",
     "Intelligence cockpit",
     "Mikrociklus intelligencia",
     "Player risk engine",
@@ -1744,6 +1998,10 @@ tab1, tab_premium, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.t
     "Adatminőség",
     "Nyers adatok",
 ])
+
+
+with tab_intro:
+    render_system_intro_page()
 
 with tab1:
     st.subheader("Csapat áttekintő")
@@ -1843,6 +2101,139 @@ with tab_premium:
             fig = px.line(weekly_fingerprints, x="week", y=tm, markers=True, title=f"Performance memory trend: {metric_name(tm)}")
             fig.update_layout(xaxis_title="Hét", yaxis_title=metric_name(tm), template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
+
+
+with tab_export:
+    st.subheader("Executive export center")
+    st.caption("Egy helyen minden vezetői információ és export: összefoglaló, readiness, teendők, player risk, insightok.")
+
+    st.markdown(
+        """
+        <div class="export-panel">
+            <h3 style="margin-top:0;">Vezetői csomag</h3>
+            <p style="color:rgba(226,232,240,.82);">
+                Ezt érdemes megmutatni vagy elküldeni a vezetőedzőnek: rövid összefoglaló,
+                top teendők, readiness, risk lista és insightok.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    executive_df = build_executive_summary_df(
+        selected_week,
+        selected_playstyle,
+        readiness_score,
+        periodization_type,
+        weekly_summary_text,
+        high_risk_count if "high_risk_count" in globals() else 0,
+        medium_risk_count if "medium_risk_count" in globals() else 0,
+    )
+    insight_export_df_export = build_insight_export_df(all_insights)
+    priorities_df = pd.DataFrame(coaching_priorities)
+    risk_export_df = player_risk_df if "player_risk_df" in globals() else pd.DataFrame()
+
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.metric("Match readiness", f"{readiness_score}/100", score_to_label(readiness_score))
+    with k2:
+        st.metric("Periodizáció", periodization_type)
+    with k3:
+        st.metric("Magas risk", high_risk_count if "high_risk_count" in globals() else 0)
+    with k4:
+        st.metric("Insightok", len(all_insights))
+
+    st.markdown("### Heti vezetői összefoglaló")
+    render_wrapped_table(executive_df)
+
+    st.markdown("### Top adaptív edzői teendők")
+    if not priorities_df.empty:
+        render_wrapped_table(priorities_df)
+    else:
+        st.info("Nincs kiemelt teendő.")
+
+    st.markdown("### Player risk")
+    if risk_export_df is not None and not risk_export_df.empty:
+        render_wrapped_table(risk_export_df.head(10))
+    else:
+        st.info("Nincs player risk adat.")
+
+    st.markdown("### Insightok")
+    render_wrapped_table(insight_export_df_export)
+
+    st.markdown("### Export gombok")
+    safe_week = _safe_filename_week(selected_week)
+    e1, e2, e3, e4 = st.columns(4)
+
+    with e1:
+        premium_pdf = None
+        if "build_premium_pdf_bytes" in globals():
+            premium_pdf = build_premium_pdf_bytes(
+                insight_export_df_export,
+                selected_week,
+                readiness_score,
+                periodization_type,
+                weekly_summary_text,
+                coaching_priorities,
+                risk_export_df,
+                selected_playstyle,
+            )
+        else:
+            premium_pdf = insights_to_pdf_bytes(insight_export_df_export, selected_week)
+
+        if premium_pdf is not None:
+            st.download_button(
+                "⬇️ Executive PDF",
+                data=premium_pdf,
+                file_name=f"executive_performance_riport_{safe_week}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+
+    with e2:
+        st.download_button(
+            "⬇️ Executive Excel",
+            data=build_executive_excel_bytes(
+                executive_df,
+                insight_export_df_export,
+                priorities_df,
+                risk_export_df,
+                weekly_fingerprints if "weekly_fingerprints" in globals() else pd.DataFrame(),
+            ),
+            file_name=f"executive_performance_riport_{safe_week}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+
+    with e3:
+        word_bytes = build_executive_word_bytes(
+            executive_df,
+            priorities_df,
+            insight_export_df_export,
+            risk_export_df,
+            selected_week,
+        )
+        if word_bytes is not None:
+            st.download_button(
+                "⬇️ Executive Word",
+                data=word_bytes,
+                file_name=f"executive_performance_riport_{safe_week}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+        else:
+            st.info("Word exporthoz szükséges: python-docx")
+
+    with e4:
+        csv_bundle = insight_export_df_export.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "⬇️ Insight CSV",
+            data=csv_bundle,
+            file_name=f"executive_insightok_{safe_week}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
 
 with tab_intel:
     st.subheader("Intelligence cockpit")
@@ -2134,4 +2525,4 @@ with tab5:
 
 
 st.divider()
-st.caption("V2.5 HU – Performance memory, readiness scoring, periodizáció, multi-week mintázatok, adaptív ajánlórendszer.")
+st.caption("V3.1 HU – Magyar demo oldal + Executive export center + Football Intelligence Platform.")
