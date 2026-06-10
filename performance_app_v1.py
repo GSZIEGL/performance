@@ -2014,103 +2014,254 @@ def build_plain_language_explanation() -> pd.DataFrame:
 
 
 
+
 # -----------------------------------------------------------------------------
-# Marketing / demo minta PDF riport
+# Marketing / demo minta PDF riport - V4.2
 # -----------------------------------------------------------------------------
 def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
-    """Teljes, kamu adatokkal készült minta vezetői riport.
+    """Látványos, többoldalas, kamu adatokkal készült teljes vezetői riport.
     Nem függ feltöltött adattól, ezért a kezdőoldalon is letölthető.
     """
     if SimpleDocTemplate is None:
         return None
+
+    from reportlab.platypus import PageBreak, KeepTogether
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
     font_name, font_bold = _register_pdf_font()
     output = io.BytesIO()
     doc = SimpleDocTemplate(
         output,
         pagesize=landscape(A4),
-        rightMargin=.9*cm,
-        leftMargin=.9*cm,
-        topMargin=.8*cm,
-        bottomMargin=.8*cm,
+        rightMargin=.85*cm,
+        leftMargin=.85*cm,
+        topMargin=.75*cm,
+        bottomMargin=.75*cm,
     )
 
     styles = getSampleStyleSheet()
-    title = ParagraphStyle("SampleTitle", parent=styles["Title"], fontName=font_bold, fontSize=21, leading=25, textColor=colors.HexColor("#0f172a"), spaceAfter=10)
-    h2 = ParagraphStyle("SampleH2", parent=styles["Heading2"], fontName=font_bold, fontSize=13, leading=16, textColor=colors.HexColor("#1e3a8a"), spaceBefore=8, spaceAfter=6)
-    body = ParagraphStyle("SampleBody", parent=styles["BodyText"], fontName=font_name, fontSize=8.8, leading=11, textColor=colors.HexColor("#111827"))
-    small = ParagraphStyle("SampleSmall", parent=styles["BodyText"], fontName=font_name, fontSize=7.6, leading=9.5, textColor=colors.HexColor("#475569"))
-    header = ParagraphStyle("SampleHeader", parent=styles["BodyText"], fontName=font_bold, fontSize=8.5, leading=10.5, textColor=colors.white)
+    title = ParagraphStyle("FPITitle", parent=styles["Title"], fontName=font_bold, fontSize=23, leading=27, textColor=colors.HexColor("#0f172a"), spaceAfter=8)
+    subtitle = ParagraphStyle("FPISub", parent=styles["BodyText"], fontName=font_name, fontSize=9, leading=11, textColor=colors.HexColor("#475569"))
+    h2 = ParagraphStyle("FPIH2", parent=styles["Heading2"], fontName=font_bold, fontSize=14, leading=17, textColor=colors.HexColor("#1e3a8a"), spaceBefore=6, spaceAfter=6)
+    h3 = ParagraphStyle("FPIH3", parent=styles["Heading3"], fontName=font_bold, fontSize=11, leading=13, textColor=colors.HexColor("#0f172a"), spaceBefore=4, spaceAfter=4)
+    body = ParagraphStyle("FPIBody", parent=styles["BodyText"], fontName=font_name, fontSize=8.3, leading=10.2, textColor=colors.HexColor("#111827"))
+    body_white = ParagraphStyle("FPIBodyWhite", parent=styles["BodyText"], fontName=font_name, fontSize=8.2, leading=10.2, textColor=colors.white)
+    small = ParagraphStyle("FPISmall", parent=styles["BodyText"], fontName=font_name, fontSize=7.3, leading=9, textColor=colors.HexColor("#64748b"))
+    header = ParagraphStyle("FPIHeader", parent=styles["BodyText"], fontName=font_bold, fontSize=7.7, leading=9.2, textColor=colors.white, alignment=TA_CENTER)
+    kpi_label = ParagraphStyle("KPILabel", parent=styles["BodyText"], fontName=font_bold, fontSize=7, leading=8, textColor=colors.HexColor("#bfdbfe"), alignment=TA_CENTER)
+    kpi_value = ParagraphStyle("KPIValue", parent=styles["BodyText"], fontName=font_bold, fontSize=18, leading=21, textColor=colors.white, alignment=TA_CENTER)
 
     def P(text, style=body):
         return Paragraph(html.escape(pdf_safe_text(text)).replace("\n", "<br/>"), style)
 
+    def section(title_text):
+        return Table([[P(title_text, h2)]], colWidths=[27.2*cm], style=[
+            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#e0f2fe")),
+            ("BOX", (0,0), (-1,-1), .5, colors.HexColor("#93c5fd")),
+            ("LEFTPADDING", (0,0), (-1,-1), 8),
+            ("RIGHTPADDING", (0,0), (-1,-1), 8),
+            ("TOPPADDING", (0,0), (-1,-1), 5),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+        ])
+
+    def kpi_card(label, value, note, color="#1e3a8a"):
+        data = [[P(label, kpi_label)], [P(value, kpi_value)], [P(note, body_white)]]
+        t = Table(data, colWidths=[5.15*cm], rowHeights=[.55*cm, 1.0*cm, .8*cm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor(color)),
+            ("BOX", (0,0), (-1,-1), .6, colors.HexColor("#cbd5e1")),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("ALIGN", (0,0), (-1,-1), "CENTER"),
+            ("LEFTPADDING", (0,0), (-1,-1), 6),
+            ("RIGHTPADDING", (0,0), (-1,-1), 6),
+            ("TOPPADDING", (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ]))
+        return t
+
+    def styled_table(data, widths, header_color="#0f172a", body_bg="#ffffff", alt_bg="#f8fafc"):
+        t = Table(data, colWidths=widths, repeatRows=1)
+        style = [
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor(header_color)),
+            ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#cbd5e1")),
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("LEFTPADDING", (0,0), (-1,-1), 5),
+            ("RIGHTPADDING", (0,0), (-1,-1), 5),
+            ("TOPPADDING", (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ("BACKGROUND", (0,1), (-1,-1), colors.HexColor(body_bg)),
+        ]
+        for r in range(2, len(data), 2):
+            style.append(("BACKGROUND", (0,r), (-1,r), colors.HexColor(alt_bg)))
+        t.setStyle(TableStyle(style))
+        return t
+
     story = []
-    story.append(P("Football Performance Intelligence - teljes minta vezetoi riport", title))
-    story.append(P("Minta klub: Demo FC U19 | Het: 2026-W22 | Jatekmodell: Pressing | Adatok: kamu GPS/terhelesi mintaadatok", small))
+
+    # PAGE 1 - Executive cover/dashboard
+    story.append(P("Football Performance Intelligence", title))
+    story.append(P("Teljes minta vezetői riport | Demo FC U19 | 2026-W22 | Játékmodell: Pressing | Minta GPS/terhelési adatok", subtitle))
+    story.append(Spacer(1, 7))
+
+    story.append(Table([[
+        kpi_card("TEAM READINESS", "78/100", "elfogadható, figyelendő", "#14532d"),
+        kpi_card("LOAD CHANGE", "+27%", "heti terhelési növekedés", "#7c2d12"),
+        kpi_card("SPRINT FIT", "72%", "edzés vs meccsigény", "#1e3a8a"),
+        kpi_card("TOP RISK", "2 fő", "magas egyéni kockázat", "#7f1d1d"),
+        kpi_card("MD-1 TAPER", "OK", "frissességi jel pozitív", "#064e3b"),
+    ]], colWidths=[5.35*cm]*5))
     story.append(Spacer(1, 8))
 
-    exec_data = [
-        [P("Meccskeszultseg", header), P("Periodizacios tipus", header), P("Vezetoi uzenet", header)],
-        [
-            P("78/100 - elfogadhato, figyelendo"),
-            P("Intenzitasfokuszu het"),
-            P("A csapat terhelesi profilja alapvetoen stabil, de ket jatekosnal emelkedett risk es sprintterheles-loket lathato. A kovetkezo edzesen a frissesseg megtartasa es az egyeni terheleskontroll a fo prioritas."),
-        ],
-    ]
-    t = Table(exec_data, colWidths=[5.0*cm, 5.5*cm, 16.6*cm])
-    t.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1e3a8a")), ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#cbd5e1")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#eff6ff")), ("LEFTPADDING", (0,0), (-1,-1), 7), ("RIGHTPADDING", (0,0), (-1,-1), 7), ("TOPPADDING", (0,0), (-1,-1), 7), ("BOTTOMPADDING", (0,0), (-1,-1), 7)]))
-    story.append(t)
-    story.append(Spacer(1, 8))
+    story.append(KeepTogether([
+        section("Vezetői összefoglaló - mit kell tudni 30 másodperc alatt?"),
+        Spacer(1, 4),
+        styled_table([
+            [P("Fő üzenet", header), P("Értelmezés", header), P("Azonnali döntés", header)],
+            [P("A csapat alapvetően mérkőzésképes, de a hét nem teljesen tiszta."), P("A readiness 78/100, miközben két játékosnál magasabb risk észlelhető. A heti load +27%, a sprintprofil pedig csak 72%-a a meccsigénynek."), P("A következő edzés fő célja ne a plusz terhelés, hanem a frissesség megtartása és az egyéni terheléskontroll legyen.")],
+            [P("A mikrociklus struktúrája részben jó."), P("Az MD-1 taper pozitív jel, de az MD-2 terhelése közel került a hét fő terhelési napjához."), P("MD-2 napon kisebb neuromuszkuláris terhelés, MD-1-en rövid aktiváció javasolt.")],
+        ], [5.8*cm, 13.0*cm, 8.4*cm], header_color="#1e3a8a", body_bg="#eff6ff")
+    ]))
+    story.append(Spacer(1, 7))
 
-    story.append(P("Top 3 edzoi teendo", h2))
-    prio_data = [
-        [P("Prioritas", header), P("Teendo", header), P("Miert fontos?", header)],
-        [P("1. Sprintterheles kontroll"), P("Nagy D. es Varga L. kovetkezo edzesen kapjon kontrollalt nagysebessegu ingert, de ne ujabb volumennovelo blokkot."), P("Mindket jatekosnal magasabb sprinttav es terhelesi loket lathato az elozo hetekhez kepest.")],
-        [P("2. MD-2 frissesseg"), P("A merkozes elotti 48 oraban csokkenteni kell a teljes loadot es a neuromuszkularis terhelest."), P("Az MD-2 nap terhelese kozel volt a het fo terhelesi napjahoz.")],
-        [P("3. Alacsony terhelesu jatekosok"), P("Kiss R. es Farkas Z. reszere kiegeszito egyeni munka vagy fokozatos visszaterheles javasolt."), P("A csapatatlaghoz kepest alacsony load ket het ota fennall.")],
-    ]
-    pt = Table(prio_data, colWidths=[4.1*cm, 11.5*cm, 11.5*cm])
-    pt.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")), ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#cbd5e1")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#f8fafc")), ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6), ("TOPPADDING", (0,0), (-1,-1), 6), ("BOTTOMPADDING", (0,0), (-1,-1), 6)]))
-    story.append(pt)
-    story.append(Spacer(1, 8))
+    story.append(KeepTogether([
+        section("Top 5 automatikus megállapítás"),
+        Spacer(1, 4),
+        styled_table([
+            [P("#", header), P("Megállapítás", header), P("Súlyosság", header), P("Mit látunk?", header), P("Javaslat", header)],
+            [P("1"), P("Heti terhelési kiugrás"), P("FIGYELMEZTETÉS"), P("A heti edzés terhelési pontértéke 27%-kal nőtt az előző héthez képest."), P("Következő edzésen terheléskontroll és egyéni reakciók figyelése.")],
+            [P("2"), P("Alacsony sprintinger"), P("FIGYELMEZTETÉS"), P("A heti sprintprofil a meccsigény kb. 72%-a."), P("Rövid, kontrollált maximális sebességű blokk, ha a heti cél engedi.")],
+            [P("3"), P("MD-2 terhelés magas lehet"), P("FIGYELMEZTETÉS"), P("Az MD-2 load közel volt a hét fő terhelési napjához."), P("Meccs előtt 48 órával alacsonyabb neuromuszkuláris terhelés.")],
+            [P("4"), P("Két játékos magas risk zónában"), P("KRITIKUS"), P("Nagy D. és Varga L. egyéni terhelése eltér a csapatprofiltól."), P("Egyéni terheléskorrekció és regenerációs visszajelzés ellenőrzése.")],
+            [P("5"), P("Pozitív tapering jel"), P("INFORMÁCIÓ"), P("Az MD-1 terhelés alacsonyabb volt a hét fő napjához képest."), P("A struktúra megtartható, ha a meccsteljesítmény visszaigazolja.")],
+        ], [1.0*cm, 5.0*cm, 3.0*cm, 9.0*cm, 9.2*cm], header_color="#0f172a")
+    ]))
 
-    story.append(P("Jatekos risk gyorsnezeti tabla", h2))
-    risk_data = [
-        [P("Jatekos", header), P("Poszt", header), P("Risk", header), P("Fo ok", header), P("Javaslat", header)],
-        [P("Nagy D."), P("CM"), P("Magas - 82"), P("Sprinttav +55%, osszterheles +18%"), P("Kovetkezo edzesen load kontroll, regeneracios monitor.")],
-        [P("Varga L."), P("W"), P("Magas - 79"), P("High effort es lassitas kiugras"), P("Excentrikus terheles csokkentese, frissesseg ellenorzes.")],
-        [P("Kiss R."), P("GK"), P("Kozepes - 61"), P("Alacsony heti load"), P("Poziciohoz illesztett kiegeszito blokk.")],
-        [P("Farkas Z."), P("DM"), P("Kozepes - 58"), P("Ket hete csokkeno sprintprofil"), P("Rovid, kontrollalt max sebessegu inger.")],
-    ]
-    rt = Table(risk_data, colWidths=[3.6*cm, 2.1*cm, 3.1*cm, 9.0*cm, 9.3*cm])
-    rt.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#7f1d1d")), ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#cbd5e1")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#fff7ed")), ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6), ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
-    story.append(rt)
-    story.append(Spacer(1, 8))
+    story.append(PageBreak())
 
-    story.append(P("Automatikus megallapitasok es javaslatok", h2))
-    insights = [
-        ("Heti terhelesi kiugras", "FIGYELMEZTETES", "A heti edzes terhelesi ponterteke 27%-kal nott az elozo hez kepest.", "A hirtelen terhelesemelkedes ronthatja a frissesseget.", "A kovetkezo edzes terheleset jatekosonkent kontrollalni kell."),
-        ("Alacsony sprintinger", "FIGYELMEZTETES", "Az edzes sprintprofilja a meccsigény kb. 72%-a.", "A maximalis sebessegu inger visszafogott lehet.", "Rovid, de kontrollalt sprintblokk javasolt, ha a mikrocilus engedi."),
-        ("Megfelelo tapering jel", "INFORMACIO", "Az MD-1 terheles jelentosen alacsonyabb volt a fo terhelesi napnal.", "Ez tamogathatja a meccsnapi frissesseget.", "A struktura megtarthato, ha a meccsteljesitmeny visszaigazolja."),
-    ]
-    ins_data = [[P("Megallapitas", header), P("Sulyossag", header), P("Mit latunk?", header), P("Miert fontos?", header), P("Javaslat", header)]]
-    for row in insights:
-        ins_data.append([P(row[0]), P(row[1]), P(row[2]), P(row[3]), P(row[4])])
-    it = Table(ins_data, colWidths=[5.0*cm, 3.2*cm, 7.0*cm, 6.1*cm, 5.8*cm])
-    it.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#334155")), ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#cbd5e1")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,1), (-1,-1), colors.white), ("LEFTPADDING", (0,0), (-1,-1), 5), ("RIGHTPADDING", (0,0), (-1,-1), 5), ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
-    story.append(it)
-    story.append(Spacer(1, 8))
+    # PAGE 2 - Coaching priorities and player risk
+    story.append(P("Edzői döntéstámogatás", title))
+    story.append(P("Prioritások, játékos risk és gyakorlati javaslatok", subtitle))
+    story.append(Spacer(1, 6))
 
-    story.append(P("Mit kap a klub a teljes Pro riportban?", h2))
-    story.append(P("Vezetoi osszefoglalo, readiness score, mikrociklus-ertekeles, jatekos risk tabla, edzoi teendok, hosszabb tavu trendek, Excel/Word/PDF export es performance memory. Ez a dokumentum mintaadatokkal keszult, valos jatekosadatot nem tartalmaz.", body))
+    story.append(KeepTogether([
+        section("Top 6 edzői teendő"),
+        Spacer(1, 4),
+        styled_table([
+            [P("Prioritás", header), P("Teendő", header), P("Miért fontos?", header), P("Mikor?", header)],
+            [P("1. Sprintterhelés kontroll"), P("Nagy D. és Varga L. kapjon kontrollált nagysebességű ingert, de ne újabb volumennövelő blokkot."), P("Mindkét játékosnál magasabb sprinttáv és terhelési löket látható."), P("Következő edzés")],
+            [P("2. MD-2 frissesség"), P("A mérkőzés előtti 48 órában csökkenteni kell a teljes loadot és a lassítási terhelést."), P("A túl magas MD-2 terhelés ronthatja a meccsnapi frissességet."), P("Meccs előtt 2 nap")],
+            [P("3. Alacsony terhelésű játékosok"), P("Kiss R. és Farkas Z. részére kiegészítő egyéni munka vagy fokozatos visszaterhelés."), P("Két hete csapatátlag alatti load, lemaradó inger alakulhat ki."), P("Következő 2 edzés")],
+            [P("4. High effort monitoring"), P("A nagy intenzitású erőfeszítéseket játékosonként kell figyelni, nem csak csapatszinten."), P("A csapatátlag elfedhet egyéni neuromuszkuláris kockázatot."), P("Minden edzés után")],
+            [P("5. Posztcsoport összevetés"), P("Szélsők és középpályások sprint/HSR arányát külön értékelni."), P("A játékmodell más fizikai profilt vár el posztonként."), P("Heti review")],
+            [P("6. Frissességi kérdőív"), P("A két magas risk játékosnál rövid szubjektív frissességi check-in."), P("A GPS nem mutatja önmagában a belső terhelésérzetet."), P("Edzés előtt")],
+        ], [4.7*cm, 10.0*cm, 9.2*cm, 3.3*cm], header_color="#14532d", body_bg="#f0fdf4")
+    ]))
+    story.append(Spacer(1, 7))
+
+    story.append(KeepTogether([
+        section("Játékos risk tábla - vezetői gyorsnézet"),
+        Spacer(1, 4),
+        styled_table([
+            [P("Játékos", header), P("Poszt", header), P("Risk", header), P("Fő eltérés", header), P("Ajánlott lépés", header)],
+            [P("Nagy D."), P("CM"), P("Magas - 82"), P("Sprinttáv +55%, összterhelés +18%"), P("Load kontroll, regenerációs monitor, következő edzésen limitált extra munka.")],
+            [P("Varga L."), P("W"), P("Magas - 79"), P("High effort és lassítás kiugrás"), P("Excentrikus terhelés csökkentése, frissesség ellenőrzés.")],
+            [P("Farkas Z."), P("DM"), P("Közepes - 63"), P("Max sebesség trend csökkenő"), P("Rövid, kontrollált max sebességű inger.")],
+            [P("Kiss R."), P("GK"), P("Közepes - 61"), P("Alacsony heti load"), P("Pozícióspecifikus kiegészítő blokk.")],
+            [P("Tóth B."), P("CB"), P("Alacsony - 38"), P("Stabil terhelés, nincs kiugrás"), P("Normál terhelés folytatható.")],
+            [P("Mészáros P."), P("ST"), P("Alacsony - 34"), P("Jó sprint kitettség, kontrollált load"), P("Jelenlegi struktúra megtartható.")],
+        ], [3.4*cm, 2.0*cm, 2.8*cm, 8.2*cm, 10.8*cm], header_color="#7f1d1d", body_bg="#fff7ed")
+    ]))
+
+    story.append(PageBreak())
+
+    # PAGE 3 - Microcycle and model fit
+    story.append(P("Mikrociklus és játékmodell illeszkedés", title))
+    story.append(P("A riport nem csak adatot mutat, hanem edzői döntésre fordítja le a GPS-profilt.", subtitle))
+    story.append(Spacer(1, 6))
+
+    story.append(KeepTogether([
+        section("Mikrociklus szerkezet - MD logika"),
+        Spacer(1, 4),
+        styled_table([
+            [P("Nap", header), P("Load index", header), P("Sprint", header), P("HSR", header), P("Értelmezés", header)],
+            [P("MD-4"), P("Magas"), P("Közepes"), P("Magas"), P("Fő terhelési nap, megfelelő helyen a mikrociklusban.")],
+            [P("MD-3"), P("Közepes"), P("Magas"), P("Közepes"), P("Jó nap maximális sebességű ingerre.")],
+            [P("MD-2"), P("Közepesen magas"), P("Alacsony"), P("Közepes"), P("Kicsit magas a meccshez közel, frissességi kockázat.")],
+            [P("MD-1"), P("Alacsony"), P("Minimális"), P("Alacsony"), P("Pozitív tapering jel, aktivációs napként megfelelő.")],
+            [P("MD"), P("Meccs"), P("Referencia"), P("Referencia"), P("A hét értékelése ehhez viszonyítva történik.")],
+        ], [3.0*cm, 3.2*cm, 3.2*cm, 3.2*cm, 14.6*cm], header_color="#1e3a8a", body_bg="#eff6ff")
+    ]))
+    story.append(Spacer(1, 7))
+
+    story.append(KeepTogether([
+        section("Játékmodell illeszkedés - Pressing profil"),
+        Spacer(1, 4),
+        styled_table([
+            [P("Komponens", header), P("Cél", header), P("Aktuális hét", header), P("Értékelés", header)],
+            [P("Táv/perc"), P("Meccsprofil 90%+"), P("88%"), P("Közel jó, de még figyelendő.")],
+            [P("High effort"), P("Meccsprofil 75%+"), P("69%"), P("Pressing modellhez kissé kevés ismételt intenzív akció.")],
+            [P("Sprintprofil"), P("Meccsprofil 80%+"), P("72%"), P("Transition/pressing elemekhez célzott sprintinger kell.")],
+            [P("Lassítási terhelés"), P("Kontrollált, ne kiugró"), P("+31%"), P("Regenerációs és excentrikus terhelési kockázat.")],
+        ], [5.5*cm, 6.2*cm, 5.0*cm, 10.5*cm], header_color="#312e81", body_bg="#f5f3ff")
+    ]))
+    story.append(Spacer(1, 7))
+
+    story.append(KeepTogether([
+        section("Vizuális gyorsjelentés - mit látna a vezető az appban?"),
+        Spacer(1, 4),
+        Table([
+            [kpi_card("PRESSING FIT", "71%", "játékmodell illeszkedés", "#312e81"),
+             kpi_card("MAX SPEED EXP.", "64%", "sebességkitettség", "#1e3a8a"),
+             kpi_card("TAPERING", "84%", "meccs előtti frissesség", "#14532d"),
+             kpi_card("PLAYER RISK", "2 high", "egyéni kontroll szükséges", "#7f1d1d"),
+             kpi_card("COACHING", "6 task", "automatikus teendő", "#0f172a")]
+        ], colWidths=[5.35*cm]*5)
+    ]))
+
+    story.append(PageBreak())
+
+    # PAGE 4 - What Pro gives
+    story.append(P("Mit kap a klub a Pro verzióban?", title))
+    story.append(P("A minta riport célja, hogy megmutassa: a rendszer nem táblázatot ad, hanem döntéstámogató vezetői anyagot.", subtitle))
+    story.append(Spacer(1, 7))
+
+    story.append(KeepTogether([
+        section("Pro riport tartalom"),
+        Spacer(1, 4),
+        styled_table([
+            [P("Modul", header), P("Mit ad?", header), P("Kinek hasznos?", header)],
+            [P("Vezetői riport"), P("30 másodperces vezetői összefoglaló, readiness, top risk, top teendő."), P("sportigazgató, vezetőedző")],
+            [P("Mikrociklus intelligencia"), P("MD-4/MD-3/MD-2/MD-1 logika, tapering, sprintinger, frissességi jelzések."), P("vezetőedző, erőnléti edző")],
+            [P("Játékos risk motor"), P("Egyéni terhelési eltérések, high effort, sprint, lassítás, load kiugrás."), P("erőnléti edző, rehabilitáció")],
+            [P("Játékmodell illeszkedés"), P("Pressing, transition, possession vagy low block fizikai profil összevetése."), P("szakmai stáb")],
+            [P("Export központ"), P("PDF, Word, Excel riportok vezetői és szakmai felhasználásra."), P("klubvezetés, stáb")],
+            [P("Performance memory"), P("Több hét/szezon trendjei, periodizációs mintázatok, hosszú távú terhelésprofil."), P("klubszintű monitoring")],
+        ], [5.1*cm, 14.5*cm, 7.6*cm], header_color="#0f172a", body_bg="#f8fafc")
+    ]))
+    story.append(Spacer(1, 7))
+
+    story.append(KeepTogether([
+        section("Demo vs Pro"),
+        Spacer(1, 4),
+        styled_table([
+            [P("Funkció", header), P("Demo", header), P("Pro", header)],
+            [P("Saját adat feltöltése"), P("Igen, korlátozott: max 8 játékos / 3 hét / 5000 sor"), P("Korlátlan")],
+            [P("Vezetői riport"), P("Igen, preview"), P("Teljes")],
+            [P("PDF / Word / Excel export"), P("Minta PDF és vízjeles előnézet"), P("Teljes export")],
+            [P("Performance memory"), P("Nem"), P("Igen")],
+            [P("Több szezon"), P("Nem"), P("Igen")],
+            [P("Saját benchmark"), P("Nem"), P("Igen")],
+        ], [9.0*cm, 9.0*cm, 9.0*cm], header_color="#14532d", body_bg="#f0fdf4")
+    ]))
+
     doc.build(story)
     output.seek(0)
     return output.read()
 
 
+
 # -----------------------------------------------------------------------------
-# V4 - Productized Demo / Pro layer
+# V4.3 - Productized Demo / Pro layer - unique Streamlit export keys
 # -----------------------------------------------------------------------------
 DEMO_PLAYER_LIMIT = 8
 DEMO_WEEK_LIMIT = 3
@@ -2256,8 +2407,8 @@ def build_demo_performance_data() -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Football Performance Intelligence – V4.1")
-st.caption("Demo/Pro verzió · Vezetői riport első helyen · saját adat korlátozott demóval · minta PDF riport · executive export")
+st.title("⚽ Football Performance Intelligence – V4.3")
+st.caption("Demo/Pro verzió · Vezetői riport első helyen · saját adat korlátozott demóval · látványos minta PDF riport · stabil export gombok")
 
 
 sample_pdf_bytes = build_marketing_sample_pdf_bytes()
@@ -2267,7 +2418,7 @@ with st.container():
         <div class="export-panel">
             <h3 style="margin-top:0;">📄 Teljes minta riport letöltése</h3>
             <p style="color:rgba(226,232,240,.82);">
-                Kamu játékosnevekkel és minta GPS-adatokkal készült teljes vezetői PDF.
+                Kamu játékosnevekkel és minta GPS-adatokkal készült látványos, többoldalas vezetői PDF.
                 Ezt meg tudod mutatni érdeklődő klubnak akkor is, ha még nem töltött fel saját adatot.
             </p>
         </div>
@@ -2276,11 +2427,13 @@ with st.container():
     )
     if sample_pdf_bytes is not None:
         st.download_button(
-            "⬇️ Teljes minta PDF riport letöltése",
+            "⬇️ Látványos teljes minta PDF riport letöltése",
             data=sample_pdf_bytes,
-            file_name="performance_intelligence_minta_riport.pdf",
+            file_name="performance_intelligence_laatvanyos_minta_riport.pdf",
             mime="application/pdf",
             use_container_width=True,
+        
+            key="download_button_unique_1",
         )
     else:
         st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
@@ -2495,7 +2648,9 @@ with tab_exec:
                 selected_playstyle,
             )
             if premium_pdf is not None:
-                st.download_button("⬇️ Vezetői PDF", data=premium_pdf, file_name=f"executive_performance_riport_{safe_week_main}.pdf", mime="application/pdf", use_container_width=True)
+                st.download_button("⬇️ Vezetői PDF", data=premium_pdf, file_name=f"executive_performance_riport_{safe_week_main}.pdf", mime="application/pdf", use_container_width=True,
+            key="download_button_unique_2",
+        )
         else:
             pro_locked_box("Vezetői PDF export")
 
@@ -2507,7 +2662,9 @@ with tab_exec:
                 file_name=f"executive_performance_riport_{safe_week_main}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
-            )
+            
+            key="download_button_unique_3",
+        )
         else:
             pro_locked_box("Vezetői Excel export")
 
@@ -2515,7 +2672,9 @@ with tab_exec:
         if is_pro_mode():
             word_bytes = build_executive_word_bytes(executive_df_main, priorities_df_main, insight_export_df_main, risk_export_df_main, selected_week)
             if word_bytes is not None:
-                st.download_button("⬇️ Vezetői Word", data=word_bytes, file_name=f"executive_performance_riport_{safe_week_main}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
+                st.download_button("⬇️ Vezetői Word", data=word_bytes, file_name=f"executive_performance_riport_{safe_week_main}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True,
+            key="download_button_unique_4",
+        )
         else:
             pro_locked_box("Vezetői Word export")
 
@@ -2526,6 +2685,8 @@ with tab_exec:
             file_name=f"demo_insight_preview_{safe_week_main}.csv",
             mime="text/csv",
             use_container_width=True,
+        
+            key="download_button_unique_5",
         )
 
 
@@ -2722,7 +2883,9 @@ with tab_export:
                 file_name=f"executive_performance_riport_{safe_week}.pdf",
                 mime="application/pdf",
                 use_container_width=True,
-            )
+            
+            key="download_button_unique_6",
+        )
 
     with e2:
         st.download_button(
@@ -2737,6 +2900,8 @@ with tab_export:
             file_name=f"executive_performance_riport_{safe_week}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
+        
+            key="download_button_unique_7",
         )
 
     with e3:
@@ -2754,7 +2919,9 @@ with tab_export:
                 file_name=f"executive_performance_riport_{safe_week}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True,
-            )
+            
+            key="download_button_unique_8",
+        )
         else:
             st.info("Word exporthoz szükséges: python-docx")
 
@@ -2766,6 +2933,8 @@ with tab_export:
             file_name=f"executive_insightok_{safe_week}.csv",
             mime="text/csv",
             use_container_width=True,
+        
+            key="download_button_unique_9",
         )
 
 
@@ -2911,7 +3080,9 @@ with tab_risk:
         fig = px.bar(player_risk_df.head(20), x="Játékos", y="Kockázati pontszám", color="Kockázati szint", title="Játékos risk score")
         fig.update_layout(xaxis_title="Játékos", yaxis_title="Kockázati pontszám", xaxis_tickangle=-45, template="plotly_dark")
         st.plotly_chart(fig, use_container_width=True)
-        st.download_button("⬇️ Játékos risk export CSV", data=player_risk_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"player_risk_{_safe_filename_week(selected_week)}.csv", mime="text/csv", use_container_width=True)
+        st.download_button("⬇️ Játékos risk export CSV", data=player_risk_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"player_risk_{_safe_filename_week(selected_week)}.csv", mime="text/csv", use_container_width=True,
+            key="download_button_unique_10",
+        )
 
 with tab2:
     st.subheader("Megállapítások és javaslatok")
@@ -2956,6 +3127,8 @@ with tab2:
             file_name=f"performance_riport_{safe_week}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
+        
+            key="download_button_unique_11",
         )
     with c2:
         csv_bytes = insight_export_df.to_csv(index=False).encode("utf-8-sig")
@@ -2965,6 +3138,8 @@ with tab2:
             file_name=f"performance_riport_{safe_week}.csv",
             mime="text/csv",
             use_container_width=True,
+        
+            key="download_button_unique_12",
         )
     with c3:
         word_bytes = insights_to_word_bytes(insight_export_df, selected_week)
@@ -2975,7 +3150,9 @@ with tab2:
                 file_name=f"performance_riport_{safe_week}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True,
-            )
+            
+            key="download_button_unique_13",
+        )
         else:
             st.info("Word exporthoz add hozzá a requirements.txt fájlhoz: python-docx")
     with c4:
@@ -2987,13 +3164,17 @@ with tab2:
                 file_name=f"performance_riport_{safe_week}.pdf",
                 mime="application/pdf",
                 use_container_width=True,
-            )
+            
+            key="download_button_unique_14",
+        )
         else:
             st.info("PDF exporthoz add hozzá a requirements.txt fájlhoz: reportlab")
     st.markdown("#### Vezetői V3 PDF export")
     premium_pdf = build_premium_pdf_bytes(insight_export_df, selected_week, readiness_score, periodization_type, weekly_summary_text, coaching_priorities, player_risk_df, selected_playstyle)
     if premium_pdf is not None:
-        st.download_button("⬇️ Vezetői V3 PDF riport", data=premium_pdf, file_name=f"premium_performance_riport_{safe_week}.pdf", mime="application/pdf", use_container_width=True)
+        st.download_button("⬇️ Vezetői V3 PDF riport", data=premium_pdf, file_name=f"premium_performance_riport_{safe_week}.pdf", mime="application/pdf", use_container_width=True,
+            key="download_button_unique_15",
+        )
 
 with tab3:
     st.subheader("Játékosmonitoring")
