@@ -41,7 +41,7 @@ except Exception:
 # Oldalbeállítás
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Football Performance Intelligence V3.2",
+    page_title="Football Performance Intelligence V4 – Demo/Pro",
     page_icon="⚽",
     layout="wide",
 )
@@ -2012,36 +2012,204 @@ def build_plain_language_explanation() -> pd.DataFrame:
     ])
 
 
+
+# -----------------------------------------------------------------------------
+# V4 - Productized Demo / Pro layer
+# -----------------------------------------------------------------------------
+DEMO_PLAYER_LIMIT = 8
+DEMO_WEEK_LIMIT = 3
+DEMO_ROW_LIMIT = 5000
+PRO_UNLOCK_CODE = "PERFORMANCE-PRO-DEMO"
+
+
+def is_pro_mode() -> bool:
+    return bool(st.session_state.get("pro_unlocked", False))
+
+
+def is_demo_mode() -> bool:
+    return not is_pro_mode()
+
+
+def render_mode_badge() -> None:
+    if is_pro_mode():
+        st.sidebar.success("🔵 PRO mód aktív")
+    else:
+        st.sidebar.warning("🟢 DEMO mód aktív")
+        st.sidebar.caption(f"Demo limit: max {DEMO_PLAYER_LIMIT} játékos · max {DEMO_WEEK_LIMIT} hét · max {DEMO_ROW_LIMIT} sor")
+
+
+def pro_locked_box(feature: str) -> None:
+    st.markdown(
+        f"""
+        <div class="export-panel">
+            <h3 style="margin-top:0;">🔒 {html.escape(feature)}</h3>
+            <p style="color:rgba(226,232,240,.82);">
+                Ez a funkció a Pro verzió része. A demo célja, hogy saját adaton is lásd az értéket,
+                de a teljes riport/export és hosszabb trendek Pro módban érhetők el.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_demo_limits(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    """Demo verzióban saját feltöltés limitálása: 8 játékos, 3 hét, 5000 sor."""
+    info = {"limited": False, "original_rows": len(df), "original_players": 0, "original_weeks": 0}
+    if df.empty or is_pro_mode():
+        return df, info
+
+    out = df.copy()
+    players = sorted(out["player_name"].dropna().astype(str).unique().tolist()) if "player_name" in out.columns else []
+    weeks = sorted(out["week"].dropna().astype(str).unique().tolist()) if "week" in out.columns else []
+    info["original_players"] = len(players)
+    info["original_weeks"] = len(weeks)
+
+    keep_players = players[:DEMO_PLAYER_LIMIT]
+    keep_weeks = weeks[-DEMO_WEEK_LIMIT:]
+    if keep_players and "player_name" in out.columns:
+        out = out[out["player_name"].isin(keep_players)]
+    if keep_weeks and "week" in out.columns:
+        out = out[out["week"].isin(keep_weeks)]
+    if len(out) > DEMO_ROW_LIMIT:
+        out = out.head(DEMO_ROW_LIMIT)
+
+    info.update({
+        "limited": len(out) != len(df) or len(players) > DEMO_PLAYER_LIMIT or len(weeks) > DEMO_WEEK_LIMIT,
+        "visible_rows": len(out),
+        "visible_players": out["player_name"].nunique() if "player_name" in out.columns else 0,
+        "visible_weeks": out["week"].nunique() if "week" in out.columns else 0,
+    })
+    return out, info
+
+
+def render_demo_limit_notice(info: Dict[str, object]) -> None:
+    if not info or not info.get("limited"):
+        return
+    st.warning(
+        "Demo limit aktív: "
+        f"játékosok {info.get('original_players', 0)} → {info.get('visible_players', 0)}, "
+        f"hetek {info.get('original_weeks', 0)} → {info.get('visible_weeks', 0)}, "
+        f"sorok {info.get('original_rows', 0)} → {info.get('visible_rows', 0)}. "
+        "A teljes keret Pro módban érhető el."
+    )
+
+
+@st.cache_data(show_spinner=False)
+def build_demo_performance_data() -> pd.DataFrame:
+    """Beépített mintaadat: 8 játékos, 3 hét, edzések + meccsek.
+    Direkt olyan mintákkal, amelyekből működő readiness, mikrociklus és risk riport készül.
+    """
+    rng = np.random.default_rng(42)
+    players = ["Kovács M.", "Nagy D.", "Szabó B.", "Tóth Á.", "Varga L.", "Farkas Z.", "Balogh P.", "Kiss R."]
+    positions = ["CB", "FB", "CM", "AM", "W", "F", "DM", "GK"]
+    start = pd.Timestamp("2026-05-18")
+    rows = []
+    for w in range(3):
+        week_start = start + pd.Timedelta(days=7*w)
+        # MD-4, MD-3, MD-2, MD-1, MD sessions
+        sessions = [
+            (week_start + pd.Timedelta(days=1), "Edzés", "MD-4 nagyobb terhelés", 1.08),
+            (week_start + pd.Timedelta(days=2), "Edzés", "MD-3 intenzív játék", 1.00),
+            (week_start + pd.Timedelta(days=3), "Edzés", "MD-2 taktikai", 0.78 + 0.10*w),
+            (week_start + pd.Timedelta(days=4), "Edzés", "MD-1 aktiváció", 0.46 + 0.08*w),
+            (week_start + pd.Timedelta(days=5), "Meccs", "Bajnoki mérkőzés", 1.28),
+        ]
+        for date, typ, sess, factor in sessions:
+            for idx, (player, pos) in enumerate(zip(players, positions)):
+                role_factor = 1.0 + (idx % 4) * 0.04
+                noise = rng.normal(1.0, 0.08)
+                base_dist = 5600 if typ == "Edzés" else 9200
+                total_distance = max(1200, base_dist * factor * role_factor * noise)
+                duration = 75 if typ == "Edzés" else 95
+                dpm = total_distance / duration
+                sprint_dist = max(20, (180 if typ == "Edzés" else 520) * factor * role_factor * rng.normal(1, .18))
+                # direkt kiugrók: 2 játékos magas risk a 3. héten
+                if w == 2 and player in ["Nagy D.", "Varga L."]:
+                    sprint_dist *= 1.55
+                    total_distance *= 1.18
+                acc_high = max(0, rng.normal(14, 4) * factor)
+                dec_high = max(0, rng.normal(13, 4) * factor)
+                rows.append({
+                    "Játékos neve": player,
+                    "Típus": typ,
+                    "Szakasz neve": sess,
+                    "Poszt": pos,
+                    "Kezdési idő": date + pd.Timedelta(hours=10),
+                    "Időtartam": duration,
+                    "Teljes táv [m]": round(total_distance, 0),
+                    "Táv/perc [m/min]": round(dpm, 1),
+                    "Maximális sebesség [km/h]": round(rng.normal(28.5 if typ == "Meccs" else 27.0, 1.2), 1),
+                    "Sprintek": int(max(1, sprint_dist / 45)),
+                    "Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)": round(sprint_dist * 1.7, 0),
+                    "Táv a sebesség célzónában 5 [m] (25.00- km/h)": round(sprint_dist, 0),
+                    "Edzési terhelési pontérték": round(total_distance / 80 + sprint_dist / 5 + acc_high * 2 + dec_high * 2, 0),
+                    "Kardióterhelés": round(total_distance / 100, 0),
+                    "Regenerálódási idő [h]": round(18 + factor * 8 + rng.normal(0, 2), 1),
+                    "Izomterhelés": round(45 + factor * 15 + rng.normal(0, 4), 1),
+                    "Átlagos pulzus [bpm]": round(136 + factor * 12 + rng.normal(0, 5), 0),
+                    "Maximális pulzus [bpm]": round(178 + factor * 6 + rng.normal(0, 4), 0),
+                    "HRV (RMSSD)": round(55 - factor * 8 + rng.normal(0, 5), 1),
+                    "Gyorsulások száma (2.50 - 2.99 m/s²)": round(acc_high * 1.6, 0),
+                    "Gyorsulások száma (3.00 - 50.00 m/s²)": round(acc_high, 0),
+                    "Gyorsulások száma (-2.99 - -2.50 m/s²)": round(dec_high * 1.5, 0),
+                    "Gyorsulások száma (-50.00 - -3.00 m/s²)": round(dec_high, 0),
+                })
+    return pd.DataFrame(rows)
+
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Football Performance Intelligence – V3.2")
-st.caption("Magyar vezetői demo → edzői nyelvű insightok → executive export center")
+st.title("⚽ Football Performance Intelligence – V4")
+st.caption("Demo/Pro verzió · Vezetői riport első helyen · saját adat korlátozott demóval · executive export")
 
 with st.sidebar:
-    st.header("1) Adatfeltöltés")
-    uploaded = st.file_uploader("Tölts fel Excel fájlt", type=["xlsx", "xls"])
+    st.header("0) Belépés / licenc")
+    user_email = st.text_input("Email (demo regisztráció)", value=st.session_state.get("user_email", ""), placeholder="név@klub.hu")
+    if user_email:
+        st.session_state["user_email"] = user_email
+    pro_code = st.text_input("Pro feloldó kód", type="password", help="Teszt kód: PERFORMANCE-PRO-DEMO")
+    if st.button("Pro mód feloldása", use_container_width=True):
+        if pro_code.strip() == PRO_UNLOCK_CODE:
+            st.session_state["pro_unlocked"] = True
+            st.success("Pro mód feloldva.")
+            st.rerun()
+        else:
+            st.error("Hibás Pro kód.")
+    render_mode_badge()
     st.divider()
-    st.markdown("**MVP fókusz:** edzői döntéstámogatás, nem sérülésdiagnosztika.")
 
-if uploaded is None:
-    st.info("Tölts fel egy GPS/terhelési Excel fájlt a kezdéshez.")
+    st.header("1) Adatfeltöltés")
+    use_demo_data = st.toggle("Minta riport mintaadatokkal", value=st.session_state.get("use_demo_data", uploaded is None if 'uploaded' in globals() else True))
+    uploaded = st.file_uploader("Saját GPS/terhelési Excel feltöltése", type=["xlsx", "xls"])
+    st.caption("Demo módban saját adat is feltölthető, de limitált: 8 játékos / 3 hét / 5000 sor.")
+    st.divider()
+    st.markdown("**Fókusz:** vezetői riport, readiness, risk, edzői teendők.")
+
+if uploaded is None and not use_demo_data:
+    st.info("Tölts fel GPS/terhelési Excel fájlt, vagy kapcsold be a minta riportot.")
     st.stop()
 
-sheets = read_excel_all(uploaded)
-sheet_names = list(sheets.keys())
+if use_demo_data and uploaded is None:
+    raw_df = build_demo_performance_data()
+    selected_sheet = "Mintaadatok"
+else:
+    sheets = read_excel_all(uploaded)
+    sheet_names = list(sheets.keys())
+    with st.sidebar:
+        selected_sheet = st.selectbox("Melyik munkalapot használjuk?", sheet_names, index=0)
+    raw_df = sheets[selected_sheet]
 
-with st.sidebar:
-    selected_sheet = st.selectbox("Melyik munkalapot használjuk?", sheet_names, index=0)
-
-raw_df = sheets[selected_sheet]
 df, mapping, missing_core = standardize_dataframe(raw_df)
 df = add_position_group(df)
+df, demo_limit_info = apply_demo_limits(df)
 
 if missing_core:
     st.error(f"Hiányzó alapmezők: {', '.join(missing_core)}")
     st.write("Oszlopmapping:", mapping)
     st.stop()
+
+render_demo_limit_notice(demo_limit_info if 'demo_limit_info' in globals() else {})
 
 weeks = sorted(df["week"].dropna().unique().tolist())
 players = sorted(df["player_name"].dropna().unique().tolist())
@@ -2056,8 +2224,13 @@ with st.sidebar:
     selected_players = st.multiselect("Játékosok", players, default=players)
 
     st.header("3) Performance memória")
-    use_memory = st.checkbox("Korábbi mentett adatok bevonása", value=False)
-    save_current_to_memory = st.button("Aktuális feltöltés mentése memoryba", use_container_width=True)
+    if is_pro_mode():
+        use_memory = st.checkbox("Korábbi mentett adatok bevonása", value=False)
+        save_current_to_memory = st.button("Aktuális feltöltés mentése memoryba", use_container_width=True)
+    else:
+        use_memory = False
+        save_current_to_memory = False
+        st.caption("🔒 Performance memória Pro funkció.")
 
 filtered = df[
     (df["week"] == selected_week)
@@ -2094,7 +2267,8 @@ high_risk_count = int((player_risk_df["Kockázati szint"] == "Magas").sum()) if 
 medium_risk_count = int((player_risk_df["Kockázati szint"] == "Közepes").sum()) if not player_risk_df.empty else 0
 
 # Tabok
-tab_intro, tab1, tab_premium, tab_export, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.tabs([
+tab_exec, tab_intro, tab1, tab_premium, tab_export, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.tabs([
+    "⭐ Vezetői riport",
     "Mi ez a rendszer?",
     "Vezetői áttekintő",
     "Vezetői cockpit",
@@ -2107,6 +2281,127 @@ tab_intro, tab1, tab_premium, tab_export, tab_intel, tab_micro, tab_risk, tab2, 
     "Adatminőség",
     "Nyers adatok",
 ])
+
+
+
+with tab_exec:
+    st.markdown(
+        """
+        <div class="hero-box">
+            <div class="hero-title">⭐ Vezetői riport</div>
+            <div class="hero-sub">
+                Egyetlen oldal vezetőedzőnek / sportigazgatónak: meccskészültség, fő kockázatok,
+                top edzői teendők és exportálható vezetői csomag.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    mode_col1, mode_col2, mode_col3 = st.columns([1, 1, 2])
+    with mode_col1:
+        st.metric("Mód", "PRO" if is_pro_mode() else "DEMO")
+    with mode_col2:
+        st.metric("Hét", selected_week)
+    with mode_col3:
+        if not is_pro_mode():
+            st.warning("Demo módban a saját adatok limitáltak, és az exportok vízjeles/korlátozott terméklogikához vannak előkészítve.")
+        else:
+            st.success("Pro mód: teljes csapat, teljes időszak, export és memória elérhető.")
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1:
+        st.metric("Meccskészültség", f"{readiness_score}/100", score_to_label(readiness_score))
+    with k2:
+        st.metric("Magas risk", high_risk_count)
+    with k3:
+        st.metric("Közepes risk", medium_risk_count)
+    with k4:
+        st.metric("Insight", len(all_insights))
+    with k5:
+        mem_weeks = analysis_base_df["week"].nunique() if "week" in analysis_base_df.columns else 0
+        st.metric("Elemzett hetek", mem_weeks)
+
+    st.markdown("### Heti vezetői összefoglaló")
+    st.info(weekly_summary_text)
+
+    left, right = st.columns([1.05, 1])
+    with left:
+        st.markdown("### Top 3 edzői teendő")
+        render_coaching_priorities(coaching_priorities)
+
+    with right:
+        st.markdown("### Játékos risk gyorsnézet")
+        if player_risk_df is not None and not player_risk_df.empty:
+            show_cols = [c for c in ["Játékos", "Kockázati szint", "Risk score", "Fő ok"] if c in player_risk_df.columns]
+            if show_cols:
+                st.dataframe(player_risk_df[show_cols].head(8), use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(player_risk_df.head(8), use_container_width=True, hide_index=True)
+        else:
+            st.info("Nincs player risk adat.")
+
+    st.markdown("### Vezetői export")
+    executive_df_main = build_executive_summary_df(
+        selected_week,
+        selected_playstyle,
+        readiness_score,
+        periodization_type,
+        weekly_summary_text,
+        high_risk_count,
+        medium_risk_count,
+    )
+    insight_export_df_main = build_insight_export_df(all_insights)
+    priorities_df_main = pd.DataFrame(coaching_priorities)
+    risk_export_df_main = player_risk_df if "player_risk_df" in globals() else pd.DataFrame()
+    safe_week_main = _safe_filename_week(selected_week)
+    e1, e2, e3, e4 = st.columns(4)
+
+    with e1:
+        if is_pro_mode():
+            premium_pdf = build_premium_pdf_bytes(
+                insight_export_df_main,
+                selected_week,
+                readiness_score,
+                periodization_type,
+                weekly_summary_text,
+                coaching_priorities,
+                risk_export_df_main,
+                selected_playstyle,
+            )
+            if premium_pdf is not None:
+                st.download_button("⬇️ Vezetői PDF", data=premium_pdf, file_name=f"executive_performance_riport_{safe_week_main}.pdf", mime="application/pdf", use_container_width=True)
+        else:
+            pro_locked_box("Vezetői PDF export")
+
+    with e2:
+        if is_pro_mode():
+            st.download_button(
+                "⬇️ Vezetői Excel",
+                data=build_executive_excel_bytes(executive_df_main, insight_export_df_main, priorities_df_main, risk_export_df_main, weekly_fingerprints),
+                file_name=f"executive_performance_riport_{safe_week_main}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        else:
+            pro_locked_box("Vezetői Excel export")
+
+    with e3:
+        if is_pro_mode():
+            word_bytes = build_executive_word_bytes(executive_df_main, priorities_df_main, insight_export_df_main, risk_export_df_main, selected_week)
+            if word_bytes is not None:
+                st.download_button("⬇️ Vezetői Word", data=word_bytes, file_name=f"executive_performance_riport_{safe_week_main}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
+        else:
+            pro_locked_box("Vezetői Word export")
+
+    with e4:
+        st.download_button(
+            "⬇️ Demo CSV preview",
+            data=insight_export_df_main.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"demo_insight_preview_{safe_week_main}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
 
 with tab_intro:
@@ -2274,6 +2569,8 @@ with tab_export:
     render_wrapped_table(insight_export_df_export)
 
     st.markdown("### Export gombok")
+    if not is_pro_mode():
+        st.warning("Demo módban a teljes vezetői PDF/Word/Excel export Pro funkció. A főoldalon demo CSV preview elérhető.")
     safe_week = _safe_filename_week(selected_week)
     e1, e2, e3, e4 = st.columns(4)
 
