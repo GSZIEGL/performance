@@ -2013,13 +2013,109 @@ def build_plain_language_explanation() -> pd.DataFrame:
 
 
 
+
+# -----------------------------------------------------------------------------
+# Marketing / demo minta PDF riport
+# -----------------------------------------------------------------------------
+def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
+    """Teljes, kamu adatokkal készült minta vezetői riport.
+    Nem függ feltöltött adattól, ezért a kezdőoldalon is letölthető.
+    """
+    if SimpleDocTemplate is None:
+        return None
+
+    font_name, font_bold = _register_pdf_font()
+    output = io.BytesIO()
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=landscape(A4),
+        rightMargin=.9*cm,
+        leftMargin=.9*cm,
+        topMargin=.8*cm,
+        bottomMargin=.8*cm,
+    )
+
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("SampleTitle", parent=styles["Title"], fontName=font_bold, fontSize=21, leading=25, textColor=colors.HexColor("#0f172a"), spaceAfter=10)
+    h2 = ParagraphStyle("SampleH2", parent=styles["Heading2"], fontName=font_bold, fontSize=13, leading=16, textColor=colors.HexColor("#1e3a8a"), spaceBefore=8, spaceAfter=6)
+    body = ParagraphStyle("SampleBody", parent=styles["BodyText"], fontName=font_name, fontSize=8.8, leading=11, textColor=colors.HexColor("#111827"))
+    small = ParagraphStyle("SampleSmall", parent=styles["BodyText"], fontName=font_name, fontSize=7.6, leading=9.5, textColor=colors.HexColor("#475569"))
+    header = ParagraphStyle("SampleHeader", parent=styles["BodyText"], fontName=font_bold, fontSize=8.5, leading=10.5, textColor=colors.white)
+
+    def P(text, style=body):
+        return Paragraph(html.escape(pdf_safe_text(text)).replace("\n", "<br/>"), style)
+
+    story = []
+    story.append(P("Football Performance Intelligence - teljes minta vezetoi riport", title))
+    story.append(P("Minta klub: Demo FC U19 | Het: 2026-W22 | Jatekmodell: Pressing | Adatok: kamu GPS/terhelesi mintaadatok", small))
+    story.append(Spacer(1, 8))
+
+    exec_data = [
+        [P("Meccskeszultseg", header), P("Periodizacios tipus", header), P("Vezetoi uzenet", header)],
+        [
+            P("78/100 - elfogadhato, figyelendo"),
+            P("Intenzitasfokuszu het"),
+            P("A csapat terhelesi profilja alapvetoen stabil, de ket jatekosnal emelkedett risk es sprintterheles-loket lathato. A kovetkezo edzesen a frissesseg megtartasa es az egyeni terheleskontroll a fo prioritas."),
+        ],
+    ]
+    t = Table(exec_data, colWidths=[5.0*cm, 5.5*cm, 16.6*cm])
+    t.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1e3a8a")), ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#cbd5e1")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#eff6ff")), ("LEFTPADDING", (0,0), (-1,-1), 7), ("RIGHTPADDING", (0,0), (-1,-1), 7), ("TOPPADDING", (0,0), (-1,-1), 7), ("BOTTOMPADDING", (0,0), (-1,-1), 7)]))
+    story.append(t)
+    story.append(Spacer(1, 8))
+
+    story.append(P("Top 3 edzoi teendo", h2))
+    prio_data = [
+        [P("Prioritas", header), P("Teendo", header), P("Miert fontos?", header)],
+        [P("1. Sprintterheles kontroll"), P("Nagy D. es Varga L. kovetkezo edzesen kapjon kontrollalt nagysebessegu ingert, de ne ujabb volumennovelo blokkot."), P("Mindket jatekosnal magasabb sprinttav es terhelesi loket lathato az elozo hetekhez kepest.")],
+        [P("2. MD-2 frissesseg"), P("A merkozes elotti 48 oraban csokkenteni kell a teljes loadot es a neuromuszkularis terhelest."), P("Az MD-2 nap terhelese kozel volt a het fo terhelesi napjahoz.")],
+        [P("3. Alacsony terhelesu jatekosok"), P("Kiss R. es Farkas Z. reszere kiegeszito egyeni munka vagy fokozatos visszaterheles javasolt."), P("A csapatatlaghoz kepest alacsony load ket het ota fennall.")],
+    ]
+    pt = Table(prio_data, colWidths=[4.1*cm, 11.5*cm, 11.5*cm])
+    pt.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")), ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#cbd5e1")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#f8fafc")), ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6), ("TOPPADDING", (0,0), (-1,-1), 6), ("BOTTOMPADDING", (0,0), (-1,-1), 6)]))
+    story.append(pt)
+    story.append(Spacer(1, 8))
+
+    story.append(P("Jatekos risk gyorsnezeti tabla", h2))
+    risk_data = [
+        [P("Jatekos", header), P("Poszt", header), P("Risk", header), P("Fo ok", header), P("Javaslat", header)],
+        [P("Nagy D."), P("CM"), P("Magas - 82"), P("Sprinttav +55%, osszterheles +18%"), P("Kovetkezo edzesen load kontroll, regeneracios monitor.")],
+        [P("Varga L."), P("W"), P("Magas - 79"), P("High effort es lassitas kiugras"), P("Excentrikus terheles csokkentese, frissesseg ellenorzes.")],
+        [P("Kiss R."), P("GK"), P("Kozepes - 61"), P("Alacsony heti load"), P("Poziciohoz illesztett kiegeszito blokk.")],
+        [P("Farkas Z."), P("DM"), P("Kozepes - 58"), P("Ket hete csokkeno sprintprofil"), P("Rovid, kontrollalt max sebessegu inger.")],
+    ]
+    rt = Table(risk_data, colWidths=[3.6*cm, 2.1*cm, 3.1*cm, 9.0*cm, 9.3*cm])
+    rt.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#7f1d1d")), ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#cbd5e1")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#fff7ed")), ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6), ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
+    story.append(rt)
+    story.append(Spacer(1, 8))
+
+    story.append(P("Automatikus megallapitasok es javaslatok", h2))
+    insights = [
+        ("Heti terhelesi kiugras", "FIGYELMEZTETES", "A heti edzes terhelesi ponterteke 27%-kal nott az elozo hez kepest.", "A hirtelen terhelesemelkedes ronthatja a frissesseget.", "A kovetkezo edzes terheleset jatekosonkent kontrollalni kell."),
+        ("Alacsony sprintinger", "FIGYELMEZTETES", "Az edzes sprintprofilja a meccsigény kb. 72%-a.", "A maximalis sebessegu inger visszafogott lehet.", "Rovid, de kontrollalt sprintblokk javasolt, ha a mikrocilus engedi."),
+        ("Megfelelo tapering jel", "INFORMACIO", "Az MD-1 terheles jelentosen alacsonyabb volt a fo terhelesi napnal.", "Ez tamogathatja a meccsnapi frissesseget.", "A struktura megtarthato, ha a meccsteljesitmeny visszaigazolja."),
+    ]
+    ins_data = [[P("Megallapitas", header), P("Sulyossag", header), P("Mit latunk?", header), P("Miert fontos?", header), P("Javaslat", header)]]
+    for row in insights:
+        ins_data.append([P(row[0]), P(row[1]), P(row[2]), P(row[3]), P(row[4])])
+    it = Table(ins_data, colWidths=[5.0*cm, 3.2*cm, 7.0*cm, 6.1*cm, 5.8*cm])
+    it.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#334155")), ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#cbd5e1")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("BACKGROUND", (0,1), (-1,-1), colors.white), ("LEFTPADDING", (0,0), (-1,-1), 5), ("RIGHTPADDING", (0,0), (-1,-1), 5), ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
+    story.append(it)
+    story.append(Spacer(1, 8))
+
+    story.append(P("Mit kap a klub a teljes Pro riportban?", h2))
+    story.append(P("Vezetoi osszefoglalo, readiness score, mikrociklus-ertekeles, jatekos risk tabla, edzoi teendok, hosszabb tavu trendek, Excel/Word/PDF export es performance memory. Ez a dokumentum mintaadatokkal keszult, valos jatekosadatot nem tartalmaz.", body))
+    doc.build(story)
+    output.seek(0)
+    return output.read()
+
+
 # -----------------------------------------------------------------------------
 # V4 - Productized Demo / Pro layer
 # -----------------------------------------------------------------------------
 DEMO_PLAYER_LIMIT = 8
 DEMO_WEEK_LIMIT = 3
 DEMO_ROW_LIMIT = 5000
-PRO_UNLOCK_CODE = "PERFORMANCE-PRO-DEMO"
+PRO_UNLOCK_CODE = "PS-PRO-2026"
 
 
 def is_pro_mode() -> bool:
@@ -2160,15 +2256,44 @@ def build_demo_performance_data() -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Football Performance Intelligence – V4")
-st.caption("Demo/Pro verzió · Vezetői riport első helyen · saját adat korlátozott demóval · executive export")
+st.title("⚽ Football Performance Intelligence – V4.1")
+st.caption("Demo/Pro verzió · Vezetői riport első helyen · saját adat korlátozott demóval · minta PDF riport · executive export")
+
+
+sample_pdf_bytes = build_marketing_sample_pdf_bytes()
+with st.container():
+    st.markdown(
+        """
+        <div class="export-panel">
+            <h3 style="margin-top:0;">📄 Teljes minta riport letöltése</h3>
+            <p style="color:rgba(226,232,240,.82);">
+                Kamu játékosnevekkel és minta GPS-adatokkal készült teljes vezetői PDF.
+                Ezt meg tudod mutatni érdeklődő klubnak akkor is, ha még nem töltött fel saját adatot.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if sample_pdf_bytes is not None:
+        st.download_button(
+            "⬇️ Teljes minta PDF riport letöltése",
+            data=sample_pdf_bytes,
+            file_name="performance_intelligence_minta_riport.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    else:
+        st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
+st.info("Pro tesztkód: PS-PRO-2026")
+
 
 with st.sidebar:
     st.header("0) Belépés / licenc")
+    st.caption("Működő Pro tesztkód: PS-PRO-2026")
     user_email = st.text_input("Email (demo regisztráció)", value=st.session_state.get("user_email", ""), placeholder="név@klub.hu")
     if user_email:
         st.session_state["user_email"] = user_email
-    pro_code = st.text_input("Pro feloldó kód", type="password", help="Teszt kód: PERFORMANCE-PRO-DEMO")
+    pro_code = st.text_input("Pro feloldó kód", type="password", help="Teszt Pro kód: PS-PRO-2026")
     if st.button("Pro mód feloldása", use_container_width=True):
         if pro_code.strip() == PRO_UNLOCK_CODE:
             st.session_state["pro_unlocked"] = True
