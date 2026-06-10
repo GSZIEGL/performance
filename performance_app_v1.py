@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import html
 import io
+import json
 import re
 from pathlib import Path
 from datetime import datetime
@@ -189,28 +190,28 @@ st.markdown(
 # Oszlopmapping
 # -----------------------------------------------------------------------------
 STANDARD_COLUMNS = {
-    "player_name": ["Játékos neve", "Player", "Player Name", "Name", "Név"],
-    "session_type": ["Típus", "Type", "Session Type", "Edzés/Meccs"],
-    "session_name": ["Szakasz neve", "Session", "Session Name"],
-    "position": ["Poszt", "Position", "Player Position", "Role"],
-    "start_time": ["Kezdési idő", "Start Time", "Start", "Dátum", "Date"],
-    "end_time": ["Befejezési idő", "End Time", "End"],
-    "duration": ["Időtartam", "Duration", "Time"],
-    "total_distance": ["Teljes táv [m]", "Tel\xadjes táv [m]", "Total Distance", "Distance", "Össztáv"],
-    "distance_per_min": ["Táv/perc [m/min]", "Distance/min", "Distance Per Min", "m/min"],
-    "max_speed": ["Maximális sebesség [km/h]", "Max Speed", "Maximum Speed"],
-    "avg_speed": ["Átlagsebesség [km/h]", "Average Speed", "Avg Speed"],
-    "sprints": ["Sprintek", "Sprints", "Sprint Count"],
+    "player_name": ["Játékos neve", "Player", "Player Name", "Name", "Név", "Játékos", "Athlete", "Athlete Name", "Player full name", "Full Name"],
+    "session_type": ["Típus", "Type", "Session Type", "Edzés/Meccs", "SessionType", "Activity Type", "Drill Type", "Event Type", "Training/Match"],
+    "session_name": ["Szakasz neve", "Session", "Session Name", "Activity", "Drill", "Exercise", "Event", "Session title"],
+    "position": ["Poszt", "Position", "Player Position", "Role", "Playing Position", "Post", "Pos"],
+    "start_time": ["Kezdési idő", "Start Time", "Start", "Dátum", "Date", "Session Date", "Day", "Datum", "Kezdés", "Start date", "StartTime"],
+    "end_time": ["Befejezési idő", "End Time", "End", "Finish", "Befejezés", "EndTime"],
+    "duration": ["Időtartam", "Duration", "Time", "Minutes", "Idő", "Időtartam [perc]", "Duration [min]", "Duration min"],
+    "total_distance": ["Teljes táv [m]", "Tel\xadjes táv [m]", "Total Distance", "Distance", "Össztáv", "Total distance (m)", "Total Dist", "Dist Total", "Distance [m]", "TD", "Total Distance m"],
+    "distance_per_min": ["Táv/perc [m/min]", "Distance/min", "Distance Per Min", "m/min", "Distance per minute", "m per min", "m/minute", "Rel Distance"],
+    "max_speed": ["Maximális sebesség [km/h]", "Max Speed", "Maximum Speed", "Top Speed", "Peak Speed", "Max Velocity", "Vmax"],
+    "avg_speed": ["Átlagsebesség [km/h]", "Average Speed", "Avg Speed", "Mean Speed"],
+    "sprints": ["Sprintek", "Sprints", "Sprint Count", "Number of Sprints", "Sprint #", "Sprint efforts"],
     "speed_zone_3": ["Táv a sebesség célzónában 3 [m] (14.40 - 19.79 km/h)"],
     "speed_zone_4": ["Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)"],
     "speed_zone_5": ["Táv a sebesség célzónában 5 [m] (25.00- km/h)"],
-    "training_load": ["Edzési terhelési pontérték", "Terhelési pont", "Player Load", "Load"],
+    "training_load": ["Edzési terhelési pontérték", "Terhelési pont", "Player Load", "Load", "Training Load", "Total Load", "Workload", "Load Score"],
     "cardio_load": ["Kardióterhelés", "Cardio Load"],
     "recovery_hours": ["Regenerálódási idő [h]", "Recovery Time", "Recovery"],
-    "muscle_load": ["Izomterhelés", "Muscle Load"],
-    "hr_avg": ["Átlagos pulzus [bpm]", "Average HR", "Avg HR"],
-    "hr_max": ["Maximális pulzus [bpm]", "Max HR", "Maximum HR"],
-    "hrv": ["HRV (RMSSD)", "HRV", "RMSSD"],
+    "muscle_load": ["Izomterhelés", "Muscle Load", "Muscular Load", "Mechanical Load"],
+    "hr_avg": ["Átlagos pulzus [bpm]", "Average HR", "Avg HR", "Mean HR", "HR avg", "Avg Heart Rate"],
+    "hr_max": ["Maximális pulzus [bpm]", "Max HR", "Maximum HR", "Peak HR", "Max Heart Rate"],
+    "hrv": ["HRV (RMSSD)", "HRV", "RMSSD", "HRV RMSSD"],
     "acc_low": ["Gyorsulások száma (2.00 - 2.49 m/s²)"],
     "acc_mid": ["Gyorsulások száma (2.50 - 2.99 m/s²)"],
     "acc_high": ["Gyorsulások száma (3.00 - 50.00 m/s²)"],
@@ -2407,8 +2408,8 @@ def build_demo_performance_data() -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Football Performance Intelligence – V4.3")
-st.caption("Demo/Pro verzió · Vezetői riport első helyen · saját adat korlátozott demóval · látványos minta PDF riport · stabil export gombok")
+st.title("⚽ Football Performance Intelligence – V4.4")
+st.caption("Demo/Pro verzió · Smart Excel Mapper · saját adat korlátozott demóval · látványos minta PDF riport · stabil export gombok")
 
 
 sample_pdf_bytes = build_marketing_sample_pdf_bytes()
@@ -2479,6 +2480,7 @@ else:
     raw_df = sheets[selected_sheet]
 
 df, mapping, missing_core = standardize_dataframe(raw_df)
+st.session_state['last_raw_df'] = raw_df
 df = add_position_group(df)
 df, demo_limit_info = apply_demo_limits(df)
 
@@ -3241,3 +3243,68 @@ with tab5:
 
 st.divider()
 st.caption("V3.2 HU – Edzőbarát magyar insight nyelv + magyarázó fogalomtár + vezetői export központ.")
+
+# -----------------------------------------------------------------------------
+# V4.4 Smart Excel Mapper UI
+# -----------------------------------------------------------------------------
+with st.expander("🧩 Smart Excel Mapper / oszlopmapping ellenőrzése", expanded=False):
+    st.write("Ha más klub más szerkezetű Excel-exportot tölt fel, itt ellenőrizhető és javítható, hogy melyik forrásoszlop melyik standard mezőre menjen.")
+    raw_df_for_mapper = locals().get("raw_df", st.session_state.get("last_raw_df", pd.DataFrame()))
+    if isinstance(raw_df_for_mapper, pd.DataFrame) and not raw_df_for_mapper.empty:
+        raw_df = raw_df_for_mapper
+        current_mapping = st.session_state.get("manual_mapping", None)
+        if current_mapping is None:
+            current_mapping = suggest_mapping(raw_df)
+            st.session_state["manual_mapping"] = current_mapping
+
+        profile_upload = st.file_uploader("Korábban mentett mapping profil betöltése (.json)", type=["json"], key="mapping_profile_upload")
+        if profile_upload is not None:
+            loaded_mapping = load_mapping_profile(profile_upload)
+            if loaded_mapping:
+                st.session_state["manual_mapping"] = loaded_mapping
+                current_mapping = loaded_mapping
+                st.success("Mapping profil betöltve.")
+
+        st.dataframe(mapping_quality_df(raw_df, current_mapping), use_container_width=True)
+
+        st.markdown("#### Kézi javítás")
+        source_options = [""] + list(raw_df.columns)
+        cols = st.columns(2)
+        editable_mapping = dict(current_mapping)
+        important_fields = CORE_REQUIRED + [
+            "position", "duration", "total_distance", "distance_per_min", "max_speed",
+            "sprints", "speed_zone_4", "speed_zone_5", "training_load", "acc_high", "dec_high"
+        ]
+        for idx, std_col in enumerate(important_fields):
+            with cols[idx % 2]:
+                current_val = editable_mapping.get(std_col) or ""
+                default_idx = source_options.index(current_val) if current_val in source_options else 0
+                editable_mapping[std_col] = st.selectbox(
+                    f"{std_col} → forrásoszlop",
+                    source_options,
+                    index=default_idx,
+                    key=f"mapper_select_{std_col}",
+                ) or None
+
+        c_apply, c_export = st.columns(2)
+        with c_apply:
+            if st.button("✅ Mapping alkalmazása erre a fájlra", use_container_width=True, key="apply_manual_mapping"):
+                mapped_df, applied_mapping, missing = apply_mapping_to_raw(raw_df, editable_mapping)
+                if missing:
+                    st.error(f"Hiányzó kötelező mezők: {', '.join(missing)}")
+                else:
+                    st.session_state["manual_mapping"] = applied_mapping
+                    st.session_state["mapped_df_override"] = mapped_df
+                    st.success(f"Mapping alkalmazva. Feldolgozott sorok: {len(mapped_df)}")
+                    st.rerun()
+        with c_export:
+            st.download_button(
+                "⬇️ Mapping profil mentése",
+                data=export_mapping_profile(editable_mapping),
+                file_name="gps_mapping_profile.json",
+                mime="application/json",
+                use_container_width=True,
+                key="download_mapping_profile",
+            )
+    else:
+        st.info("Mapping ellenőrzéshez előbb tölts fel egy Excel/CSV fájlt.")
