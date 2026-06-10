@@ -244,6 +244,107 @@ PLAYSTYLE_OPTIONS = {
 }
 
 
+
+# -----------------------------------------------------------------------------
+# V4.5 - Smart Mapper fallback helpers
+# -----------------------------------------------------------------------------
+def _norm_mapping_text(text: object) -> str:
+    import unicodedata
+    text = str(text or "").lower().replace("\u00ad", " ")
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+def smart_column_score(source_col: object, std_col: str, aliases: List[str]) -> int:
+    src = _norm_mapping_text(source_col)
+    if not src:
+        return 0
+    alias_norms = [_norm_mapping_text(a) for a in aliases] + [_norm_mapping_text(std_col)]
+    best = 0
+    for a in alias_norms:
+        if not a:
+            continue
+        if src == a:
+            best = max(best, 100)
+        elif src.replace(" ", "") == a.replace(" ", ""):
+            best = max(best, 96)
+        elif a in src or src in a:
+            best = max(best, 86 if len(a) >= 4 else 70)
+        else:
+            src_tokens = set(src.split())
+            a_tokens = set(a.split())
+            if src_tokens and a_tokens:
+                overlap = len(src_tokens & a_tokens) / max(1, len(a_tokens))
+                best = max(best, int(overlap * 78))
+    hints = {
+        "player_name": ["player", "jatekos", "nev", "name", "athlete"],
+        "session_type": ["type", "tipus", "match", "game", "training", "edzes", "meccs"],
+        "start_time": ["date", "datum", "start", "day", "ido"],
+        "duration": ["duration", "minutes", "perc", "time"],
+        "total_distance": ["distance", "tav", "dist", "total"],
+        "distance_per_min": ["min", "minute", "rel", "per"],
+        "max_speed": ["max", "speed", "velocity", "vmax"],
+        "sprints": ["sprint"],
+        "training_load": ["load", "terheles", "workload"],
+        "speed_zone_4": ["zone 4", "z4", "19", "24", "hsr"],
+        "speed_zone_5": ["zone 5", "z5", "25", "sprint distance"],
+        "acc_high": ["acc", "acceleration", "gyorsulas", "3"],
+        "dec_high": ["dec", "deceleration", "lassitas", "-3"],
+        "high_efforts": ["high effort", "effort"],
+    }
+    if std_col in hints:
+        hit = sum(1 for h in hints[std_col] if h in src)
+        if hit:
+            best = max(best, min(94, 58 + hit * 14))
+    return int(best)
+
+def suggest_mapping(raw_df: pd.DataFrame) -> Dict[str, Optional[str]]:
+    suggestions: Dict[str, Optional[str]] = {}
+    used = set()
+    for std_col, aliases in STANDARD_COLUMNS.items():
+        scored = []
+        for c in raw_df.columns:
+            if c in used:
+                continue
+            scored.append((smart_column_score(c, std_col, aliases), c))
+        scored.sort(reverse=True, key=lambda x: x[0])
+        if scored and scored[0][0] >= 58:
+            suggestions[std_col] = scored[0][1]
+            used.add(scored[0][1])
+        else:
+            suggestions[std_col] = None
+    return suggestions
+
+def mapping_quality_df(raw_df: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> pd.DataFrame:
+    rows = []
+    for std_col, aliases in STANDARD_COLUMNS.items():
+        src = mapping.get(std_col)
+        score = smart_column_score(src, std_col, aliases) if src else 0
+        rows.append({
+            "Standard mező": std_col,
+            "Felismert forrásoszlop": src or "",
+            "Bizonyosság": score,
+            "Kötelező": "igen" if std_col in CORE_REQUIRED else "nem",
+            "Magyar név": METRIC_LABELS.get(std_col, std_col),
+        })
+    return pd.DataFrame(rows)
+
+def export_mapping_profile(mapping: Dict[str, Optional[str]], profile_name: str = "GPS mapping profil") -> bytes:
+    payload = {
+        "profile_name": profile_name,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "mapping": mapping,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+
+def load_mapping_profile(uploaded_file) -> Dict[str, Optional[str]]:
+    try:
+        payload = json.loads(uploaded_file.read().decode("utf-8"))
+        return payload.get("mapping", {})
+    except Exception:
+        return {}
+
 @dataclass
 class Insight:
     title: str
@@ -388,6 +489,58 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
     out = out[~out["player_name"].str.lower().str.contains("benchmark|átlag|atlag|összesen|osszesen", na=False)]
 
     return out, mapping, []
+
+def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> Tuple[pd.DataFrame, Dict[str, Optional[str]], List[str]]:
+    df = raw.copy()
+    df.columns = [clean_col_name(c) for c in df.columns]
+    out = pd.DataFrame()
+    fixed_mapping: Dict[str, Optional[str]] = {}
+    for std_col in STANDARD_COLUMNS:
+        source = mapping.get(std_col)
+        source = clean_col_name(source) if source else None
+        fixed_mapping[std_col] = source
+        if source and source in df.columns:
+            out[std_col] = df[source]
+    missing_core = [c for c in CORE_REQUIRED if c not in out.columns]
+    if missing_core:
+        return out, fixed_mapping, missing_core
+
+    out["player_name"] = out["player_name"].astype(str).str.strip()
+    out["session_type"] = out["session_type"].apply(normalize_session_type)
+    out["start_time"] = pd.to_datetime(out["start_time"], errors="coerce")
+    out["session_date"] = out["start_time"].dt.date
+    out["week"] = out["start_time"].dt.to_period("W").astype(str)
+    if "duration" in out.columns:
+        out["duration_min"] = out["duration"].apply(duration_to_minutes)
+    else:
+        out["duration_min"] = np.nan
+
+    numeric_cols = [
+        "total_distance", "distance_per_min", "max_speed", "avg_speed", "sprints",
+        "speed_zone_3", "speed_zone_4", "speed_zone_5", "training_load", "cardio_load",
+        "recovery_hours", "muscle_load", "hr_avg", "hr_max", "hrv", "acc_low", "acc_mid",
+        "acc_high", "dec_low", "dec_mid", "dec_high",
+    ]
+    for col in numeric_cols:
+        if col in out.columns:
+            out[col] = to_numeric(out[col])
+    for col in ["speed_zone_3", "speed_zone_4", "speed_zone_5", "acc_low", "acc_mid", "acc_high", "dec_low", "dec_mid", "dec_high"]:
+        if col not in out.columns:
+            out[col] = 0
+
+    out["hsr_distance"] = out[["speed_zone_4", "speed_zone_5"]].sum(axis=1, min_count=1)
+    out["sprint_distance"] = out["speed_zone_5"]
+    out["acc_count"] = out[["acc_low", "acc_mid", "acc_high"]].sum(axis=1, min_count=1)
+    out["dec_count"] = out[["dec_low", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
+    out["high_efforts"] = out[["acc_mid", "acc_high", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
+    if "distance_per_min" not in out.columns or out["distance_per_min"].isna().all():
+        if "total_distance" in out.columns:
+            out["distance_per_min"] = out["total_distance"] / out["duration_min"]
+    out = out.dropna(subset=["start_time"])
+    out = out[out["player_name"].str.len() > 0]
+    out = out[~out["player_name"].str.lower().str.contains("benchmark|átlag|atlag|összesen|osszesen", na=False)]
+    return out, fixed_mapping, []
+
 
 
 def aggregate_weekly(df: pd.DataFrame) -> pd.DataFrame:
@@ -2267,6 +2420,16 @@ def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
 DEMO_PLAYER_LIMIT = 8
 DEMO_WEEK_LIMIT = 3
 DEMO_ROW_LIMIT = 5000
+
+# -----------------------------------------------------------------------------
+# V4.5 - Emailhez kötött aktiváló kód koncepció
+# -----------------------------------------------------------------------------
+# Éles verzióban ezt nem a kódban tároljuk, hanem Supabase táblában:
+# licenses(email, activation_code_hash, plan, is_active, expires_at, max_users, club_name)
+# A felhasználó megadja: email + aktiváló kód.
+# Az app lekéri / ellenőrzi a hash-t, és ha aktív, Pro módot ad.
+# Mostani MVP-ben marad az egyszerű tesztkód: PS-PRO-2026.
+
 PRO_UNLOCK_CODE = "PS-PRO-2026"
 
 
@@ -2408,8 +2571,8 @@ def build_demo_performance_data() -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Football Performance Intelligence – V4.4")
-st.caption("Demo/Pro verzió · Smart Excel Mapper · saját adat korlátozott demóval · látványos minta PDF riport · stabil export gombok")
+st.title("⚽ Football Performance Intelligence – V4.5")
+st.caption("Demo/Pro verzió · Smart Excel Mapper + License · saját adat korlátozott demóval · látványos minta PDF riport · stabil export gombok")
 
 
 sample_pdf_bytes = build_marketing_sample_pdf_bytes()
@@ -3245,16 +3408,16 @@ st.divider()
 st.caption("V3.2 HU – Edzőbarát magyar insight nyelv + magyarázó fogalomtár + vezetői export központ.")
 
 # -----------------------------------------------------------------------------
-# V4.4 Smart Excel Mapper UI
+# V4.4 Smart Excel Mapper + License UI
 # -----------------------------------------------------------------------------
-with st.expander("🧩 Smart Excel Mapper / oszlopmapping ellenőrzése", expanded=False):
+with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzése", expanded=False):
     st.write("Ha más klub más szerkezetű Excel-exportot tölt fel, itt ellenőrizhető és javítható, hogy melyik forrásoszlop melyik standard mezőre menjen.")
     raw_df_for_mapper = locals().get("raw_df", st.session_state.get("last_raw_df", pd.DataFrame()))
     if isinstance(raw_df_for_mapper, pd.DataFrame) and not raw_df_for_mapper.empty:
         raw_df = raw_df_for_mapper
         current_mapping = st.session_state.get("manual_mapping", None)
         if current_mapping is None:
-            current_mapping = suggest_mapping(raw_df)
+            current_mapping = suggest_mapping(raw_df) if 'suggest_mapping' in globals() else {}
             st.session_state["manual_mapping"] = current_mapping
 
         profile_upload = st.file_uploader("Korábban mentett mapping profil betöltése (.json)", type=["json"], key="mapping_profile_upload")
@@ -3265,7 +3428,7 @@ with st.expander("🧩 Smart Excel Mapper / oszlopmapping ellenőrzése", expand
                 current_mapping = loaded_mapping
                 st.success("Mapping profil betöltve.")
 
-        st.dataframe(mapping_quality_df(raw_df, current_mapping), use_container_width=True)
+        st.dataframe(mapping_quality_df(raw_df, current_mapping) if 'mapping_quality_df' in globals() else pd.DataFrame(), use_container_width=True)
 
         st.markdown("#### Kézi javítás")
         source_options = [""] + list(raw_df.columns)
