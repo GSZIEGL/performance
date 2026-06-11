@@ -2911,7 +2911,7 @@ session_types = sorted(df["session_type"].dropna().unique().tolist())
 
 with st.sidebar:
     st.header("Szűrők")
-    selected_week = st.selectbox("Hét", weeks, index=len(weeks, format_func=week_label_short) - 1 if weeks else 0, format_func=format_week_label)
+    selected_week = st.selectbox("Hét", weeks, index=len(weeks) - 1 if weeks else 0, format_func=week_label_short)
     selected_playstyle = st.selectbox("Játékmodell", list(PLAYSTYLE_OPTIONS.keys()), index=0)
     st.caption(PLAYSTYLE_OPTIONS[selected_playstyle])
     selected_types = st.multiselect("Típus", session_types, default=session_types)
