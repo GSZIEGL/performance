@@ -618,62 +618,31 @@ st.markdown(
  }
 
 
- /* ===== FPI final summary + expander readability ===== */
- .fpi-readable-summary {
-   background: linear-gradient(135deg, #ffffff, #eef6ff) !important;
-   color: #0f172a !important;
-   border: 1px solid #bfdbfe !important;
-   border-radius: 22px !important;
-   padding: 18px 20px !important;
-   box-shadow: 0 18px 44px rgba(15,23,42,.22) !important;
-   line-height: 1.55 !important;
-   font-size: 1rem !important;
-   margin: 12px 0 18px 0 !important;
- }
- .fpi-readable-summary,
- .fpi-readable-summary *,
- .fpi-readable-summary p,
- .fpi-readable-summary div,
- .fpi-readable-summary span,
- .fpi-readable-summary li,
- .fpi-readable-summary b,
- .fpi-readable-summary strong {
+ /* Final direct summary readability override */
+ .fpi-readable-summary, .fpi-readable-summary * {
    color: #0f172a !important;
    opacity: 1 !important;
    text-shadow: none !important;
  }
- .fpi-readable-summary .fpi-summary-title {
-   font-size: 1.22rem !important;
-   font-weight: 950 !important;
-   margin-bottom: 10px !important;
+ div[style*="Heti vezetői összefoglaló"],
+ div[style*="Heti vezetői összefoglaló"] * {
    color: #0f172a !important;
+   opacity: 1 !important;
+   text-shadow: none !important;
  }
- .fpi-readable-summary .fpi-summary-line {
-   margin: 6px 0 !important;
- }
- .fpi-readable-summary .fpi-summary-label {
-   font-weight: 950 !important;
-   color: #1e3a8a !important;
- }
-
+ /* Expander / Smart mapper readable */
  div[data-testid="stExpander"] {
    background: #ffffff !important;
    border: 1px solid #cbd5e1 !important;
    border-radius: 18px !important;
-   box-shadow: 0 12px 28px rgba(15,23,42,.16) !important;
  }
+ div[data-testid="stExpander"],
  div[data-testid="stExpander"] *,
  div[data-testid="stExpander"] p,
  div[data-testid="stExpander"] label,
- div[data-testid="stExpander"] span,
- div[data-testid="stExpander"] div {
+ div[data-testid="stExpander"] span {
    color: #0f172a !important;
    opacity: 1 !important;
- }
- div[data-testid="stExpander"] summary,
- div[data-testid="stExpander"] summary * {
-   color: #0f172a !important;
-   font-weight: 900 !important;
  }
  div[data-testid="stExpander"] input,
  div[data-testid="stExpander"] textarea,
@@ -1530,43 +1499,84 @@ def render_fpi_hero() -> None:
 
 
 
-def clean_literal_newlines(text: object) -> str:
+def clean_literal_newlines_for_display(text: object) -> str:
     raw = str(text or "")
     raw = raw.replace("\\r", "")
     raw = raw.replace("\\n", "\n")
     return raw
 
 
-def render_readable_summary(text: object) -> None:
-    """Heti vezetői összefoglaló olvasható, világos kártyában."""
-    raw = clean_literal_newlines(text)
-    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    html_lines = []
+def render_leader_summary_direct(text: object) -> None:
+    """Fixen olvasható vezetői összefoglaló fehér kártyán, sötét betűkkel."""
+    raw = clean_literal_newlines_for_display(text)
+    lines = [ln.strip().lstrip("-• ").strip() for ln in raw.splitlines() if ln.strip()]
+
+    # Biztonsági javítás: ha a Játékmodell sorban maradtak benne literal \n részek.
+    normalized = []
     for ln in lines:
-        clean = html.escape(ln.lstrip("-• ").strip())
-        if clean.startswith("Hét:"):
-            html_lines.append(f'<div class="fpi-summary-line"><span class="fpi-summary-label">📅 {clean}</span></div>')
-        elif clean.startswith("Legfontosabb üzenet:"):
-            html_lines.append(f'<div class="fpi-summary-title">⚡ {clean}</div>')
-        elif clean.startswith("Mit látunk?"):
-            html_lines.append(f'<div class="fpi-summary-line"><span class="fpi-summary-label">🔎 Mit látunk?</span> {clean.replace("Mit látunk?", "").strip()}</div>')
-        elif clean.startswith("Javaslat:"):
-            html_lines.append(f'<div class="fpi-summary-line"><span class="fpi-summary-label">🎯 Javaslat:</span> {clean.replace("Javaslat:", "").strip()}</div>')
-        elif clean.startswith("Második fontos téma:"):
-            html_lines.append(f'<div class="fpi-summary-line"><span class="fpi-summary-label">➕ Második fontos téma:</span> {clean.replace("Második fontos téma:", "").strip()}</div>')
-        elif clean.startswith("Játékmodell:"):
-            # If readiness/periodization accidentally stuck after this, split visually.
-            clean2 = clean.replace("\\n", "<br>")
-            clean2 = clean2.replace("Meccskészültség:", "<br><span class='fpi-summary-label'>🚀 Meccskészültség:</span>")
-            clean2 = clean2.replace("Periodizációs besorolás:", "<br><span class='fpi-summary-label'>📈 Periodizáció:</span>")
-            html_lines.append(f'<div class="fpi-summary-line"><span class="fpi-summary-label">♟️ Játékmodell:</span> {clean2.replace("Játékmodell:", "").strip()}</div>')
-        elif clean.startswith("Meccskészültség:"):
-            html_lines.append(f'<div class="fpi-summary-line"><span class="fpi-summary-label">🚀 Meccskészültség:</span> {clean.replace("Meccskészültség:", "").strip()}</div>')
-        elif clean.startswith("Periodizációs besorolás:"):
-            html_lines.append(f'<div class="fpi-summary-line"><span class="fpi-summary-label">📈 Periodizáció:</span> {clean.replace("Periodizációs besorolás:", "").strip()}</div>')
+        if "\\n" in ln:
+            normalized.extend([p.strip().lstrip("-• ").strip() for p in ln.replace("\\n", "\n").splitlines() if p.strip()])
         else:
-            html_lines.append(f'<div class="fpi-summary-line">{clean}</div>')
-    st.markdown('<div class="fpi-readable-summary">' + "".join(html_lines) + '</div>', unsafe_allow_html=True)
+            normalized.append(ln)
+    lines = normalized
+
+    html_rows = []
+    for ln in lines:
+        esc = html.escape(ln)
+        if esc.startswith("Hét:"):
+            label, value = "📅 Hét", esc.replace("Hét:", "").strip()
+        elif esc.startswith("Legfontosabb üzenet:"):
+            label, value = "⚡ Legfontosabb üzenet", esc.replace("Legfontosabb üzenet:", "").strip()
+        elif esc.startswith("Mit látunk?"):
+            label, value = "🔎 Mit látunk?", esc.replace("Mit látunk?", "").strip()
+        elif esc.startswith("Javaslat:"):
+            label, value = "🎯 Javaslat", esc.replace("Javaslat:", "").strip()
+        elif esc.startswith("Második fontos téma:"):
+            label, value = "➕ Második fontos téma", esc.replace("Második fontos téma:", "").strip()
+        elif esc.startswith("Játékmodell:"):
+            label, value = "♟️ Játékmodell", esc.replace("Játékmodell:", "").strip()
+        elif esc.startswith("Meccskészültség:"):
+            label, value = "🚀 Meccskészültség", esc.replace("Meccskészültség:", "").strip()
+        elif esc.startswith("Periodizációs besorolás:"):
+            label, value = "📈 Periodizáció", esc.replace("Periodizációs besorolás:", "").strip()
+        else:
+            label, value = "", esc
+
+        if label:
+            html_rows.append(
+                f"""
+                <div style="display:grid;grid-template-columns:230px 1fr;gap:14px;padding:10px 0;border-bottom:1px solid #e2e8f0;">
+                    <div style="color:#1e3a8a!important;font-weight:950!important;">{label}</div>
+                    <div style="color:#0f172a!important;font-weight:800!important;line-height:1.45;">{value}</div>
+                </div>
+                """
+            )
+        else:
+            html_rows.append(
+                f"""
+                <div style="padding:8px 0;color:#0f172a!important;font-weight:800!important;line-height:1.45;">{value}</div>
+                """
+            )
+
+    st.markdown(
+        f"""
+        <div style="
+            background:#ffffff!important;
+            color:#0f172a!important;
+            border:1px solid #bfdbfe;
+            border-radius:22px;
+            padding:20px 22px;
+            margin:12px 0 22px 0;
+            box-shadow:0 18px 44px rgba(15,23,42,.22);
+        ">
+            <div style="font-size:1.25rem;font-weight:950;color:#0f172a!important;margin-bottom:10px;">
+                Heti vezetői összefoglaló
+            </div>
+            {''.join(html_rows)}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 
@@ -3412,7 +3422,7 @@ weekly_summary_text = build_weekly_summary(all_insights, selected_week, selected
 all_insights = humanize_insights(all_insights)
 coaching_priorities = humanize_priority_list(coaching_priorities)
 weekly_summary_text = coach_friendly_phrase(weekly_summary_text)
-weekly_summary_text += f"\\nMeccskészültség: {readiness_score}/100 ({score_to_label(readiness_score)})\\nPeriodizációs besorolás: {periodization_type}"
+weekly_summary_text += f"\\n- Meccskészültség: {readiness_score}/100 ({score_to_label(readiness_score)})\\n- Periodizációs besorolás: {periodization_type}"
 player_risk_df = calculate_player_risk(analysis_base_df, selected_week)
 high_risk_count = int((player_risk_df["Kockázati szint"] == "Magas").sum()) if not player_risk_df.empty else 0
 medium_risk_count = int((player_risk_df["Kockázati szint"] == "Közepes").sum()) if not player_risk_df.empty else 0
@@ -3456,7 +3466,7 @@ with tab_exec:
         st.metric("Hét", format_week_label(selected_week))
     with mode_col3:
         if not is_pro_mode():
-            st.warning("")
+            st.empty()
         else:
             pass
 
