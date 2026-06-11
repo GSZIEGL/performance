@@ -431,6 +431,192 @@ st.markdown(
    border-radius: 14px !important;
  }
 
+
+ /* ===== FPI HARD READABILITY PATCH ===== */
+ :root {
+   --fpi-dark: #020617;
+   --fpi-panel: #0f172a;
+   --fpi-panel-2: #111827;
+   --fpi-white: #f8fafc;
+   --fpi-muted-light: #dbeafe;
+   --fpi-text-dark: #0f172a;
+   --fpi-green: #22c55e;
+   --fpi-blue: #2563eb;
+ }
+
+ /* Main text on dark background */
+ .stApp, .stApp p, .stApp span, .stApp label, .stApp div {
+   text-shadow: none !important;
+ }
+
+ /* Sidebar: everything readable */
+ [data-testid="stSidebar"] {
+   background: linear-gradient(180deg, #020617 0%, #0b1220 100%) !important;
+ }
+ [data-testid="stSidebar"] h1,
+ [data-testid="stSidebar"] h2,
+ [data-testid="stSidebar"] h3,
+ [data-testid="stSidebar"] p,
+ [data-testid="stSidebar"] label,
+ [data-testid="stSidebar"] span,
+ [data-testid="stSidebar"] div {
+   color: #f8fafc !important;
+ }
+
+ /* Sidebar input fields */
+ [data-testid="stSidebar"] input,
+ [data-testid="stSidebar"] textarea,
+ [data-testid="stSidebar"] [data-baseweb="input"],
+ [data-testid="stSidebar"] [data-baseweb="input"] > div {
+   background: #ffffff !important;
+   color: #0f172a !important;
+   border-color: #cbd5e1 !important;
+   border-radius: 12px !important;
+ }
+ [data-testid="stSidebar"] input::placeholder {
+   color: #64748b !important;
+   opacity: 1 !important;
+ }
+
+ /* Sidebar buttons: no white-on-white */
+ [data-testid="stSidebar"] .stButton > button,
+ [data-testid="stSidebar"] button {
+   background: linear-gradient(135deg,#2563eb,#1d4ed8) !important;
+   color: #ffffff !important;
+   border: 1px solid rgba(255,255,255,.25) !important;
+   border-radius: 14px !important;
+   font-weight: 900 !important;
+   min-height: 44px !important;
+ }
+ [data-testid="stSidebar"] .stButton > button *,
+ [data-testid="stSidebar"] button * {
+   color: #ffffff !important;
+   font-weight: 900 !important;
+ }
+ [data-testid="stSidebar"] .stButton > button:hover,
+ [data-testid="stSidebar"] button:hover {
+   background: linear-gradient(135deg,#1d4ed8,#1e40af) !important;
+ }
+
+ /* Alerts in sidebar */
+ [data-testid="stSidebar"] .stAlert {
+   background: #dbeafe !important;
+   border: 1px solid #93c5fd !important;
+   border-radius: 16px !important;
+ }
+ [data-testid="stSidebar"] .stAlert *,
+ [data-testid="stSidebar"] .stAlert p,
+ [data-testid="stSidebar"] .stAlert div {
+   color: #0f172a !important;
+ }
+
+ /* Toggle label */
+ [data-testid="stSidebar"] [data-testid="stWidgetLabel"] * {
+   color: #f8fafc !important;
+ }
+
+ /* Top KPI labels: force light */
+ div[data-testid="stMetric"],
+ div[data-testid="stMetric"] * {
+   color: #f8fafc !important;
+ }
+ div[data-testid="stMetricLabel"],
+ div[data-testid="stMetricLabel"] *,
+ div[data-testid="stMetricDelta"],
+ div[data-testid="stMetricDelta"] * {
+   color: #dbeafe !important;
+   opacity: 1 !important;
+ }
+ div[data-testid="stMetricValue"],
+ div[data-testid="stMetricValue"] * {
+   color: #ffffff !important;
+   opacity: 1 !important;
+ }
+
+ /* Weekly summary / action boxes: force light cards with dark text */
+ .fpi-action-card,
+ .fpi-action-card *,
+ .fpi-summary-card,
+ .fpi-summary-card *,
+ .fpi-summary-item,
+ .fpi-summary-item * {
+   background-color: #f8fafc !important;
+   color: #0f172a !important;
+   opacity: 1 !important;
+   text-shadow: none !important;
+ }
+ .fpi-action-card {
+   background: linear-gradient(135deg,#f8fafc,#e0f2fe) !important;
+   border: 1px solid #93c5fd !important;
+   box-shadow: 0 18px 42px rgba(15,23,42,.24) !important;
+ }
+ .fpi-summary-label {
+   color: #334155 !important;
+ }
+ .fpi-summary-value {
+   color: #0f172a !important;
+ }
+
+ /* Any markdown card that has blue background but dark text */
+ .stMarkdown div[style*="background"],
+ .stMarkdown div[style*="background"] p,
+ .stMarkdown div[style*="background"] span {
+   opacity: 1 !important;
+ }
+
+ /* Tabs readable */
+ button[data-baseweb="tab"],
+ button[data-baseweb="tab"] *,
+ [role="tab"],
+ [role="tab"] * {
+   color: #e2e8f0 !important;
+   opacity: 1 !important;
+   font-weight: 850 !important;
+ }
+ button[data-baseweb="tab"][aria-selected="true"],
+ button[data-baseweb="tab"][aria-selected="true"] *,
+ [role="tab"][aria-selected="true"],
+ [role="tab"][aria-selected="true"] * {
+   color: #ffffff !important;
+   font-weight: 950 !important;
+ }
+ button[data-baseweb="tab"]:hover,
+ button[data-baseweb="tab"]:hover *,
+ [role="tab"]:hover,
+ [role="tab"]:hover * {
+   color: #ffffff !important;
+ }
+
+ /* Download buttons: strong green CTA */
+ .stDownloadButton > button,
+ .stDownloadButton > button * {
+   background: linear-gradient(135deg,#22c55e,#16a34a) !important;
+   color: #ffffff !important;
+   border: none !important;
+   font-weight: 950 !important;
+   opacity: 1 !important;
+ }
+ .stDownloadButton > button {
+   border-radius: 16px !important;
+   min-height: 48px !important;
+   box-shadow: 0 16px 36px rgba(34,197,94,.28) !important;
+ }
+
+ /* Data tables: keep default white readable */
+ [data-testid="stDataFrame"] {
+   background: #ffffff !important;
+   color: #0f172a !important;
+ }
+ [data-testid="stDataFrame"] * {
+   color: #0f172a !important;
+ }
+
+ /* Selectboxes / dropdowns in main */
+ [data-baseweb="select"] div,
+ [data-baseweb="select"] span {
+   color: #0f172a !important;
+ }
+
  </style>
     """,
     unsafe_allow_html=True,
@@ -1243,7 +1429,7 @@ def playstyle_insights(df: pd.DataFrame, selected_week: str, playstyle: str) -> 
 
 def html_linebreaks(text: object) -> str:
     """Streamlit markdown/HTML megjelenítéshez: a literal \\n karaktereket valódi sortöréssé alakítja."""
-    safe = str(text or "").replace("\\n", "\n")
+    safe = str(text or "").replace("\\n", "\n").replace("\\r", "")
     return html.escape(safe).replace("\n", "<br>")
 
 
