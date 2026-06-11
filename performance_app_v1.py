@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import html
 import io
+import hashlib
+import os
 import json
 import re
 from pathlib import Path
@@ -38,11 +40,16 @@ except Exception:
     TTFont = None
 
 
+try:
+    from supabase import create_client
+except Exception:
+    create_client = None
+
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Football Performance Intelligence V4 – Demo/Pro",
+    page_title="Football Performance Intelligence",
     page_icon="⚽",
     layout="wide",
 )
@@ -180,7 +187,32 @@ st.markdown(
         border: 1px solid rgba(148,163,184,.24);
         margin-bottom: 18px;
     }
-    </style>
+   
+ .fpi-clean-card {
+   border-radius: 20px;
+   padding: 18px 20px;
+   background: #ffffff;
+   color: #0f172a;
+   border: 1px solid #e2e8f0;
+   box-shadow: 0 10px 28px rgba(15,23,42,.08);
+   margin-bottom: 14px;
+ }
+ .fpi-dark-card {
+   border-radius: 20px;
+   padding: 18px 20px;
+   background: linear-gradient(135deg,#0f172a,#1e293b);
+   color: #f8fafc;
+   border: 1px solid rgba(148,163,184,.28);
+   box-shadow: 0 14px 36px rgba(15,23,42,.22);
+   margin-bottom: 14px;
+ }
+ .fpi-muted { color:#64748b; }
+ .fpi-dark-card .fpi-muted { color:#cbd5e1; }
+ .export-panel p, .export-panel div, .export-panel h3 { color: #f8fafc; }
+ .feature-box, .intro-card, .score-card, .priority-card, .insight-card { color: #f8fafc; }
+ .feature-text, .mini-muted { color: #dbeafe !important; }
+
+ </style>
     """,
     unsafe_allow_html=True,
 )
@@ -2428,13 +2460,91 @@ DEMO_ROW_LIMIT = 5000
 # licenses(email, activation_code_hash, plan, is_active, expires_at, max_users, club_name)
 # A felhasználó megadja: email + aktiváló kód.
 # Az app lekéri / ellenőrzi a hash-t, és ha aktív, Pro módot ad.
-# Mostani MVP-ben marad az egyszerű tesztkód: PS-PRO-2026.
+# Mostani MVP-ben marad az egyszerű tesztkód: .
 
-PRO_UNLOCK_CODE = "PS-PRO-2026"
+
+# -----------------------------------------------------------------------------
+# Supabase license layer
+# -----------------------------------------------------------------------------
+def get_secret_value(name: str, default: str = "") -> str:
+    try:
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return os.getenv(name, default)
+
+
+def get_supabase_client():
+    url = get_secret_value("SUPABASE_URL")
+    key = get_secret_value("SUPABASE_ANON_KEY")
+    if not url or not key or create_client is None:
+        return None
+    try:
+        return create_client(url, key)
+    except Exception:
+        return None
+
+
+def hash_license_key(raw_key: str) -> str:
+    salt = get_secret_value("LICENSE_SALT", "performance-intelligence")
+    return hashlib.sha256((salt + "::" + str(raw_key).strip()).encode("utf-8")).hexdigest()
+
+
+def validate_license_supabase(email: str, license_key: str) -> Dict[str, object]:
+    email = str(email or "").strip().lower()
+    license_key = str(license_key or "").strip()
+    if not email or not license_key:
+        return {"ok": False, "message": "Add meg az e-mail címet és az aktiváló kódot."}
+
+    fallback = get_secret_value("FALLBACK_PRO_CODE")
+    if fallback and license_key == fallback:
+        return {
+            "ok": True,
+            "email": email,
+            "plan": "pro",
+            "club_name": "Pro klub",
+            "team_name": "Pro csapat",
+            "license_id": "fallback",
+            "message": "Pro hozzáférés aktív.",
+        }
+
+    client = get_supabase_client()
+    if client is None:
+        return {"ok": False, "message": "Supabase kapcsolat nincs beállítva. Demo módban folytatható."}
+
+    try:
+        key_hash = hash_license_key(license_key)
+        resp = client.rpc("validate_license", {
+            "p_email": email,
+            "p_license_hash": key_hash,
+        }).execute()
+        data = resp.data
+        if isinstance(data, list):
+            data = data[0] if data else None
+
+        if not data:
+            return {"ok": False, "message": "Nem található aktív licenc ehhez az e-mailhez és kódhoz."}
+
+        if data.get("ok"):
+            return {
+                "ok": True,
+                "email": data.get("email", email),
+                "plan": data.get("plan", "pro"),
+                "club_name": data.get("club_name", ""),
+                "team_name": data.get("team_name", ""),
+                "license_id": data.get("license_id", ""),
+                "message": "Pro hozzáférés aktív.",
+            }
+
+        return {"ok": False, "message": data.get("message", "A licenc nem aktív vagy lejárt.")}
+    except Exception as exc:
+        return {"ok": False, "message": f"Licencellenőrzési hiba: {exc}"}
 
 
 def is_pro_mode() -> bool:
-    return bool(st.session_state.get("pro_unlocked", False))
+    lic = st.session_state.get("license_status", {})
+    return bool(lic.get("ok"))
 
 
 def is_demo_mode() -> bool:
@@ -2443,10 +2553,42 @@ def is_demo_mode() -> bool:
 
 def render_mode_badge() -> None:
     if is_pro_mode():
-        st.sidebar.success("🔵 PRO mód aktív")
+        lic = st.session_state.get("license_status", {})
+        st.sidebar.success("Pro hozzáférés aktív")
+        club = lic.get("club_name") or lic.get("email")
+        if club:
+            st.sidebar.caption(str(club))
+        if lic.get("team_name"):
+            st.sidebar.caption(f"Csapat: {lic.get('team_name')}")
     else:
-        st.sidebar.warning("🟢 DEMO mód aktív")
+        st.sidebar.info("Demo mód")
         st.sidebar.caption(f"Demo limit: max {DEMO_PLAYER_LIMIT} játékos · max {DEMO_WEEK_LIMIT} hét · max {DEMO_ROW_LIMIT} sor")
+
+
+def render_license_panel() -> None:
+    st.sidebar.markdown("### Belépés")
+    if is_pro_mode():
+        render_mode_badge()
+        if st.sidebar.button("Kijelentkezés", use_container_width=True, key="logout_license"):
+            st.session_state.pop("license_status", None)
+            st.rerun()
+        return
+
+    email = st.sidebar.text_input("E-mail", value=st.session_state.get("user_email", ""), placeholder="nev@klub.hu", key="license_email")
+    if email:
+        st.session_state["user_email"] = email
+
+    license_key = st.sidebar.text_input("Aktiváló kód", type="password", help="A klubhoz kapott aktiváló kód.", key="license_key")
+    if st.sidebar.button("Pro aktiválása", use_container_width=True, key="activate_license"):
+        result = validate_license_supabase(email, license_key)
+        if result.get("ok"):
+            st.session_state["license_status"] = result
+            st.sidebar.success("Pro hozzáférés aktiválva.")
+            st.rerun()
+        else:
+            st.sidebar.warning(result.get("message", "Sikertelen aktiválás."))
+
+    render_mode_badge()
 
 
 def pro_locked_box(feature: str) -> None:
@@ -2571,8 +2713,8 @@ def build_demo_performance_data() -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Football Performance Intelligence – V4.5")
-st.caption("Demo/Pro verzió · Smart Excel Mapper + License · saját adat korlátozott demóval · látványos minta PDF riport · stabil export gombok")
+st.title("⚽ Football Performance Intelligence")
+st.caption("GPS-terhelésből vezetői döntéstámogatás, edzői prioritások és exportálható riportok.")
 
 
 sample_pdf_bytes = build_marketing_sample_pdf_bytes()
@@ -2601,27 +2743,14 @@ with st.container():
         )
     else:
         st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
-st.info("Pro tesztkód: PS-PRO-2026")
+
 
 
 with st.sidebar:
-    st.header("0) Belépés / licenc")
-    st.caption("Működő Pro tesztkód: PS-PRO-2026")
-    user_email = st.text_input("Email (demo regisztráció)", value=st.session_state.get("user_email", ""), placeholder="név@klub.hu")
-    if user_email:
-        st.session_state["user_email"] = user_email
-    pro_code = st.text_input("Pro feloldó kód", type="password", help="Teszt Pro kód: PS-PRO-2026")
-    if st.button("Pro mód feloldása", use_container_width=True):
-        if pro_code.strip() == PRO_UNLOCK_CODE:
-            st.session_state["pro_unlocked"] = True
-            st.success("Pro mód feloldva.")
-            st.rerun()
-        else:
-            st.error("Hibás Pro kód.")
-    render_mode_badge()
+    render_license_panel()
     st.divider()
 
-    st.header("1) Adatfeltöltés")
+    st.header("Adatfeltöltés")
     use_demo_data = st.toggle("Minta riport mintaadatokkal", value=st.session_state.get("use_demo_data", uploaded is None if 'uploaded' in globals() else True))
     uploaded = st.file_uploader("Saját GPS/terhelési Excel feltöltése", type=["xlsx", "xls"])
     st.caption("Demo módban saját adat is feltölthető, de limitált: 8 játékos / 3 hét / 5000 sor.")
@@ -2659,14 +2788,14 @@ players = sorted(df["player_name"].dropna().unique().tolist())
 session_types = sorted(df["session_type"].dropna().unique().tolist())
 
 with st.sidebar:
-    st.header("2) Szűrők")
+    st.header("Szűrők")
     selected_week = st.selectbox("Hét", weeks, index=len(weeks) - 1 if weeks else 0)
     selected_playstyle = st.selectbox("Játékmodell", list(PLAYSTYLE_OPTIONS.keys()), index=0)
     st.caption(PLAYSTYLE_OPTIONS[selected_playstyle])
     selected_types = st.multiselect("Típus", session_types, default=session_types)
     selected_players = st.multiselect("Játékosok", players, default=players)
 
-    st.header("3) Performance memória")
+    st.header("Performance memória")
     if is_pro_mode():
         use_memory = st.checkbox("Korábbi mentett adatok bevonása", value=False)
         save_current_to_memory = st.button("Aktuális feltöltés mentése memoryba", use_container_width=True)
