@@ -212,6 +212,61 @@ st.markdown(
  .feature-box, .intro-card, .score-card, .priority-card, .insight-card { color: #f8fafc; }
  .feature-text, .mini-muted { color: #dbeafe !important; }
 
+
+ /* ===== FPI WOW UI refresh ===== */
+ .stApp {
+   background:
+     radial-gradient(circle at 10% 5%, rgba(34,197,94,.18), transparent 28%),
+     radial-gradient(circle at 90% 0%, rgba(59,130,246,.20), transparent 30%),
+     linear-gradient(135deg, #020617 0%, #0f172a 52%, #111827 100%);
+ }
+ .block-container { padding-top: 1.1rem; padding-bottom: 2rem; }
+ .fpi-hero-wow {
+   border-radius: 30px; padding: 28px 30px; margin: 8px 0 22px 0;
+   background: radial-gradient(circle at top left, rgba(34,197,94,.30), transparent 34%),
+               radial-gradient(circle at bottom right, rgba(59,130,246,.34), transparent 30%),
+               linear-gradient(135deg, rgba(15,23,42,.98), rgba(30,41,59,.86));
+   border: 1px solid rgba(226,232,240,.18);
+   box-shadow: 0 24px 70px rgba(0,0,0,.35);
+   color: #f8fafc;
+ }
+ .fpi-hero-wow h1 { margin: 0; font-size: 2.55rem; line-height: 1; letter-spacing: -0.055em; font-weight: 950; }
+ .fpi-hero-wow p { margin: 10px 0 0 0; color: #cbd5e1; font-size: 1.02rem; line-height: 1.45; }
+ .fpi-chip-row { margin-top: 16px; }
+ .fpi-chip-wow {
+   display: inline-block; padding: 7px 12px; margin: 4px 6px 0 0; border-radius: 999px;
+   background: rgba(15,23,42,.55); border: 1px solid rgba(148,163,184,.28);
+   color: #dbeafe; font-weight: 800; font-size: .86rem;
+ }
+ .fpi-summary-card {
+   border-radius: 24px; padding: 20px 22px; margin: 10px 0 18px 0;
+   background: rgba(248,250,252,.97); color: #0f172a;
+   border: 1px solid rgba(226,232,240,.95); box-shadow: 0 18px 46px rgba(15,23,42,.18);
+ }
+ .fpi-summary-card h3 { margin: 0 0 10px 0; font-size: 1.18rem; font-weight: 950; color: #0f172a; }
+ .fpi-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-top: 12px; }
+ .fpi-summary-item { border-radius: 16px; padding: 12px 13px; background: #f8fafc; border: 1px solid #e2e8f0; }
+ .fpi-summary-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: #64748b; font-weight: 900; margin-bottom: 4px; }
+ .fpi-summary-value { color: #0f172a; font-weight: 800; line-height: 1.35; }
+ .fpi-action-card {
+   border-radius: 20px; padding: 16px 18px; margin: 12px 0;
+   background: linear-gradient(135deg, #ecfdf5, #eff6ff);
+   color: #0f172a; border: 1px solid #bfdbfe; box-shadow: 0 10px 28px rgba(37,99,235,.12);
+ }
+ .fpi-action-card b { color:#0f172a; }
+ .fpi-kpi-panel {
+   border-radius: 22px; padding: 17px 18px;
+   background: linear-gradient(145deg, rgba(255,255,255,.98), rgba(239,246,255,.96));
+   color: #0f172a; border: 1px solid rgba(219,234,254,.95);
+   box-shadow: 0 14px 34px rgba(15,23,42,.14); min-height: 118px;
+ }
+ .fpi-kpi-panel .label { color: #64748b; font-size: .78rem; font-weight: 900; text-transform: uppercase; letter-spacing: .07em; }
+ .fpi-kpi-panel .value { color: #0f172a; font-size: 2.05rem; font-weight: 950; letter-spacing: -.04em; margin-top: 6px; }
+ .fpi-kpi-panel .note { color: #475569; font-size: .86rem; margin-top: 5px; line-height: 1.35; }
+ .fpi-section-title { color: #f8fafc; font-size: 1.35rem; font-weight: 950; margin: 22px 0 10px 0; letter-spacing: -.03em; }
+ .insight-card, .priority-card, .score-card, .intro-card, .feature-box, .export-panel { color: #f8fafc !important; }
+ .feature-text, .mini-muted, .premium-kpi-note, .hero-sub { color: #dbeafe !important; }
+
  </style>
     """,
     unsafe_allow_html=True,
@@ -1021,18 +1076,58 @@ def playstyle_insights(df: pd.DataFrame, selected_week: str, playstyle: str) -> 
     return insights
 
 
+
+def html_linebreaks(text: object) -> str:
+    """Streamlit markdown/HTML megjelenítéshez: a literal \\n karaktereket valódi sortöréssé alakítja."""
+    safe = str(text or "").replace("\\n", "\n")
+    return html.escape(safe).replace("\n", "<br>")
+
+
+def week_label_short(week_value: object) -> str:
+    """Hosszú pandas week labelből rövid, dashboard-barát hét címke."""
+    txt = str(week_value or "")
+    if "/" in txt:
+        try:
+            start = pd.to_datetime(txt.split("/")[0])
+            return f"{start.strftime('%Y')}-W{int(start.isocalendar().week):02d}"
+        except Exception:
+            return txt.split("/")[0]
+    return txt
+
+
+def render_fpi_hero() -> None:
+    st.markdown(
+        """
+        <div class="fpi-hero-wow">
+          <h1>⚽ Football Performance Intelligence</h1>
+          <p>GPS-terhelésből vezetői döntéstámogatás, edzői prioritások és exportálható performance riportok.</p>
+          <div class="fpi-chip-row">
+            <span class="fpi-chip-wow">⚡ Readiness</span>
+            <span class="fpi-chip-wow">🎯 Coaching priorities</span>
+            <span class="fpi-chip-wow">🧠 Smart mapper</span>
+            <span class="fpi-chip-wow">📄 Executive export</span>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def build_weekly_summary(insights: List[Insight], selected_week: str, playstyle: str) -> str:
-    week_label = format_week_label(selected_week)
     if not insights:
         return (
-            f"Hét: {week_label}\\n\\n"
-            "Fő üzenet: nem látható kiemelt kockázat.\\n"
+            f"Hét: {week_label_short(selected_week)}\n\n"
+            "Legfontosabb üzenet: Stabil hét\n"
+            "- Mit látunk? Nem látható kiemelt negatív eltérés az aktuális hét fő mutatóiban.\n"
+            "- Javaslat: Érdemes tovább figyelni a sprint- és intenzitási trendeket.\n"
             f"- Játékmodell: {playstyle}"
         )
+
     critical = [i for i in insights if i.severity == "KRITIKUS"]
     warning = [i for i in insights if i.severity == "FIGYELMEZTETÉS"]
     info = [i for i in insights if i.severity == "INFORMÁCIÓ"]
     main = critical[0] if critical else (warning[0] if warning else info[0])
+
     second = None
     for i in insights:
         if i.title != main.title:
@@ -1040,7 +1135,7 @@ def build_weekly_summary(insights: List[Insight], selected_week: str, playstyle:
             break
 
     lines = [
-        f"Hét: {week_label}",
+        f"Hét: {week_label_short(selected_week)}",
         "",
         f"Legfontosabb üzenet: {main.title}",
         f"- Mit látunk? {main.observation}",
@@ -1049,8 +1144,7 @@ def build_weekly_summary(insights: List[Insight], selected_week: str, playstyle:
     if second is not None:
         lines.append(f"- Második fontos téma: {second.title}")
     lines.append(f"- Játékmodell: {playstyle}")
-    return "\\n".join(lines)
-
+    return "\n".join(lines)
 
 def top_coaching_priorities(insights: List[Insight], limit: int = 3) -> List[Dict[str, str]]:
     ordered = sorted(insights, key=lambda x: SEVERITY_RANK.get(x.severity, 9))
@@ -2742,8 +2836,7 @@ def build_demo_performance_data() -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
-st.title("⚽ Football Performance Intelligence")
-st.caption("GPS-terhelésből vezetői döntéstámogatás, edzői prioritások és exportálható riportok.")
+render_fpi_hero()
 
 
 sample_pdf_bytes = build_marketing_sample_pdf_bytes()
@@ -2818,7 +2911,7 @@ session_types = sorted(df["session_type"].dropna().unique().tolist())
 
 with st.sidebar:
     st.header("Szűrők")
-    selected_week = st.selectbox("Hét", weeks, index=len(weeks) - 1 if weeks else 0, format_func=format_week_label)
+    selected_week = st.selectbox("Hét", weeks, index=len(weeks, format_func=week_label_short) - 1 if weeks else 0, format_func=format_week_label)
     selected_playstyle = st.selectbox("Játékmodell", list(PLAYSTYLE_OPTIONS.keys()), index=0)
     st.caption(PLAYSTYLE_OPTIONS[selected_playstyle])
     selected_types = st.multiselect("Típus", session_types, default=session_types)
