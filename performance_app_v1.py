@@ -631,6 +631,26 @@ def metric_name(metric: str) -> str:
     return METRIC_LABELS.get(metric, metric)
 
 
+def format_week_label(week_value: object) -> str:
+    """Rövid, dashboard-barát hétfelirat.
+    A pandas periodből érkező '2026-06-01/2026-06-07' helyett pl. '2026-W23'.
+    """
+    text = str(week_value or "")
+    try:
+        if "/" in text:
+            start = pd.to_datetime(text.split("/")[0], errors="coerce")
+            if pd.notna(start):
+                iso = start.isocalendar()
+                return f"{int(iso.year)}-W{int(iso.week):02d}"
+        dt = pd.to_datetime(text, errors="coerce")
+        if pd.notna(dt):
+            iso = dt.isocalendar()
+            return f"{int(iso.year)}-W{int(iso.week):02d}"
+    except Exception:
+        pass
+    return text
+
+
 def team_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
     insights: List[Insight] = []
     weeks = sorted(df["week"].dropna().unique().tolist())
@@ -1002,8 +1022,13 @@ def playstyle_insights(df: pd.DataFrame, selected_week: str, playstyle: str) -> 
 
 
 def build_weekly_summary(insights: List[Insight], selected_week: str, playstyle: str) -> str:
+    week_label = format_week_label(selected_week)
     if not insights:
-        return f"A(z) {selected_week} hét fő mutatói alapján nem látható kiemelt kockázat. A játékmodell: {playstyle}."
+        return (
+            f"Hét: {week_label}\\n\\n"
+            "Fő üzenet: nem látható kiemelt kockázat.\\n"
+            f"- Játékmodell: {playstyle}"
+        )
     critical = [i for i in insights if i.severity == "KRITIKUS"]
     warning = [i for i in insights if i.severity == "FIGYELMEZTETÉS"]
     info = [i for i in insights if i.severity == "INFORMÁCIÓ"]
@@ -1013,14 +1038,18 @@ def build_weekly_summary(insights: List[Insight], selected_week: str, playstyle:
         if i.title != main.title:
             second = i
             break
-    text = (
-        f"A(z) {selected_week} hét legfontosabb üzenete: {main.title.lower()}. "
-        f"{main.observation} {main.recommendation}"
-    )
+
+    lines = [
+        f"Hét: {week_label}",
+        "",
+        f"Legfontosabb üzenet: {main.title}",
+        f"- Mit látunk? {main.observation}",
+        f"- Javaslat: {main.recommendation}",
+    ]
     if second is not None:
-        text += f" Második fontos téma: {second.title.lower()}."
-    text += f" A kiválasztott játékmodell: {playstyle}."
-    return text
+        lines.append(f"- Második fontos téma: {second.title}")
+    lines.append(f"- Játékmodell: {playstyle}")
+    return "\\n".join(lines)
 
 
 def top_coaching_priorities(insights: List[Insight], limit: int = 3) -> List[Dict[str, str]]:
@@ -2789,7 +2818,7 @@ session_types = sorted(df["session_type"].dropna().unique().tolist())
 
 with st.sidebar:
     st.header("Szűrők")
-    selected_week = st.selectbox("Hét", weeks, index=len(weeks) - 1 if weeks else 0)
+    selected_week = st.selectbox("Hét", weeks, index=len(weeks) - 1 if weeks else 0, format_func=format_week_label)
     selected_playstyle = st.selectbox("Játékmodell", list(PLAYSTYLE_OPTIONS.keys()), index=0)
     st.caption(PLAYSTYLE_OPTIONS[selected_playstyle])
     selected_types = st.multiselect("Típus", session_types, default=session_types)
@@ -2833,7 +2862,7 @@ weekly_summary_text = build_weekly_summary(all_insights, selected_week, selected
 all_insights = humanize_insights(all_insights)
 coaching_priorities = humanize_priority_list(coaching_priorities)
 weekly_summary_text = coach_friendly_phrase(weekly_summary_text)
-weekly_summary_text += f" Meccskészültség: {readiness_score}/100 ({score_to_label(readiness_score)}). Periodizációs besorolás: {periodization_type}."
+weekly_summary_text += f"\\n- Meccskészültség: {readiness_score}/100 ({score_to_label(readiness_score)})\\n- Periodizációs besorolás: {periodization_type}"
 player_risk_df = calculate_player_risk(analysis_base_df, selected_week)
 high_risk_count = int((player_risk_df["Kockázati szint"] == "Magas").sum()) if not player_risk_df.empty else 0
 medium_risk_count = int((player_risk_df["Kockázati szint"] == "Közepes").sum()) if not player_risk_df.empty else 0
@@ -2874,12 +2903,12 @@ with tab_exec:
     with mode_col1:
         st.metric("Mód", "PRO" if is_pro_mode() else "DEMO")
     with mode_col2:
-        st.metric("Hét", selected_week)
+        st.metric("Hét", format_week_label(selected_week))
     with mode_col3:
         if not is_pro_mode():
             st.warning("Demo módban a saját adatok limitáltak, és az exportok vízjeles/korlátozott terméklogikához vannak előkészítve.")
         else:
-            st.success("Pro mód: teljes csapat, teljes időszak, export és memória elérhető.")
+            pass
 
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
