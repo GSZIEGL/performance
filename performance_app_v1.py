@@ -2678,26 +2678,453 @@ def render_risk_cards(risk_df: pd.DataFrame, limit: int=5) -> None:
         level=row.get("Kockázati szint","Alacsony"); css="risk-high" if level=="Magas" else ("risk-medium" if level=="Közepes" else "risk-low")
         st.markdown(f"""<div class='insight-card {css}'><div class='insight-title'>{html.escape(str(row.get('Játékos','')))} · {html.escape(str(level))} kockázat · {row.get('Kockázati pontszám',0)}/100</div><div class='insight-label'>Fő okok</div><div class='insight-text'>{html.escape(str(row.get('Fő okok','')))}</div></div>""", unsafe_allow_html=True)
 
-def build_premium_pdf_bytes(insights_df: pd.DataFrame, selected_week: str, readiness_score: int, periodization_type: str, weekly_summary_text: str, coaching_priorities: List[Dict[str,str]], risk_df: pd.DataFrame, playstyle: str) -> Optional[bytes]:
-    if SimpleDocTemplate is None: return None
-    font_name,font_bold=_register_pdf_font(); output=io.BytesIO(); doc=SimpleDocTemplate(output,pagesize=landscape(A4),rightMargin=.8*cm,leftMargin=.8*cm,topMargin=.8*cm,bottomMargin=.8*cm)
-    styles=getSampleStyleSheet(); title=ParagraphStyle("V3Title",parent=styles["Title"],fontName=font_bold,fontSize=21,leading=25,textColor=colors.HexColor("#0F172A")); h2=ParagraphStyle("V3H2",parent=styles["Heading2"],fontName=font_bold,fontSize=13,leading=16,textColor=colors.HexColor("#1F4E78")); body=ParagraphStyle("V3Body",parent=styles["Normal"],fontName=font_name,fontSize=8.5,leading=11); small=ParagraphStyle("V3Small",parent=styles["Normal"],fontName=font_name,fontSize=7,leading=9); header=ParagraphStyle("V3Header",parent=styles["Normal"],fontName=font_bold,fontSize=7,leading=9,textColor=colors.white)
-    def P(v,style=body): return Paragraph(html.escape(pdf_safe_text(v)).replace("\n","<br/>",),style)
-    story=[P("Football Performance Intelligence - V3 riport",title),P(f"Hét: {selected_week} · Játékmodell: {playstyle} · Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}",body),Spacer(1,.25*cm)]
-    exec_data=[[P("Meccskészültség",header),P("Periodizáció",header),P("Vezetői összefoglaló",header)],[P(f"{readiness_score}/100 - {score_to_label(readiness_score)}",body),P(periodization_type,body),P(weekly_summary_text,body)]]
-    et=Table(exec_data,colWidths=[5*cm,5*cm,16.5*cm]); et.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#0F172A")),("BACKGROUND",(0,1),(-1,1),colors.HexColor("#F1F5F9")),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),6),("RIGHTPADDING",(0,0),(-1,-1),6),("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6)])); story += [et,Spacer(1,.35*cm),P("Top 3 edzői teendő",h2)]
+
+def build_premium_pdf_bytes(
+    insights_df: pd.DataFrame,
+    selected_week: str,
+    readiness_score: int,
+    periodization_type: str,
+    weekly_summary_text: str,
+    coaching_priorities: List[Dict[str, str]],
+    risk_df: pd.DataFrame,
+    playstyle: str
+) -> Optional[bytes]:
+    """Éles, látványos Pro PDF riport valós feltöltött adatokból.
+    A minta PDF vizuális és tartalmi logikáját követi.
+    """
+    if SimpleDocTemplate is None:
+        return None
+
+    try:
+        from reportlab.platypus import PageBreak
+    except Exception:
+        PageBreak = None
+
+    font_name, font_bold = _register_pdf_font()
+    output = io.BytesIO()
+
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=landscape(A4),
+        rightMargin=0.7 * cm,
+        leftMargin=0.7 * cm,
+        topMargin=0.65 * cm,
+        bottomMargin=0.65 * cm,
+    )
+
+    styles = getSampleStyleSheet()
+
+    title = ParagraphStyle(
+        "LiveReportTitle",
+        parent=styles["Title"],
+        fontName=font_bold,
+        fontSize=23,
+        leading=27,
+        alignment=1,
+        textColor=colors.HexColor("#0F172A"),
+        spaceAfter=5,
+    )
+    subtitle = ParagraphStyle(
+        "LiveReportSubtitle",
+        parent=styles["Normal"],
+        fontName=font_name,
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor("#475569"),
+        spaceAfter=8,
+    )
+    h2 = ParagraphStyle(
+        "LiveReportH2",
+        parent=styles["Heading2"],
+        fontName=font_bold,
+        fontSize=15,
+        leading=18,
+        textColor=colors.HexColor("#1F4E78"),
+        spaceBefore=7,
+        spaceAfter=5,
+    )
+    body = ParagraphStyle(
+        "LiveReportBody",
+        parent=styles["Normal"],
+        fontName=font_name,
+        fontSize=8.2,
+        leading=10.5,
+        textColor=colors.HexColor("#111827"),
+    )
+    small = ParagraphStyle(
+        "LiveReportSmall",
+        parent=styles["Normal"],
+        fontName=font_name,
+        fontSize=7.1,
+        leading=9,
+        textColor=colors.HexColor("#111827"),
+    )
+    tiny = ParagraphStyle(
+        "LiveReportTiny",
+        parent=styles["Normal"],
+        fontName=font_name,
+        fontSize=6.5,
+        leading=8.2,
+        textColor=colors.HexColor("#111827"),
+    )
+    header = ParagraphStyle(
+        "LiveReportHeader",
+        parent=styles["Normal"],
+        fontName=font_bold,
+        fontSize=7.2,
+        leading=9,
+        alignment=1,
+        textColor=colors.white,
+    )
+    kpi_label = ParagraphStyle(
+        "KpiLabel",
+        parent=styles["Normal"],
+        fontName=font_bold,
+        fontSize=7.2,
+        leading=9,
+        alignment=1,
+        textColor=colors.white,
+    )
+    kpi_value = ParagraphStyle(
+        "KpiValue",
+        parent=styles["Normal"],
+        fontName=font_bold,
+        fontSize=17,
+        leading=20,
+        alignment=1,
+        textColor=colors.white,
+    )
+    kpi_note = ParagraphStyle(
+        "KpiNote",
+        parent=styles["Normal"],
+        fontName=font_name,
+        fontSize=7,
+        leading=8.5,
+        alignment=1,
+        textColor=colors.white,
+    )
+
+    def clean_text(v: object) -> str:
+        txt = pdf_safe_text(v)
+        txt = str(txt or "")
+        txt = txt.replace("\\r", "").replace("\\n", "\n")
+        return txt
+
+    def P(v, style=body):
+        return Paragraph(html.escape(clean_text(v)).replace("\n", "<br/>"), style)
+
+    def section_bar(text: str):
+        t = Table([[P(text, h2)]], colWidths=[27.7 * cm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#DFF2FF")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#93C5FD")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        return t
+
+    def data_table(data, col_widths, header_bg="#0F172A", row_bgs=None):
+        if row_bgs is None:
+            row_bgs = [colors.white, colors.HexColor("#F8FAFC")]
+        t = Table(data, colWidths=col_widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(header_bg)),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), row_bgs),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        return t
+
+    def severity_count(label: str) -> int:
+        if insights_df is None or insights_df.empty or "Súlyosság" not in insights_df.columns:
+            return 0
+        return int((insights_df["Súlyosság"].astype(str).str.upper() == label).sum())
+
+    high_risk_count = 0
+    medium_risk_count = 0
+    if risk_df is not None and not risk_df.empty and "Kockázati szint" in risk_df.columns:
+        high_risk_count = int((risk_df["Kockázati szint"].astype(str).str.lower() == "magas").sum())
+        medium_risk_count = int((risk_df["Kockázati szint"].astype(str).str.lower() == "közepes").sum())
+
+    critical_count = severity_count("KRITIKUS")
+    warning_count = severity_count("FIGYELMEZTETÉS")
+    insight_count = len(insights_df) if insights_df is not None else 0
+
+    sprint_fit = "—"
+    load_change = "—"
+    try:
+        full_text = " ".join(insights_df.astype(str).values.flatten().tolist()) if insights_df is not None and not insights_df.empty else ""
+        m = re.search(r"kb\.\s*(\d+)%", full_text)
+        if m:
+            sprint_fit = f"{m.group(1)}%"
+        m2 = re.search(r"(\d+)%[-–]kal nőtt", full_text)
+        if m2:
+            load_change = f"+{m2.group(1)}%"
+    except Exception:
+        pass
+
+    readiness_label = score_to_label(readiness_score)
+    top_risk_label = f"{high_risk_count} fő" if high_risk_count else "OK"
+
+    story = []
+    story.append(P("Football Performance Intelligence", title))
+    story.append(P(
+        f"Éles vezetői riport | Hét: {format_week_label(selected_week)} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        subtitle,
+    ))
+
+    # KPI strip
+    kpis = [
+        ("TEAM READINESS", f"{readiness_score}/100", readiness_label, "#166534" if readiness_score >= 75 else "#1E3A8A" if readiness_score >= 60 else "#991B1B"),
+        ("LOAD CHANGE", load_change, "heti terhelési jel", "#8B2C13"),
+        ("SPRINT FIT", sprint_fit, "edzés vs meccsigény", "#1E3A8A"),
+        ("TOP RISK", top_risk_label, "magas egyéni kockázat", "#7F1D1D" if high_risk_count else "#166534"),
+        ("INSIGHT", str(insight_count), "automatikus megállapítás", "#0F172A"),
+    ]
+
+    kpi_tables = []
+    for label, value, note, color in kpis:
+        kt = Table(
+            [[P(label, kpi_label)], [P(value, kpi_value)], [P(note, kpi_note)]],
+            colWidths=[5.1 * cm],
+            rowHeights=[0.55 * cm, 0.9 * cm, 0.55 * cm],
+        )
+        kt.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(color)),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.white),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        kpi_tables.append(kt)
+
+    strip = Table([kpi_tables], colWidths=[5.25 * cm] * 5)
+    strip.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    story += [strip, Spacer(1, 0.28 * cm)]
+
+    # Executive summary
+    story.append(section_bar("Vezetői összefoglaló – mit kell tudni 30 másodperc alatt?"))
+
+    summary_clean = clean_text(weekly_summary_text)
+    summary_lines = [x.strip().lstrip("-• ").strip() for x in summary_clean.splitlines() if x.strip()]
+    main_msg = ""
+    observation = ""
+    recommendation = ""
+    second_topic = ""
+    for line in summary_lines:
+        if line.startswith("Legfontosabb üzenet:"):
+            main_msg = line.replace("Legfontosabb üzenet:", "").strip()
+        elif line.startswith("Mit látunk?"):
+            observation = line.replace("Mit látunk?", "").strip()
+        elif line.startswith("Javaslat:"):
+            recommendation = line.replace("Javaslat:", "").strip()
+        elif line.startswith("Második fontos téma:"):
+            second_topic = line.replace("Második fontos téma:", "").strip()
+
+    if not main_msg and summary_lines:
+        main_msg = summary_lines[0]
+    if not observation:
+        observation = "A heti adatok alapján több automatikus performance jelzés készült."
+    if not recommendation:
+        recommendation = "A következő edzés tervezésénél a readiness, a sprintinger és az egyéni risk jelzések együtt értelmezendők."
+    if not second_topic:
+        second_topic = "Egyéni és mikrociklus kontroll"
+
+    exec_data = [
+        [P("Fő üzenet", header), P("Értelmezés", header), P("Azonnali döntés", header)],
+        [
+            P(main_msg, body),
+            P(f"{observation}\nMeccskészültség: {readiness_score}/100 ({readiness_label}). Periodizáció: {periodization_type}.", body),
+            P(recommendation, body),
+        ],
+        [
+            P(second_topic, body),
+            P(f"Magas risk: {high_risk_count} fő, közepes risk: {medium_risk_count} fő. Insightok száma: {insight_count}.", body),
+            P("A top edzői teendőket és játékos risk sort érdemes stábértekezleten külön átvenni.", body),
+        ],
+    ]
+    story.append(data_table(exec_data, [5.9 * cm, 9.9 * cm, 11.9 * cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#F8FAFC"), colors.HexColor("#EFF6FF")]))
+    story += [Spacer(1, 0.25 * cm)]
+
+    # Top insights
+    story.append(section_bar("Top automatikus megállapítások"))
+    insight_cols = ["Megállapítás", "Súlyosság", "Mit látunk?", "Javaslat"]
+    insight_cols = [c for c in insight_cols if insights_df is not None and c in insights_df.columns]
+    top_data = [[P("#", header)] + [P(c, header) for c in insight_cols]]
+    if insights_df is not None and not insights_df.empty and insight_cols:
+        for i, (_, r) in enumerate(insights_df.head(6).iterrows(), 1):
+            top_data.append([P(str(i), small)] + [P(r.get(c, ""), small) for c in insight_cols])
+    else:
+        top_data.append([P("1", small), P("Nincs kiemelt megállapítás", small), P("INFORMÁCIÓ", small), P("A feltöltött adatok alapján nincs kritikus jelzés.", small), P("Normál monitoring folytatható.", small)])
+
+    widths = [0.8 * cm, 5.3 * cm, 3.0 * cm, 10.0 * cm, 8.6 * cm][:len(top_data[0])]
+    story.append(data_table(top_data, widths, header_bg="#0F172A"))
+
+    if PageBreak:
+        story.append(PageBreak())
+    else:
+        story.append(Spacer(1, 1 * cm))
+
+    # PAGE 2
+    story.append(P("Edzői döntéstámogatás", title))
+    story.append(P("Prioritások, játékos risk és gyakorlati javaslatok valós feltöltött adatok alapján.", subtitle))
+    story.append(section_bar("Top edzői teendők"))
+
+    pr_data = [[P("Prioritás", header), P("Teendő", header), P("Miért fontos?", header), P("Mikor?", header)]]
     if coaching_priorities:
-        data=[[P("#",header),P("Téma",header),P("Teendő",header),P("Miért fontos?",header)]]
-        for i,it in enumerate(coaching_priorities[:3],1): data.append([P(str(i),small),P(it.get("Cím",""),small),P(it.get("Teendő",""),small),P(it.get("Miért",""),small)])
-        t=Table(data,colWidths=[.8*cm,5*cm,10.5*cm,10.2*cm],repeatRows=1); t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1F4E78")),("GRID",(0,0),(-1,-1),.25,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)])); story.append(t)
-    if risk_df is not None and not risk_df.empty:
-        story += [Spacer(1,.35*cm),P("Top játékos kockázat lista",h2)]; cols=["Játékos","Kockázati pontszám","Kockázati szint","Fő okok"]; data=[[P(c,header) for c in cols]]
-        for _,r in risk_df.head(8).iterrows(): data.append([P(r.get(c,""),small) for c in cols])
-        rt=Table(data,colWidths=[5.2*cm,2.3*cm,3.2*cm,15.8*cm],repeatRows=1); rt.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#7F1D1D")),("GRID",(0,0),(-1,-1),.25,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#FFF7ED")]),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)])); story.append(rt)
-    story += [Spacer(1,.35*cm),P("Insight tábla",h2)]; cols=["Súlyosság","Terület","Megállapítás","Mit látunk?","Miért fontos?","Javaslat"]; cols=[c for c in cols if c in insights_df.columns]; data=[[P(c,header) for c in cols]]
-    for _,r in insights_df.iterrows(): data.append([P(r.get(c,""),small) for c in cols])
-    widths={"Súlyosság":2.5*cm,"Terület":2*cm,"Megállapítás":3.7*cm,"Mit látunk?":5.7*cm,"Miért fontos?":5.7*cm,"Javaslat":6.9*cm}; tab=Table(data,colWidths=[widths.get(c,3*cm) for c in cols],repeatRows=1); tab.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1F4E78")),("GRID",(0,0),(-1,-1),.25,colors.HexColor("#BFBFBF")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F7F9FC")]),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)])); story.append(tab)
-    doc.build(story); return output.getvalue()
+        for i, item in enumerate(coaching_priorities[:6], 1):
+            pr_data.append([
+                P(str(i), small),
+                P(item.get("Teendő", item.get("Cím", "")), small),
+                P(item.get("Miért", ""), small),
+                P(item.get("Mikor", "Következő edzés / heti review"), small),
+            ])
+    else:
+        pr_data.append([P("1", small), P("Normál monitoring", small), P("Nincs kiemelt edzői beavatkozás.", small), P("Heti review", small)])
+
+    story.append(data_table(pr_data, [1.8 * cm, 10.0 * cm, 10.0 * cm, 5.9 * cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.HexColor("#F8FAFC")]))
+    story += [Spacer(1, 0.25 * cm)]
+
+    story.append(section_bar("Játékos risk tábla – vezetői gyorsnézet"))
+    risk_cols = ["Játékos", "Kockázati szint", "Kockázati pontszám", "Fő okok"]
+    risk_cols = [c for c in risk_cols if risk_df is not None and c in risk_df.columns]
+    risk_data = [[P(c, header) for c in risk_cols]]
+    if risk_df is not None and not risk_df.empty and risk_cols:
+        for _, r in risk_df.head(10).iterrows():
+            risk_data.append([P(r.get(c, ""), small) for c in risk_cols])
+    else:
+        risk_cols = ["Játékos", "Kockázati szint", "Kockázati pontszám", "Fő okok"]
+        risk_data = [[P(c, header) for c in risk_cols]]
+        risk_data.append([P("Nincs magas risk", small), P("Alacsony", small), P("—", small), P("A feltöltött hét alapján nincs kiemelt egyéni kockázat.", small)])
+
+    risk_widths = {
+        "Játékos": 4.7 * cm,
+        "Kockázati szint": 3.0 * cm,
+        "Kockázati pontszám": 3.0 * cm,
+        "Fő okok": 17.0 * cm,
+    }
+    story.append(data_table(risk_data, [risk_widths.get(c, 4 * cm) for c in risk_cols], header_bg="#7F1D1D", row_bgs=[colors.white, colors.HexColor("#FFF7ED")]))
+
+    if PageBreak:
+        story.append(PageBreak())
+    else:
+        story.append(Spacer(1, 1 * cm))
+
+    # PAGE 3
+    story.append(P("Mikrociklus és játékmodell illeszkedés", title))
+    story.append(P("A riport nem csak adatot mutat, hanem edzői döntésre fordítja le a GPS-profilt.", subtitle))
+    story.append(section_bar("Mikrociklus szerkezet – automatikus értelmezés"))
+
+    micro_rows = [
+        ["Komponens", "Aktuális jel", "Értékelés"],
+        ["Readiness", f"{readiness_score}/100", readiness_label],
+        ["Periodizáció", periodization_type, "A heti load és frissességi jelzések alapján."],
+        ["Sprint fit", sprint_fit, "A meccsigényhez viszonyított sprintinger becsült jele."],
+        ["Magas risk", f"{high_risk_count} fő", "Egyéni kontroll szükséges, ha 1 főnél több magas risk van."],
+        ["Insight súlyosság", f"{critical_count} kritikus / {warning_count} figyelmeztetés", "A heti fő fókusz a kritikus és figyelmeztető jelzésekből jön."],
+    ]
+    story.append(data_table([[P(c, header) for c in micro_rows[0]]] + [[P(c, small) for c in row] for row in micro_rows[1:]], [5.8 * cm, 6.8 * cm, 15.1 * cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
+    story += [Spacer(1, 0.25 * cm)]
+
+    story.append(section_bar(f"Játékmodell illeszkedés – {playstyle} profil"))
+
+    if str(playstyle).lower() == "pressing":
+        components = [
+            ["Táv/perc", "Meccsprofil 90%+", "Ellenőrizendő", "Pressing modellhez magas munkasűrűség kell."],
+            ["High effort", "Meccsprofil 75%+", "Ellenőrizendő", "Ismételt intenzív akciók kulcsfontosságúak."],
+            ["Sprintprofil", "Meccsprofil 80%+", sprint_fit, "Célzott sprintinger javasolt, ha alacsony."],
+            ["Lassítási terhelés", "Kontrollált", "Risk alapján", "Excentrikus/regenerációs kockázatot jelezhet."],
+        ]
+    else:
+        components = [
+            ["Táv/perc", "Játékmodellhez illeszkedő", "Ellenőrizendő", "A heti tempó illeszkedjen a meccsigényhez."],
+            ["Sprintprofil", "Meccsprofilhoz közeli", sprint_fit, "A gyors munka ne maradjon tartósan alacsony."],
+            ["Load kontroll", "Ne legyen nagy kiugrás", load_change, "A hirtelen terhelésemelkedés readiness kockázatot adhat."],
+            ["Játékos risk", "Egyéni eltérések kontrollja", top_risk_label, "A csapatátlag elfedhet egyéni problémákat."],
+        ]
+
+    jd = [[P("Komponens", header), P("Cél", header), P("Aktuális hét", header), P("Értékelés", header)]]
+    for row in components:
+        jd.append([P(c, small) for c in row])
+
+    story.append(data_table(jd, [5.4 * cm, 6.2 * cm, 4.6 * cm, 11.5 * cm], header_bg="#312E81", row_bgs=[colors.white, colors.HexColor("#F5F3FF")]))
+    story += [Spacer(1, 0.25 * cm)]
+
+    story.append(section_bar("Vizuális gyorsjelentés – vezetői dashboard nézet"))
+    dash_kpis = [
+        ("READINESS", f"{readiness_score}%", "meccskészültség", "#166534" if readiness_score >= 75 else "#1E3A8A"),
+        ("SPRINT FIT", sprint_fit, "sebességkitettség", "#1E3A8A"),
+        ("LOAD", load_change, "heti terhelésjel", "#8B2C13"),
+        ("PLAYER RISK", top_risk_label, "egyéni kontroll", "#7F1D1D" if high_risk_count else "#166534"),
+        ("COACHING", f"{len(coaching_priorities[:6])} task", "automatikus teendő", "#0F172A"),
+    ]
+
+    mini_tables = []
+    for label, val, note, color in dash_kpis:
+        mt = Table(
+            [[P(label, kpi_label)], [P(val, kpi_value)], [P(note, kpi_note)]],
+            colWidths=[5.1 * cm],
+            rowHeights=[0.5 * cm, 0.8 * cm, 0.5 * cm],
+        )
+        mt.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(color)),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.white),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        mini_tables.append(mt)
+    story.append(Table([mini_tables], colWidths=[5.25 * cm] * 5))
+
+    if PageBreak:
+        story.append(PageBreak())
+    else:
+        story.append(Spacer(1, 1 * cm))
+
+    # PAGE 4
+    story.append(P("Teljes Pro riport – részletes insight tábla", title))
+    story.append(P("A Pro export célja, hogy a vezetői összkép mellett a szakmai stáb részletes megállapításokat is megkapjon.", subtitle))
+    story.append(section_bar("Mit kap ebből a stáb?"))
+
+    pro_rows = [
+        ["Modul", "Mit ad?", "Kinek hasznos?"],
+        ["Vezetői riport", "30 másodperces összefoglaló, readiness, top risk, top teendő.", "sportigazgató, vezetőedző"],
+        ["Mikrociklus", "MD-logika, tapering, sprintinger, frissességi jelzések.", "vezetőedző, erőnléti edző"],
+        ["Játékos risk motor", "Egyéni terhelési eltérések, sprint, lassítás, load kiugrás.", "erőnléti edző, rehabilitáció"],
+        ["Játékmodell illeszkedés", "Fizikai profil összevetése a választott játékmodellel.", "szakmai stáb"],
+        ["Export központ", "PDF, Word, Excel riportok vezetői és szakmai felhasználásra.", "klubvezetés, stáb"],
+    ]
+
+    story.append(data_table([[P(c, header) for c in pro_rows[0]]] + [[P(c, small) for c in row] for row in pro_rows[1:]], [5.0 * cm, 14.5 * cm, 8.2 * cm], header_bg="#0F172A", row_bgs=[colors.white, colors.HexColor("#F8FAFC")]))
+    story += [Spacer(1, 0.25 * cm)]
+
+    story.append(section_bar("Részletes insight tábla"))
+    if insights_df is not None and not insights_df.empty:
+        detail_cols = ["Súlyosság", "Terület", "Megállapítás", "Mit látunk?", "Javaslat"]
+        detail_cols = [c for c in detail_cols if c in insights_df.columns]
+        detail_data = [[P(c, header) for c in detail_cols]]
+        for _, r in insights_df.head(12).iterrows():
+            detail_data.append([P(r.get(c, ""), tiny) for c in detail_cols])
+        detail_widths = {
+            "Súlyosság": 3.2 * cm,
+            "Terület": 2.4 * cm,
+            "Megállapítás": 4.8 * cm,
+            "Mit látunk?": 8.6 * cm,
+            "Javaslat": 8.7 * cm,
+        }
+        story.append(data_table(detail_data, [detail_widths.get(c, 4 * cm) for c in detail_cols], header_bg="#1F4E78", row_bgs=[colors.white, colors.HexColor("#F7F9FC")]))
+    else:
+        story.append(P("Nincs részletes insight adat.", body))
+
+    doc.build(story)
+    output.seek(0)
+    return output.getvalue()
 
 
 # -----------------------------------------------------------------------------
