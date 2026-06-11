@@ -362,6 +362,75 @@ st.markdown(
    font-weight: 800 !important;
  }
 
+
+ /* ===== FPI tab + CTA readability fix ===== */
+ button[data-baseweb="tab"] {
+   color: #cbd5e1 !important;
+   font-weight: 850 !important;
+   opacity: 1 !important;
+   background: transparent !important;
+ }
+ button[data-baseweb="tab"] * {
+   color: #cbd5e1 !important;
+   font-weight: 850 !important;
+   opacity: 1 !important;
+ }
+ button[data-baseweb="tab"][aria-selected="true"],
+ button[data-baseweb="tab"][aria-selected="true"] * {
+   color: #ffffff !important;
+   font-weight: 950 !important;
+ }
+ button[data-baseweb="tab"]:hover,
+ button[data-baseweb="tab"]:hover * {
+   color: #ffffff !important;
+ }
+ div[data-baseweb="tab-list"] {
+   gap: 8px;
+   background: rgba(15,23,42,.42);
+   border-radius: 18px;
+   padding: 8px 10px;
+   border: 1px solid rgba(148,163,184,.18);
+ }
+ div[data-baseweb="tab-border"] {
+   background-color: #ef4444 !important;
+   height: 3px !important;
+ }
+ .stDownloadButton > button {
+   background: linear-gradient(135deg,#22c55e,#16a34a) !important;
+   color: #ffffff !important;
+   border: 0 !important;
+   border-radius: 16px !important;
+   font-weight: 950 !important;
+   min-height: 48px !important;
+   box-shadow: 0 14px 34px rgba(34,197,94,.24) !important;
+ }
+ .stDownloadButton > button:hover {
+   background: linear-gradient(135deg,#16a34a,#15803d) !important;
+   color: #ffffff !important;
+   transform: translateY(-1px);
+   box-shadow: 0 18px 42px rgba(34,197,94,.32) !important;
+ }
+ .stDownloadButton > button * {
+   color: #ffffff !important;
+   font-weight: 950 !important;
+ }
+ .stButton > button {
+   border-radius: 14px !important;
+   font-weight: 900 !important;
+ }
+ input, textarea, [data-baseweb="input"] input {
+   color: #0f172a !important;
+   background: #ffffff !important;
+ }
+ [data-testid="stSidebar"] .stAlert,
+ [data-testid="stSidebar"] .stAlert * {
+   color: #0f172a !important;
+ }
+ [data-testid="stSidebar"] .stAlert {
+   background: #dbeafe !important;
+   border-radius: 14px !important;
+ }
+
  </style>
     """,
     unsafe_allow_html=True,
@@ -2635,7 +2704,7 @@ def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
         styled_table([
             [P("Modul", header), P("Mit ad?", header), P("Kinek hasznos?", header)],
             [P("Vezetői riport"), P("30 másodperces vezetői összefoglaló, readiness, top risk, top teendő."), P("sportigazgató, vezetőedző")],
-            [P("Mikrociklus intelligencia"), P("MD-4/MD-3/MD-2/MD-1 logika, tapering, sprintinger, frissességi jelzések."), P("vezetőedző, erőnléti edző")],
+            [P("📅 Mikrociklus"), P("MD-4/MD-3/MD-2/MD-1 logika, tapering, sprintinger, frissességi jelzések."), P("vezetőedző, erőnléti edző")],
             [P("Játékos risk motor"), P("Egyéni terhelési eltérések, high effort, sprint, lassítás, load kiugrás."), P("erőnléti edző, rehabilitáció")],
             [P("Játékmodell illeszkedés"), P("Pressing, transition, possession vagy low block fizikai profil összevetése."), P("szakmai stáb")],
             [P("Export központ"), P("PDF, Word, Excel riportok vezetői és szakmai felhasználásra."), P("klubvezetés, stáb")],
@@ -2779,7 +2848,7 @@ def render_mode_badge() -> None:
         if lic.get("team_name"):
             st.sidebar.caption(f"Csapat: {lic.get('team_name')}")
     else:
-        st.sidebar.info("Demo mód")
+        st.sidebar.success("Demo mód")
         st.sidebar.caption(f"Demo limit: max {DEMO_PLAYER_LIMIT} játékos · max {DEMO_WEEK_LIMIT} hét · max {DEMO_ROW_LIMIT} sor")
 
 
@@ -3057,18 +3126,18 @@ medium_risk_count = int((player_risk_df["Kockázati szint"] == "Közepes").sum()
 
 # Tabok
 tab_exec, tab_intro, tab1, tab_premium, tab_export, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.tabs([
-    "⭐ Vezetői riport",
-    "Mi ez a rendszer?",
-    "Vezetői áttekintő",
-    "Vezetői cockpit",
-    "Vezetői export központ",
-    "Intelligencia cockpit",
-    "Mikrociklus intelligencia",
-    "Játékos kockázati motor",
-    "Megállapítások és javaslatok",
-    "Játékosmonitoring",
-    "Adatminőség",
-    "Nyers adatok",
+    "🏠 Dashboard",
+    "ℹ️ Rendszer",
+    "📌 Áttekintő",
+    "🎛️ Cockpit",
+    "📄 Export",
+    "🧠 Intelligence",
+    "📅 Mikrociklus",
+    "🚨 Kockázat",
+    "🎯 Javaslatok",
+    "👤 Játékosok",
+    "✅ Adatminőség",
+    "🧾 Nyers adatok",
 ])
 
 
@@ -3271,7 +3340,7 @@ with tab1:
 
 
 with tab_premium:
-    st.subheader("Vezetői cockpit")
+    st.subheader("🎛️ Cockpit")
     st.caption("Cool vezetői nézet: readiness, risk, load, sprint, periodizáció és top teendők egy képernyőn.")
     render_hero(selected_week, selected_playstyle, readiness_score, periodization_type)
     k1, k2, k3, k4 = st.columns(4)
@@ -3305,7 +3374,7 @@ with tab_premium:
 
 
 with tab_export:
-    st.subheader("Vezetői export központ")
+    st.subheader("📄 Export")
     st.caption("Egy helyen minden vezetői információ és export: összefoglaló, readiness, teendők, player risk, insightok.")
 
     st.markdown(
@@ -3450,7 +3519,7 @@ with tab_export:
 
 
 with tab_intel:
-    st.subheader("Intelligencia cockpit")
+    st.subheader("🧠 Intelligence")
     st.caption("V2.5: readiness score, periodizáció, performance memória, multi-week mintázatok és adaptív ajánlások.")
 
     c1, c2 = st.columns([1, 1])
@@ -3518,7 +3587,7 @@ with tab_intel:
 
 
 with tab_micro:
-    st.subheader("Mikrociklus intelligencia")
+    st.subheader("📅 Mikrociklus")
     st.caption("A rendszer a meccsnaphoz viszonyítva értelmezi a heti struktúrát: MD-4, MD-3, MD-2, MD-1, MD, MD+1.")
 
     micro_df = build_microcycle_table(analysis_base_df, selected_week)
@@ -3580,7 +3649,7 @@ with tab_micro:
 
 
 with tab_risk:
-    st.subheader("Játékos kockázati motor")
+    st.subheader("🚨 Kockázat")
     st.caption("Játékosszintű, többhetes eltérésalapú risk scoring: load spike, sprintprofil, lassítások, max sebesség.")
     if player_risk_df.empty:
         st.info("Nincs elég adat a játékosszintű risk engine-hez. Legalább több hét játékosszintű adat kell hozzá.")
@@ -3596,7 +3665,7 @@ with tab_risk:
         )
 
 with tab2:
-    st.subheader("Megállapítások és javaslatok")
+    st.subheader("🎯 Javaslatok")
     st.caption("Szabályalapú performance motor: AI nélkül is ad szakmai következtetést és javaslatot.")
 
     insights = all_insights
@@ -3688,7 +3757,7 @@ with tab2:
         )
 
 with tab3:
-    st.subheader("Játékosmonitoring")
+    st.subheader("👤 Játékosok")
     pw = player_weekly(df)
     pw_current = pw[(pw["week"] == selected_week) & (pw["player_name"].isin(selected_players))]
     if not pw_current.empty:
@@ -3711,7 +3780,7 @@ with tab3:
         st.info("Nincs adat az aktuális szűrésre.")
 
 with tab4:
-    st.subheader("Adatminőség")
+    st.subheader("✅ Adatminőség")
     st.caption("Ez azért fontos, mert a sportadat a valóságban mindig kicsit koszos.")
 
     c1, c2, c3, c4 = st.columns(4)
