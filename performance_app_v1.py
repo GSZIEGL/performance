@@ -652,6 +652,20 @@ st.markdown(
    background: #ffffff !important;
  }
 
+
+ /* ===== Weekly summary final readability override ===== */
+ pre, pre * {
+   color: #000000 !important;
+ }
+ div[style*="Heti vezetői összefoglaló"],
+ div[style*="Heti vezetői összefoglaló"] *,
+ div[style*="border-left:10px solid #2563eb"],
+ div[style*="border-left:10px solid #2563eb"] * {
+   color: #000000 !important;
+   opacity: 1 !important;
+   text-shadow: none !important;
+ }
+
  </style>
     """,
     unsafe_allow_html=True,
@@ -1573,6 +1587,186 @@ def render_leader_summary_direct(text: object) -> None:
                 Heti vezetői összefoglaló
             </div>
             {''.join(html_rows)}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+
+
+
+def create_sample_input_template_bytes() -> Optional[bytes]:
+    """Minta Excel sablon: Adatok + Használati útmutató.
+    A felhasználó ezt letölti, kitölti, majd visszatölti az appba.
+    """
+    try:
+        import pandas as pd
+        import io
+    except Exception:
+        return None
+
+    output = io.BytesIO()
+
+    columns = [
+        "Játékos neve",
+        "Típus",
+        "Szakasz neve",
+        "Poszt",
+        "Kezdési idő",
+        "Befejezési idő",
+        "Időtartam",
+        "Teljes táv [m]",
+        "Táv/perc [m/min]",
+        "Maximális sebesség [km/h]",
+        "Sprintek",
+        "Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)",
+        "Táv a sebesség célzónában 5 [m] (25.00- km/h)",
+        "Edzési terhelési pontérték",
+        "Izomterhelés",
+        "Átlagos pulzus [bpm]",
+        "Maximális pulzus [bpm]",
+        "HRV (RMSSD)",
+        "Gyorsulások száma (2.50 - 2.99 m/s²)",
+        "Gyorsulások száma (3.00 - 50.00 m/s²)",
+        "Gyorsulások száma (-2.99 - -2.50 m/s²)",
+        "Gyorsulások száma (-50.00 - -3.00 m/s²)",
+    ]
+
+    sample_rows = [
+        [
+            "Minta Játékos 1", "Edzés", "MD-4 edzés", "CM",
+            "2026-06-01 10:00", "2026-06-01 11:20", "01:20:00",
+            7200, 90, 29.4, 12, 620, 180, 410, 58, 148, 188, 62, 22, 8, 20, 7
+        ],
+        [
+            "Minta Játékos 1", "Meccs", "Bajnoki mérkőzés", "CM",
+            "2026-06-07 17:00", "2026-06-07 18:45", "01:45:00",
+            10600, 101, 31.2, 24, 1050, 690, 620, 84, 162, 194, 55, 34, 14, 31, 12
+        ],
+        [
+            "Minta Játékos 2", "Edzés", "MD-4 edzés", "W",
+            "2026-06-01 10:00", "2026-06-01 11:20", "01:20:00",
+            7600, 95, 30.7, 15, 760, 260, 445, 63, 151, 190, 59, 25, 10, 22, 9
+        ],
+        [
+            "Minta Játékos 2", "Meccs", "Bajnoki mérkőzés", "W",
+            "2026-06-07 17:00", "2026-06-07 18:45", "01:45:00",
+            11100, 106, 32.0, 29, 1200, 760, 650, 88, 165, 197, 53, 38, 16, 33, 13
+        ],
+    ]
+
+    df = pd.DataFrame(sample_rows, columns=columns)
+
+    guide_rows = [
+        ["Cél", "Ez a sablon mutatja, milyen szerkezetű Excel tölthető fel a Performance Intelligence appba."],
+        ["Fontos", "Az edzés- és meccsadatokat EGYMÁS ALÁ kell halmozni ugyanazon az Adatok munkalapon."],
+        ["Egy sor jelentése", "Egy játékos egy edzésen vagy mérkőzésen mért adata."],
+        ["Típus oszlop", "Csak ilyen értékeket használj: Edzés vagy Meccs."],
+        ["Dátum/idő", "A Kezdési idő lehet például: 2026-06-01 10:00."],
+        ["Időtartam", "Javasolt formátum: 01:20:00 vagy percben megadott szám."],
+        ["Kötelező mezők", "Játékos neve, Típus, Kezdési idő."],
+        ["Ajánlott fő mezők", "Teljes táv, Táv/perc, Maximális sebesség, Sprintek, sebességzónák, terhelési pont, gyorsulás/lassítás."],
+        ["Ha más a GPS-export fejléce", "A Smart Excel Mapper segít felismerni és kézzel összepárosítani az oszlopokat."],
+        ["Tipp", "Ne készíts külön munkalapot edzésenként. Minden esemény menjen az Adatok munkalapra egymás alá."],
+    ]
+    guide = pd.DataFrame(guide_rows, columns=["Téma", "Leírás"])
+
+    # Using pandas ExcelWriter because this runs inside Streamlit app generation.
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="Adatok")
+        guide.to_excel(writer, index=False, sheet_name="Használati útmutató")
+
+        workbook = writer.book
+        ws_data = writer.sheets["Adatok"]
+        ws_guide = writer.sheets["Használati útmutató"]
+
+        header_fmt = workbook.add_format({
+            "bold": True,
+            "font_color": "white",
+            "bg_color": "#1E3A8A",
+            "border": 1,
+            "align": "center",
+            "valign": "vcenter",
+            "text_wrap": True,
+        })
+        cell_fmt = workbook.add_format({
+            "border": 1,
+            "valign": "top",
+            "text_wrap": True,
+        })
+        date_fmt = workbook.add_format({
+            "border": 1,
+            "num_format": "yyyy-mm-dd hh:mm",
+            "valign": "top",
+        })
+        guide_header_fmt = workbook.add_format({
+            "bold": True,
+            "font_color": "white",
+            "bg_color": "#166534",
+            "border": 1,
+            "align": "center",
+            "valign": "vcenter",
+        })
+
+        for col_idx, col_name in enumerate(columns):
+            ws_data.write(0, col_idx, col_name, header_fmt)
+            width = 24 if len(col_name) < 24 else 34
+            ws_data.set_column(col_idx, col_idx, width, cell_fmt)
+
+        ws_data.set_column(4, 5, 20, date_fmt)
+        ws_data.freeze_panes(1, 0)
+        ws_data.autofilter(0, 0, len(df), len(columns)-1)
+
+        # Guide formatting
+        ws_guide.write(0, 0, "Téma", guide_header_fmt)
+        ws_guide.write(0, 1, "Leírás", guide_header_fmt)
+        ws_guide.set_column(0, 0, 24, cell_fmt)
+        ws_guide.set_column(1, 1, 90, cell_fmt)
+        ws_guide.freeze_panes(1, 0)
+
+    output.seek(0)
+    return output.getvalue()
+
+
+def render_weekly_summary_card(summary_text: object) -> None:
+    """Fixen olvasható heti vezetői összefoglaló.
+    Fehér háttér + fekete szöveg + valódi sortörések.
+    """
+    raw = str(summary_text or "")
+    raw = raw.replace("\\r", "").replace("\\n", "\n")
+    raw = raw.replace("\r", "")
+    safe = html.escape(raw)
+
+    st.markdown(
+        f"""
+        <div style="
+            background:#ffffff !important;
+            color:#000000 !important;
+            border-left:10px solid #2563eb;
+            border-radius:18px;
+            padding:24px 26px;
+            margin:12px 0 22px 0;
+            box-shadow:0 10px 28px rgba(0,0,0,.20);
+        ">
+            <div style="
+                color:#000000 !important;
+                font-size:1.25rem;
+                font-weight:950;
+                margin-bottom:14px;
+            ">
+                Heti vezetői összefoglaló
+            </div>
+            <pre style="
+                color:#000000 !important;
+                background:#ffffff !important;
+                font-family:Segoe UI, Arial, sans-serif;
+                font-size:16px;
+                font-weight:700;
+                line-height:1.7;
+                white-space:pre-wrap;
+                margin:0;
+            ">{safe}</pre>
         </div>
         """,
         unsafe_allow_html=True,
@@ -3340,6 +3534,17 @@ with st.sidebar:
     st.divider()
 
     st.header("Adatfeltöltés")
+    template_bytes = create_sample_input_template_bytes()
+    if template_bytes is not None:
+        st.download_button(
+            "⬇️ Minta Excel sablon letöltése",
+            data=template_bytes,
+            file_name="performance_input_sablon.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="download_performance_input_template",
+        )
+
     use_demo_data = st.toggle("Minta riport mintaadatokkal", value=st.session_state.get("use_demo_data", uploaded is None if 'uploaded' in globals() else True))
     uploaded = st.file_uploader("Saját GPS/terhelési Excel feltöltése", type=["xlsx", "xls"])
     st.caption("Demo módban saját adat is feltölthető, de limitált: 8 játékos / 3 hét / 5000 sor.")
@@ -3422,7 +3627,10 @@ weekly_summary_text = build_weekly_summary(all_insights, selected_week, selected
 all_insights = humanize_insights(all_insights)
 coaching_priorities = humanize_priority_list(coaching_priorities)
 weekly_summary_text = coach_friendly_phrase(weekly_summary_text)
-weekly_summary_text += f"\\n- Meccskészültség: {readiness_score}/100 ({score_to_label(readiness_score)})\\n- Periodizációs besorolás: {periodization_type}"
+weekly_summary_text += (
+    f"\n\nMeccskészültség: {readiness_score}/100 ({score_to_label(readiness_score)})"
+    f"\nPeriodizációs besorolás: {periodization_type}"
+)
 player_risk_df = calculate_player_risk(analysis_base_df, selected_week)
 high_risk_count = int((player_risk_df["Kockázati szint"] == "Magas").sum()) if not player_risk_df.empty else 0
 medium_risk_count = int((player_risk_df["Kockázati szint"] == "Közepes").sum()) if not player_risk_df.empty else 0
@@ -3484,7 +3692,7 @@ with tab_exec:
         st.metric("Elemzett hetek", mem_weeks)
 
     st.markdown("### Heti vezetői összefoglaló")
-    st.info(weekly_summary_text)
+    render_weekly_summary_card(weekly_summary_text)
 
     left, right = st.columns([1.05, 1])
     with left:
@@ -3593,7 +3801,7 @@ with tab1:
         metric_card("Terhelési pont", f"{load:,.0f}" if pd.notna(load) else "—")
 
     st.markdown("### Heti vezetői összefoglaló")
-    st.info(weekly_summary_text)
+    render_weekly_summary_card(weekly_summary_text)
     r1, r2, r3 = st.columns(3)
     with r1:
         st.metric("Meccskészültség", f"{readiness_score}/100", score_to_label(readiness_score))
@@ -3974,7 +4182,7 @@ with tab2:
     insights = all_insights
 
     st.markdown("### Heti összefoglaló")
-    st.info(weekly_summary_text)
+    render_weekly_summary_card(weekly_summary_text)
 
     st.markdown("### Top 3 adaptív edzői teendő")
     render_coaching_priorities(coaching_priorities)
