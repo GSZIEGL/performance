@@ -1596,13 +1596,16 @@ def render_leader_summary_direct(text: object) -> None:
 
 
 
+
 def create_sample_input_template_bytes() -> Optional[bytes]:
     """Minta Excel sablon: Adatok + Használati útmutató.
-    A felhasználó ezt letölti, kitölti, majd visszatölti az appba.
+    Csak openpyxl-t használ, hogy Streamlit Cloudon ne kelljen xlsxwriter.
     """
     try:
-        import pandas as pd
         import io
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+        from openpyxl.worksheet.table import Table, TableStyleInfo
     except Exception:
         return None
 
@@ -1656,9 +1659,8 @@ def create_sample_input_template_bytes() -> Optional[bytes]:
         ],
     ]
 
-    df = pd.DataFrame(sample_rows, columns=columns)
-
     guide_rows = [
+        ["Téma", "Leírás"],
         ["Cél", "Ez a sablon mutatja, milyen szerkezetű Excel tölthető fel a Performance Intelligence appba."],
         ["Fontos", "Az edzés- és meccsadatokat EGYMÁS ALÁ kell halmozni ugyanazon az Adatok munkalapon."],
         ["Egy sor jelentése", "Egy játékos egy edzésen vagy mérkőzésen mért adata."],
@@ -1670,61 +1672,90 @@ def create_sample_input_template_bytes() -> Optional[bytes]:
         ["Ha más a GPS-export fejléce", "A Smart Excel Mapper segít felismerni és kézzel összepárosítani az oszlopokat."],
         ["Tipp", "Ne készíts külön munkalapot edzésenként. Minden esemény menjen az Adatok munkalapra egymás alá."],
     ]
-    guide = pd.DataFrame(guide_rows, columns=["Téma", "Leírás"])
 
-    # Using pandas ExcelWriter because this runs inside Streamlit app generation.
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="Adatok")
-        guide.to_excel(writer, index=False, sheet_name="Használati útmutató")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Adatok"
+    guide = wb.create_sheet("Használati útmutató")
 
-        workbook = writer.book
-        ws_data = writer.sheets["Adatok"]
-        ws_guide = writer.sheets["Használati útmutató"]
+    ws.append(columns)
+    for row in sample_rows:
+        ws.append(row)
 
-        header_fmt = workbook.add_format({
-            "bold": True,
-            "font_color": "white",
-            "bg_color": "#1E3A8A",
-            "border": 1,
-            "align": "center",
-            "valign": "vcenter",
-            "text_wrap": True,
-        })
-        cell_fmt = workbook.add_format({
-            "border": 1,
-            "valign": "top",
-            "text_wrap": True,
-        })
-        date_fmt = workbook.add_format({
-            "border": 1,
-            "num_format": "yyyy-mm-dd hh:mm",
-            "valign": "top",
-        })
-        guide_header_fmt = workbook.add_format({
-            "bold": True,
-            "font_color": "white",
-            "bg_color": "#166534",
-            "border": 1,
-            "align": "center",
-            "valign": "vcenter",
-        })
+    guide.append(guide_rows[0])
+    for row in guide_rows[1:]:
+        guide.append(row)
 
-        for col_idx, col_name in enumerate(columns):
-            ws_data.write(0, col_idx, col_name, header_fmt)
-            width = 24 if len(col_name) < 24 else 34
-            ws_data.set_column(col_idx, col_idx, width, cell_fmt)
+    # Styles
+    thin = Side(style="thin", color="CBD5E1")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    header_fill = PatternFill("solid", fgColor="1E3A8A")
+    guide_fill = PatternFill("solid", fgColor="166534")
+    white_font = Font(bold=True, color="FFFFFF")
+    dark_font = Font(color="0F172A")
+    wrap = Alignment(wrap_text=True, vertical="top")
+    center = Alignment(wrap_text=True, vertical="center", horizontal="center")
 
-        ws_data.set_column(4, 5, 20, date_fmt)
-        ws_data.freeze_panes(1, 0)
-        ws_data.autofilter(0, 0, len(df), len(columns)-1)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = white_font
+        cell.alignment = center
+        cell.border = border
 
-        # Guide formatting
-        ws_guide.write(0, 0, "Téma", guide_header_fmt)
-        ws_guide.write(0, 1, "Leírás", guide_header_fmt)
-        ws_guide.set_column(0, 0, 24, cell_fmt)
-        ws_guide.set_column(1, 1, 90, cell_fmt)
-        ws_guide.freeze_panes(1, 0)
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            cell.font = dark_font
+            cell.alignment = wrap
+            cell.border = border
 
+    for cell in guide[1]:
+        cell.fill = guide_fill
+        cell.font = white_font
+        cell.alignment = center
+        cell.border = border
+
+    for row in guide.iter_rows(min_row=2):
+        for cell in row:
+            cell.font = dark_font
+            cell.alignment = wrap
+            cell.border = border
+
+    # Widths
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 14
+    ws.column_dimensions["C"].width = 20
+    ws.column_dimensions["D"].width = 10
+    ws.column_dimensions["E"].width = 20
+    ws.column_dimensions["F"].width = 20
+    ws.column_dimensions["G"].width = 14
+    for col in range(8, len(columns) + 1):
+        ws.column_dimensions[chr(64 + col) if col <= 26 else "Z"].width = 18
+
+    guide.column_dimensions["A"].width = 26
+    guide.column_dimensions["B"].width = 95
+
+    ws.freeze_panes = "A2"
+    guide.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+
+    # Table if possible
+    try:
+        tab = Table(displayName="PerformanceInputTable", ref=ws.dimensions)
+        style = TableStyleInfo(name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False, showRowStripes=True, showColumnStripes=False)
+        tab.tableStyleInfo = style
+        ws.add_table(tab)
+    except Exception:
+        pass
+
+    try:
+        tab2 = Table(displayName="PerformanceGuideTable", ref=guide.dimensions)
+        style2 = TableStyleInfo(name="TableStyleMedium4", showFirstColumn=False, showLastColumn=False, showRowStripes=True, showColumnStripes=False)
+        tab2.tableStyleInfo = style2
+        guide.add_table(tab2)
+    except Exception:
+        pass
+
+    wb.save(output)
     output.seek(0)
     return output.getvalue()
 
