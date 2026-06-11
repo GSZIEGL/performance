@@ -127,20 +127,20 @@ st.markdown(
         line-height: 1;
     }
     .score-label {
-        color: rgba(226,232,240,.86);
+        color: #e0f2fe;
         font-weight: 800;
         margin-top: 6px;
     }
     .mini-muted {
-        color: rgba(226,232,240,.72);
+        color: #dbeafe;
         font-size: .92rem;
         line-height: 1.35;
     }
 
     .hero-box {border-radius:24px;padding:24px 28px;margin-bottom:20px;background:radial-gradient(circle at top left,rgba(34,197,94,.22),transparent 34%),radial-gradient(circle at bottom right,rgba(59,130,246,.24),transparent 30%),linear-gradient(135deg,rgba(2,6,23,.96),rgba(15,23,42,.88));border:1px solid rgba(148,163,184,.22);box-shadow:0 18px 45px rgba(0,0,0,.28)}
-    .hero-title {font-size:2.1rem;font-weight:950;letter-spacing:-.04em;margin-bottom:4px}.hero-sub{color:rgba(226,232,240,.78);font-size:1.02rem;line-height:1.45}
+    .hero-title {font-size:2.1rem;font-weight:950;letter-spacing:-.04em;margin-bottom:4px}.hero-sub{color:#dbeafe;font-size:1.02rem;line-height:1.45}
     .premium-kpi{border-radius:20px;padding:18px;background:linear-gradient(145deg,rgba(15,23,42,.94),rgba(30,41,59,.78));border:1px solid rgba(148,163,184,.20);box-shadow:0 10px 28px rgba(0,0,0,.18);min-height:120px}
-    .premium-kpi-label{color:rgba(226,232,240,.72);font-size:.86rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.premium-kpi-value{font-size:2rem;font-weight:950;margin-top:8px;line-height:1}.premium-kpi-note{color:rgba(226,232,240,.70);font-size:.86rem;margin-top:9px}
+    .premium-kpi-label{color:#dbeafe;font-size:.86rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.premium-kpi-value{font-size:2rem;font-weight:950;margin-top:8px;line-height:1}.premium-kpi-note{color:#dbeafe;font-size:.86rem;margin-top:9px}
     .risk-high{border-left:8px solid #ef4444!important}.risk-medium{border-left:8px solid #f59e0b!important}.risk-low{border-left:8px solid #22c55e!important}
     .section-chip{display:inline-block;padding:5px 11px;border-radius:999px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.25);color:#bbf7d0;font-weight:850;margin:2px 4px 8px 0}
 
@@ -175,7 +175,7 @@ st.markdown(
         color: #bfdbfe;
     }
     .feature-text {
-        color: rgba(226,232,240,.82);
+        color: #e0f2fe;
         line-height: 1.45;
         font-size: .94rem;
     }
@@ -266,6 +266,101 @@ st.markdown(
  .fpi-section-title { color: #f8fafc; font-size: 1.35rem; font-weight: 950; margin: 22px 0 10px 0; letter-spacing: -.03em; }
  .insight-card, .priority-card, .score-card, .intro-card, .feature-box, .export-panel { color: #f8fafc !important; }
  .feature-text, .mini-muted, .premium-kpi-note, .hero-sub { color: #dbeafe !important; }
+
+
+ /* ===== FPI contrast/readability fix ===== */
+ html, body, .stApp, [data-testid="stAppViewContainer"] {
+   color: #f8fafc !important;
+ }
+ [data-testid="stSidebar"] {
+   background: linear-gradient(180deg, #020617, #0f172a) !important;
+ }
+ [data-testid="stSidebar"] * {
+   color: #f8fafc !important;
+ }
+ .stMarkdown, .stText, p, span, label, div {
+   text-rendering: optimizeLegibility;
+ }
+ .fpi-hero-wow,
+ .fpi-hero-wow *,
+ .fpi-dark-card,
+ .fpi-dark-card *,
+ .fpi-glass,
+ .fpi-glass *,
+ .intro-card,
+ .intro-card *,
+ .feature-box,
+ .feature-box *,
+ .score-card,
+ .score-card *,
+ .priority-card,
+ .priority-card *,
+ .insight-card,
+ .insight-card *,
+ .export-panel,
+ .export-panel * {
+   color: #f8fafc !important;
+ }
+ .fpi-hero-wow p,
+ .hero-sub,
+ .feature-text,
+ .mini-muted,
+ .premium-kpi-note,
+ .score-label {
+   color: #dbeafe !important;
+ }
+ .fpi-summary-card,
+ .fpi-summary-card *,
+ .fpi-summary-item,
+ .fpi-summary-item *,
+ .fpi-action-card,
+ .fpi-action-card *,
+ .fpi-kpi-panel,
+ .fpi-kpi-panel * {
+   color: #0f172a !important;
+ }
+ .fpi-summary-label,
+ .fpi-kpi-panel .label,
+ .fpi-kpi-panel .note,
+ .fpi-muted {
+   color: #475569 !important;
+ }
+ .fpi-chip-wow,
+ .section-chip,
+ .micro-pill {
+   color: #f8fafc !important;
+   background: rgba(15,23,42,.78) !important;
+   border-color: rgba(226,232,240,.32) !important;
+ }
+ .pill-critical { background:#991b1b !important; color:#ffffff !important; }
+ .pill-warning { background:#92400e !important; color:#ffffff !important; }
+ .pill-info { background:#1d4ed8 !important; color:#ffffff !important; }
+ .wrap-table th {
+   background: #1e3a8a !important;
+   color: #ffffff !important;
+ }
+ .wrap-table td {
+   color: #f8fafc !important;
+   background: rgba(15,23,42,.72) !important;
+ }
+ .wrap-table tr:nth-child(even) td {
+   background: rgba(30,41,59,.82) !important;
+ }
+ .stDataFrame, .stDataFrame * {
+   color: inherit;
+ }
+ div[data-testid="stMetricValue"] {
+   color: #f8fafc !important;
+ }
+ div[data-testid="stMetricLabel"] {
+   color: #dbeafe !important;
+ }
+ .stAlert, .stAlert * {
+   color: #0f172a !important;
+ }
+ button, button * {
+   font-weight: 800 !important;
+ }
 
  </style>
     """,
@@ -2719,7 +2814,7 @@ def pro_locked_box(feature: str) -> None:
         f"""
         <div class="export-panel">
             <h3 style="margin-top:0;">🔒 {html.escape(feature)}</h3>
-            <p style="color:rgba(226,232,240,.82);">
+            <p style="color:#e0f2fe;">
                 Ez a funkció a Pro verzió része. A demo célja, hogy saját adaton is lásd az értéket,
                 de a teljes riport/export és hosszabb trendek Pro módban érhetők el.
             </p>
@@ -2845,7 +2940,7 @@ with st.container():
         """
         <div class="export-panel">
             <h3 style="margin-top:0;">📄 Teljes minta riport letöltése</h3>
-            <p style="color:rgba(226,232,240,.82);">
+            <p style="color:#e0f2fe;">
                 Kamu játékosnevekkel és minta GPS-adatokkal készült látványos, többoldalas vezetői PDF.
                 Ezt meg tudod mutatni érdeklődő klubnak akkor is, ha még nem töltött fel saját adatot.
             </p>
@@ -3217,7 +3312,7 @@ with tab_export:
         """
         <div class="export-panel">
             <h3 style="margin-top:0;">Vezetői csomag</h3>
-            <p style="color:rgba(226,232,240,.82);">
+            <p style="color:#e0f2fe;">
                 Ezt érdemes megmutatni vagy elküldeni a vezetőedzőnek: rövid összefoglaló,
                 top teendők, readiness, kockázati lista és insightok.
             </p>
