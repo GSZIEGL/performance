@@ -1057,21 +1057,54 @@ def normalize_session_type(x: object) -> str:
 
 
 
+def _plausible_fpi_datetime(x: object) -> pd.Timestamp:
+    """Csak reális sportadat dátumot enged át.
+    Ez megakadályozza, hogy mezszámok / játékos ID-k / értékek évszámként (pl. 9946-W01) bekerüljenek.
+    """
+    dt = pd.to_datetime(x, errors="coerce")
+    if pd.isna(dt):
+        return pd.NaT
+    try:
+        year = int(dt.year)
+        # Futball GPS történeti/import adatokhoz bő, de reális tartomány.
+        if year < 2015 or year > 2035:
+            return pd.NaT
+        return dt
+    except Exception:
+        return pd.NaT
+
+
+def _plausible_fpi_datetime_series(series: pd.Series) -> pd.Series:
+    parsed = pd.to_datetime(series, errors="coerce")
+    if parsed.empty:
+        return parsed
+    years = parsed.dt.year
+    parsed = parsed.mask((years < 2015) | (years > 2035))
+    return parsed
+
+
 def extract_date_from_text(text: object) -> Optional[pd.Timestamp]:
     """Dátum kinyerése GPS Split/lapnév/szöveg mezőből.
-    Kezeli a tipikus magyar és angol formátumokat is: YYYY-MM-DD, YYYY.MM.DD,
-    DD.MM.YYYY, DD/MM/YYYY, valamint DD.MM. lapnév esetén ésszerű év fallback.
+
+    V5.5 javítás: nem fogad el önmagában álló 3-4 jegyű számokat dátumnak,
+    mert ezekből pandas képes irreális éveket csinálni (pl. 9946-W01).
+    Csak reális, 2015–2035 közötti dátum mehet tovább.
     """
     s = str(text or "").strip()
     if not s or s.lower() in ["nan", "none", "nat"]:
         return None
 
-    # Excel serial dátum fallback
+    # Tiszta 1-4 jegyű szám nem dátum az FPI-ben (gyakran mezszám, ID, érték).
+    if re.fullmatch(r"\d{1,4}(\.0+)?", s):
+        return None
+
+    # Excel serial dátum fallback: 2015-2035 közé kell esnie.
     try:
         if re.fullmatch(r"\d{5}(\.\d+)?", s):
             val = float(s)
-            if 25000 < val < 90000:
-                return pd.to_datetime(val, unit="D", origin="1899-12-30", errors="coerce")
+            if 42005 <= val <= 49675:  # kb. 2015-01-01 .. 2035-12-31
+                return _plausible_fpi_datetime(pd.to_datetime(val, unit="D", origin="1899-12-30", errors="coerce"))
+            return None
     except Exception:
         pass
 
@@ -1084,23 +1117,32 @@ def extract_date_from_text(text: object) -> Optional[pd.Timestamp]:
         if m:
             try:
                 if mode == "ymd":
-                    return pd.to_datetime(f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", errors="coerce")
-                return pd.to_datetime(f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", errors="coerce")
+                    dt = pd.to_datetime(f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", errors="coerce")
+                else:
+                    dt = pd.to_datetime(f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", errors="coerce")
+                dt = _plausible_fpi_datetime(dt)
+                return dt if pd.notna(dt) else None
             except Exception:
                 pass
 
-    # 02.01. jellegű lapnév. Az évnél először az aktuális évet használjuk,
-    # de ha ez nagyon jövőbeli lenne, pandas úgyis csak heti bontáshoz használja.
+    # 02.01. jellegű lapnév. Csak akkor, ha tényleg dátum-szerű pontozott forma.
     m = re.search(r"(?<!\d)(\d{1,2})\.(\d{1,2})\.(?!\d)", s)
     if m:
         year = datetime.now().year
-        return pd.to_datetime(f"{year}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", errors="coerce")
+        dt = pd.to_datetime(f"{year}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", errors="coerce")
+        dt = _plausible_fpi_datetime(dt)
+        return dt if pd.notna(dt) else None
 
-    dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
-    if pd.notna(dt):
-        return dt
+    # Általános pandas csak akkor, ha a szöveg tartalmaz dátumelválasztót vagy hónapnevet.
+    # Így a '9946' / '9399' típusú értékek nem lesznek dátumok.
+    month_words = "jan feb mar apr may jun jul aug sep oct nov dec január januar február március marcius április aprilis május majus június junius július julius augusztus szeptember október oktober november december"
+    looks_date_like = any(ch in s for ch in ["-", "/", ".", ":"]) or any(w in s.lower() for w in month_words.split())
+    if looks_date_like:
+        dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
+        dt = _plausible_fpi_datetime(dt)
+        if pd.notna(dt):
+            return dt
     return None
-
 
 def parse_datetime_series(series: pd.Series, fallback_source: Optional[pd.Series] = None, sheet_name: str = "") -> pd.Series:
     """Robusztus dátumfelismerés oszlopból, majd fallback Split/lapnév alapján."""
@@ -1108,6 +1150,7 @@ def parse_datetime_series(series: pd.Series, fallback_source: Optional[pd.Series
         base = pd.Series([pd.NaT] * (len(fallback_source) if fallback_source is not None else 0))
     else:
         base = pd.to_datetime(series, errors="coerce", dayfirst=True)
+        base = _plausible_fpi_datetime_series(base)
         if base.isna().mean() > 0.5:
             base2 = series.apply(extract_date_from_text)
             base = base.fillna(base2)
@@ -1121,6 +1164,7 @@ def parse_datetime_series(series: pd.Series, fallback_source: Optional[pd.Series
 
 
 # -----------------------------------------------------------------------------
+# FPI_REALFIX_2026_06_16_V055_PLAUSIBLE_DATE_GUARD
 # FPI_REALFIX_2026_06_16_V054_DATE_COLUMN_RESCUE
 # Cél: ha a mapper rossz/konstans dátumoszlopra áll, ne ragadjon minden 2026-W01-en.
 # -----------------------------------------------------------------------------
@@ -1137,16 +1181,18 @@ def _date_column_name_score(col: object) -> int:
 
 
 def _as_datetime_candidate(series: pd.Series) -> pd.Series:
-    """Egy potenciális dátumoszlop robusztus próbaparsolása."""
+    """Egy potenciális dátumoszlop robusztus próbaparsolása, irreális évek kiszűrésével."""
     if series is None:
         return pd.Series(dtype="datetime64[ns]")
-    # Először normál pandas, utána szövegből regex, végül Excel serial.
     parsed = pd.to_datetime(series, errors="coerce", dayfirst=True)
+    parsed = _plausible_fpi_datetime_series(parsed)
+    # Ha a pandas kevés reális dátumot talál, regex/szöveges mentés.
     if parsed.notna().sum() < max(3, int(len(series) * 0.20)):
         parsed2 = series.apply(extract_date_from_text)
         parsed = parsed.fillna(parsed2)
-    return pd.to_datetime(parsed, errors="coerce")
-
+    parsed = pd.to_datetime(parsed, errors="coerce")
+    parsed = _plausible_fpi_datetime_series(parsed)
+    return parsed
 
 def find_best_date_series(df: pd.DataFrame, current_source: Optional[str] = None, sheet_name: str = "") -> Tuple[pd.Series, Optional[str], pd.DataFrame]:
     """Megkeresi a legjobb dátumforrást a teljes raw df-ben.
@@ -1166,12 +1212,17 @@ def find_best_date_series(df: pd.DataFrame, current_source: Optional[str] = None
         valid = int(parsed.notna().sum())
         unique_days = int(parsed.dt.date.nunique()) if valid else 0
         unique_weeks = int(parsed.dt.to_period("W-SUN").nunique()) if valid else 0
+        unique_years = int(parsed.dt.year.nunique()) if valid else 0
         valid_ratio = valid / max(1, len(df))
         name_score = _date_column_name_score(col)
         # Büntessük a konstans dátumot, még ha sok sorban szerepel is.
         score = int(valid_ratio * 100) + unique_days * 18 + unique_weeks * 45 + name_score
         if unique_days <= 1:
             score -= 160
+        # Ha egy oszlop túl sok különböző évre szóródik, az biztosan nem dátumoszlop,
+        # hanem szám/id/érték, amit pandas évnek értelmezett.
+        if unique_years > 3:
+            score -= 1000
         if current_source_clean and clean_col_name(col) == current_source_clean:
             score += 8
         rows.append({
@@ -1179,10 +1230,11 @@ def find_best_date_series(df: pd.DataFrame, current_source: Optional[str] = None
             "ervenyes_datum_sor": valid,
             "kulonbozo_nap": unique_days,
             "kulonbozo_het": unique_weeks,
+            "kulonbozo_ev": unique_years,
             "nev_pont": name_score,
             "osszpont": score,
         })
-        if score > best_score and valid >= max(3, int(len(df) * 0.20)):
+        if score > best_score and valid >= max(3, int(len(df) * 0.20)) and unique_years <= 3:
             best_score = score
             best_col = col
             best_series = parsed
@@ -5049,7 +5101,7 @@ with st.sidebar:
     st.caption("Demo módban saját adat is feltölthető, de limitált: 8 játékos / 3 hét / 5000 sor.")
     st.divider()
     st.markdown("**Fókusz:** vezetői riport, readiness, risk, edzői teendők.")
-    st.caption("V5.4 REAL DATE RESCUE – 2026-06-16")
+    st.caption("V5.5 REAL DATE RESCUE – 2026-06-16")
 
 if uploaded is None and not use_demo_data:
     st.info("Tölts fel GPS/terhelési Excel fájlt, vagy kapcsold be a minta riportot.")
@@ -5097,7 +5149,7 @@ if df.empty or "week" not in df.columns or df["week"].dropna().empty:
 
 render_demo_limit_notice(demo_limit_info if 'demo_limit_info' in globals() else {})
 
-with st.sidebar.expander("Import diagnosztika V5.4", expanded=False):
+with st.sidebar.expander("Import diagnosztika V5.5", expanded=False):
     st.markdown("**FPI_REALFIX_2026_06_16_V054_DATE_COLUMN_RESCUE**")
     try:
         st.json({
