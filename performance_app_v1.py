@@ -680,17 +680,17 @@ STANDARD_COLUMNS = {
     "session_type": ["Típus", "Type", "Session Type", "Edzés/Meccs", "SessionType", "Activity Type", "Drill Type", "Event Type", "Training/Match"],
     "session_name": ["Szakasz neve", "Session", "Session Name", "Activity", "Drill", "Exercise", "Event", "Session title"],
     "position": ["Poszt", "Position", "Player Position", "Role", "Playing Position", "Post", "Pos"],
-    "start_time": ["Kezdési idő", "Start Time", "Start", "Dátum", "Date", "Session Date", "Day", "Datum", "Kezdés", "Start date", "StartTime"],
+    "start_time": ["Kezdési idő", "Start Time", "Start", "Dátum", "Date", "Session Date", "Day", "Datum", "Kezdés", "Start date", "StartTime", "Split"],
     "end_time": ["Befejezési idő", "End Time", "End", "Finish", "Befejezés", "EndTime"],
     "duration": ["Időtartam", "Duration", "Time", "Minutes", "Idő", "Időtartam [perc]", "Duration [min]", "Duration min"],
     "total_distance": ["Teljes táv [m]", "Tel\xadjes táv [m]", "Total Distance", "Distance", "Össztáv", "Total distance (m)", "Total Dist", "Dist Total", "Distance [m]", "TD", "Total Distance m"],
     "distance_per_min": ["Táv/perc [m/min]", "Distance/min", "Distance Per Min", "m/min", "Distance per minute", "m per min", "m/minute", "Rel Distance"],
     "max_speed": ["Maximális sebesség [km/h]", "Max Speed", "Maximum Speed", "Top Speed", "Peak Speed", "Max Velocity", "Vmax"],
     "avg_speed": ["Átlagsebesség [km/h]", "Average Speed", "Avg Speed", "Mean Speed"],
-    "sprints": ["Sprintek", "Sprints", "Sprint Count", "Number of Sprints", "Sprint #", "Sprint efforts"],
+    "sprints": ["Sprintek", "Sprints", "Sprint Count", "Number of Sprints", "Sprint #", "Sprint efforts", "Sprints count  ()", "Sprints count"],
     "speed_zone_3": ["Táv a sebesség célzónában 3 [m] (14.40 - 19.79 km/h)"],
-    "speed_zone_4": ["Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)"],
-    "speed_zone_5": ["Táv a sebesség célzónában 5 [m] (25.00- km/h)"],
+    "speed_zone_4": ["Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)", "Distance(4+5)  (m)", "Distance(4+5)", "Distance 4+5", "HSR Distance"],
+    "speed_zone_5": ["Táv a sebesség célzónában 5 [m] (25.00- km/h)", "Total sprints distance  (m)", "Total sprints distance", "Sprint distance", "Sprint Distance"],
     "training_load": ["Edzési terhelési pontérték", "Terhelési pont", "Player Load", "Load", "Training Load", "Total Load", "Workload", "Load Score"],
     "cardio_load": ["Kardióterhelés", "Cardio Load"],
     "recovery_hours": ["Regenerálódási idő [h]", "Recovery Time", "Recovery"],
@@ -700,10 +700,10 @@ STANDARD_COLUMNS = {
     "hrv": ["HRV (RMSSD)", "HRV", "RMSSD", "HRV RMSSD"],
     "acc_low": ["Gyorsulások száma (2.00 - 2.49 m/s²)"],
     "acc_mid": ["Gyorsulások száma (2.50 - 2.99 m/s²)"],
-    "acc_high": ["Gyorsulások száma (3.00 - 50.00 m/s²)"],
+    "acc_high": ["Gyorsulások száma (3.00 - 50.00 m/s²)", "Total Accelerations  ()", "Total Accelerations", "Accelerations (2+3)  ()", "Accelerations (2+3)"],
     "dec_low": ["Gyorsulások száma (-2.49 - -2.00 m/s²)"],
     "dec_mid": ["Gyorsulások száma (-2.99 - -2.50 m/s²)"],
-    "dec_high": ["Gyorsulások száma (-50.00 - -3.00 m/s²)"],
+    "dec_high": ["Gyorsulások száma (-50.00 - -3.00 m/s²)", "Total Decelerations  ()", "Total Decelerations", "Decelerations (2+3)  ()", "Decelerations (2+3)"],
 }
 
 CORE_REQUIRED = ["player_name", "session_type", "start_time"]
@@ -913,9 +913,111 @@ def normalize_session_type(x: object) -> str:
     return str(x).strip() if str(x).strip() else "Ismeretlen"
 
 
+
+def extract_date_from_text(text: object) -> Optional[pd.Timestamp]:
+    """Dátum kinyerése GPS Split/lapnév szövegből."""
+    s = str(text or "")
+    # 2026-2-1 / 2026.02.01 / 2026_02_01
+    m = re.search(r"(20\d{2})[-._/ ](\d{1,2})[-._/ ](\d{1,2})", s)
+    if m:
+        return pd.to_datetime(f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", errors="coerce")
+    # 02.01. jellegű lapnév. Év fallback: aktuális év helyett sportidényhez 2026.
+    m = re.search(r"(\d{1,2})\.(\d{1,2})\.", s)
+    if m:
+        return pd.to_datetime(f"2026-{int(m.group(1)):02d}-{int(m.group(2)):02d}", errors="coerce")
+    return None
+
+
+def detect_header_row(raw_df: pd.DataFrame) -> Optional[int]:
+    """Megkeresi, melyik sorban van a valódi fejléc.
+    Tipikus GPS exportnál az első sor üres, a 2. sorban van: Name, Split, Duration...
+    """
+    if raw_df is None or raw_df.empty:
+        return None
+    max_scan = min(10, len(raw_df))
+    for i in range(max_scan):
+        vals = [str(v).strip().lower() for v in raw_df.iloc[i].tolist() if str(v).strip().lower() not in ["nan", "none", ""]]
+        joined = " | ".join(vals)
+        if ("name" in vals or "player" in joined or "játékos" in joined or "jatekos" in joined) and (
+            "split" in vals or "total distance" in joined or "top speed" in joined or "duration" in joined
+        ):
+            return i
+    return None
+
+
+def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.DataFrame:
+    """Egy munkalap megtisztítása az app számára.
+    Kezeli:
+    - üres első sor
+    - 2. sorban lévő fejléc
+    - több meccslap
+    - hiányzó Típus / Kezdési idő / Szakasz neve mező
+    """
+    if raw_df is None or raw_df.empty:
+        return pd.DataFrame()
+
+    df = raw_df.copy()
+
+    # Ha pd.read_excel header=0 miatt Unnamed oszlopok vannak, akkor az első adatsorban lehet a valódi fejléc.
+    unnamed_ratio = sum(str(c).startswith("Unnamed") for c in df.columns) / max(1, len(df.columns))
+    header_row = detect_header_row(df)
+
+    if unnamed_ratio > 0.5 and header_row is not None:
+        new_cols = [clean_col_name(x) if clean_col_name(x) else f"col_{j+1}" for j, x in enumerate(df.iloc[header_row].tolist())]
+        df = df.iloc[header_row + 1:].copy()
+        df.columns = new_cols
+    else:
+        df.columns = [clean_col_name(c) for c in df.columns]
+
+    # Üres sorok törlése.
+    df = df.dropna(how="all")
+    df = df.loc[:, ~pd.Series(df.columns).astype(str).str.startswith("Unnamed").values]
+
+    # Ha nincs típus, ebből a workbookból ez meccsadat.
+    if "Típus" not in df.columns and "Type" not in df.columns and "Session Type" not in df.columns:
+        df["Típus"] = "Meccs"
+
+    if "Szakasz neve" not in df.columns and "Session Name" not in df.columns:
+        df["Szakasz neve"] = sheet_name or "GPS mérkőzés"
+
+    # Kezdési idő kinyerése Splitből vagy lapnévből, ha nincs explicit dátum.
+    has_start = any(c in df.columns for c in ["Kezdési idő", "Start Time", "Start", "Date", "Dátum"])
+    if not has_start:
+        dates = []
+        split_col = "Split" if "Split" in df.columns else None
+        for _, row in df.iterrows():
+            dt = extract_date_from_text(row.get(split_col, "")) if split_col else None
+            if dt is None or pd.isna(dt):
+                dt = extract_date_from_text(sheet_name)
+            if dt is None or pd.isna(dt):
+                dt = pd.to_datetime("2026-01-01")
+            dates.append(dt.strftime("%Y-%m-%d 17:00"))
+        df["Kezdési idő"] = dates
+
+    return df
+
+
+def prepare_uploaded_sheets(sheets: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+    """Minden feltöltött munkalapot normalizál, és létrehoz egy összesített lapot is."""
+    prepared: Dict[str, pd.DataFrame] = {}
+    frames = []
+    for name, raw in sheets.items():
+        clean = normalize_uploaded_sheet(raw, name)
+        if clean is not None and not clean.empty:
+            prepared[name] = clean
+            frames.append(clean)
+    if frames:
+        prepared = {"Összes munkalap": pd.concat(frames, ignore_index=True)} | prepared
+    return prepared if prepared else sheets
+
+
+
+
 @st.cache_data(show_spinner=False)
 def read_excel_all(file) -> Dict[str, pd.DataFrame]:
-    return pd.read_excel(file, sheet_name=None)
+    # header=None kell, mert sok GPS exportnál az első sor üres,
+    # a valódi fejléc a 2. sorban van.
+    return pd.read_excel(file, sheet_name=None, header=None)
 
 
 def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Optional[str]], List[str]]:
@@ -949,7 +1051,7 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
     numeric_cols = [
         "total_distance", "distance_per_min", "max_speed", "avg_speed", "sprints",
         "speed_zone_3", "speed_zone_4", "speed_zone_5", "training_load", "cardio_load",
-        "recovery_hours", "muscle_load", "hr_avg", "hr_max", "hrv", "acc_low", "acc_mid",
+        "recovery_hours", "muscle_load", "hr_avg", "hr_max", "hrv", "high_efforts", "acc_low", "acc_mid",
         "acc_high", "dec_low", "dec_mid", "dec_high",
     ]
     for col in numeric_cols:
@@ -964,7 +1066,10 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
     out["sprint_distance"] = out["speed_zone_5"]
     out["acc_count"] = out[["acc_low", "acc_mid", "acc_high"]].sum(axis=1, min_count=1)
     out["dec_count"] = out[["dec_low", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
-    out["high_efforts"] = out[["acc_mid", "acc_high", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
+    if "high_efforts" not in out.columns or out["high_efforts"].isna().all():
+        out["high_efforts"] = out[["acc_mid", "acc_high", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
+    else:
+        out["high_efforts"] = to_numeric(out["high_efforts"])
 
     if "distance_per_min" not in out.columns or out["distance_per_min"].isna().all():
         if "total_distance" in out.columns:
@@ -1004,7 +1109,7 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
     numeric_cols = [
         "total_distance", "distance_per_min", "max_speed", "avg_speed", "sprints",
         "speed_zone_3", "speed_zone_4", "speed_zone_5", "training_load", "cardio_load",
-        "recovery_hours", "muscle_load", "hr_avg", "hr_max", "hrv", "acc_low", "acc_mid",
+        "recovery_hours", "muscle_load", "hr_avg", "hr_max", "hrv", "high_efforts", "acc_low", "acc_mid",
         "acc_high", "dec_low", "dec_mid", "dec_high",
     ]
     for col in numeric_cols:
@@ -1018,7 +1123,10 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
     out["sprint_distance"] = out["speed_zone_5"]
     out["acc_count"] = out[["acc_low", "acc_mid", "acc_high"]].sum(axis=1, min_count=1)
     out["dec_count"] = out[["dec_low", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
-    out["high_efforts"] = out[["acc_mid", "acc_high", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
+    if "high_efforts" not in out.columns or out["high_efforts"].isna().all():
+        out["high_efforts"] = out[["acc_mid", "acc_high", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
+    else:
+        out["high_efforts"] = to_numeric(out["high_efforts"])
     if "distance_per_min" not in out.columns or out["distance_per_min"].isna().all():
         if "total_distance" in out.columns:
             out["distance_per_min"] = out["total_distance"] / out["duration_min"]
@@ -4018,26 +4126,43 @@ if use_demo_data and uploaded is None:
     selected_sheet = "Mintaadatok"
 else:
     sheets = read_excel_all(uploaded)
+    sheets = prepare_uploaded_sheets(sheets)
     sheet_names = list(sheets.keys())
     with st.sidebar:
         selected_sheet = st.selectbox("Melyik munkalapot használjuk?", sheet_names, index=0)
     raw_df = sheets[selected_sheet]
 
-df, mapping, missing_core = standardize_dataframe(raw_df)
+# Ha a felhasználó a mapperrel már alkalmazott kézi mappinget, azt használjuk.
+if "mapped_df_override" in st.session_state and isinstance(st.session_state["mapped_df_override"], pd.DataFrame) and not st.session_state["mapped_df_override"].empty:
+    df = st.session_state["mapped_df_override"].copy()
+    mapping = st.session_state.get("manual_mapping", {})
+    missing_core = []
+else:
+    df, mapping, missing_core = standardize_dataframe(raw_df)
+
 st.session_state['last_raw_df'] = raw_df
-df = add_position_group(df)
-df, demo_limit_info = apply_demo_limits(df)
 
 if missing_core:
     st.error(f"Hiányzó alapmezők: {', '.join(missing_core)}")
     st.write("Oszlopmapping:", mapping)
-    st.stop()
+    st.info("Nyisd le lent a Smart Excel Mappert. Most már nem állítjuk meg az appot, hogy kézzel javítható legyen a mapping.")
+    # Minimális üres standard df, hogy a mapper és a nyers adatnézet elérhető maradjon.
+    df = pd.DataFrame(columns=["player_name", "session_type", "start_time", "session_date", "week"])
+
+df = add_position_group(df)
+df, demo_limit_info = apply_demo_limits(df)
+
+if df.empty or "week" not in df.columns or df["week"].dropna().empty:
+    st.warning("A fájl még nem értelmezhető elemzésre. Ellenőrizd a Smart Excel Mapperben a kötelező mezőket: játékos, típus, kezdési idő.")
 
 render_demo_limit_notice(demo_limit_info if 'demo_limit_info' in globals() else {})
 
-weeks = sorted(df["week"].dropna().unique().tolist())
-players = sorted(df["player_name"].dropna().unique().tolist())
-session_types = sorted(df["session_type"].dropna().unique().tolist())
+weeks = sorted(df["week"].dropna().unique().tolist()) if "week" in df.columns else []
+players = sorted(df["player_name"].dropna().unique().tolist()) if "player_name" in df.columns else []
+session_types = sorted(df["session_type"].dropna().unique().tolist()) if "session_type" in df.columns else []
+
+if not weeks or not players:
+    st.stop()
 
 with st.sidebar:
     st.header("Szűrők")
@@ -4813,6 +4938,11 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
                 st.success("Mapping profil betöltve.")
 
         st.dataframe(mapping_quality_df(raw_df, current_mapping) if 'mapping_quality_df' in globals() else pd.DataFrame(), use_container_width=True)
+
+        if st.button("♻️ Mapping override törlése", use_container_width=True, key="clear_mapping_override"):
+            st.session_state.pop("mapped_df_override", None)
+            st.session_state.pop("manual_mapping", None)
+            st.rerun()
 
         st.markdown("#### Kézi javítás")
         source_options = [""] + list(raw_df.columns)
