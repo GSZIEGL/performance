@@ -45,6 +45,8 @@ try:
 except Exception:
     create_client = None
 
+FPI_IMPORT_ENGINE_VERSION = "FPI_REALFIX_2026_06_16_V057_GENERAL_EXCEL_IMPORT"
+
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
 # -----------------------------------------------------------------------------
@@ -1057,56 +1059,38 @@ def normalize_session_type(x: object) -> str:
 
 
 
-def _plausible_fpi_datetime(x: object) -> pd.Timestamp:
-    """Csak reális sportadat dátumot enged át.
-    Ez megakadályozza, hogy mezszámok / játékos ID-k / értékek évszámként (pl. 9946-W01) bekerüljenek.
-    """
-    dt = pd.to_datetime(x, errors="coerce")
-    if pd.isna(dt):
-        return pd.NaT
+def _plausible_datetime(dt: object) -> Optional[pd.Timestamp]:
+    """Csak életszerű sportadat-dátumot enged át. Mezszám/ID ne lehessen év."""
     try:
-        year = int(dt.year)
-        # Futball GPS történeti/import adatokhoz bő, de reális tartomány.
-        if year < 2015 or year > 2035:
-            return pd.NaT
-        return dt
+        ts = pd.to_datetime(dt, errors="coerce", dayfirst=True)
+        if pd.isna(ts):
+            return None
+        if 2015 <= int(ts.year) <= 2035:
+            return ts
     except Exception:
-        return pd.NaT
-
-
-def _plausible_fpi_datetime_series(series: pd.Series) -> pd.Series:
-    parsed = pd.to_datetime(series, errors="coerce")
-    if parsed.empty:
-        return parsed
-    years = parsed.dt.year
-    parsed = parsed.mask((years < 2015) | (years > 2035))
-    return parsed
+        return None
+    return None
 
 
 def extract_date_from_text(text: object) -> Optional[pd.Timestamp]:
-    """Dátum kinyerése GPS Split/lapnév/szöveg mezőből.
+    """Dátum kinyerése szövegből, de csak valódi dátummintából.
 
-    V5.5 javítás: nem fogad el önmagában álló 3-4 jegyű számokat dátumnak,
-    mert ezekből pandas képes irreális éveket csinálni (pl. 9946-W01).
-    Csak reális, 2015–2035 közötti dátum mehet tovább.
+    Fontos: a puszta számokat (pl. mezszám: 49, 9946) nem értelmezzük dátumként.
+    Ez akadályozza meg a 9946-W01 típusú hibás hetek képződését.
     """
     s = str(text or "").strip()
     if not s or s.lower() in ["nan", "none", "nat"]:
         return None
 
-    # Tiszta 1-4 jegyű szám nem dátum az FPI-ben (gyakran mezszám, ID, érték).
-    if re.fullmatch(r"\d{1,4}(\.0+)?", s):
-        return None
-
-    # Excel serial dátum fallback: 2015-2035 közé kell esnie.
-    try:
-        if re.fullmatch(r"\d{5}(\.\d+)?", s):
+    # Puszta szám nem dátum, kivéve Excel serial tartomány.
+    if re.fullmatch(r"\d+(\.\d+)?", s):
+        try:
             val = float(s)
-            if 42005 <= val <= 49675:  # kb. 2015-01-01 .. 2035-12-31
-                return _plausible_fpi_datetime(pd.to_datetime(val, unit="D", origin="1899-12-30", errors="coerce"))
-            return None
-    except Exception:
-        pass
+            if 25000 < val < 90000:
+                return _plausible_datetime(pd.to_datetime(val, unit="D", origin="1899-12-30", errors="coerce"))
+        except Exception:
+            pass
+        return None
 
     patterns = [
         (r"(20\d{2})[-._/ ](\d{1,2})[-._/ ](\d{1,2})", "ymd"),
@@ -1117,172 +1101,66 @@ def extract_date_from_text(text: object) -> Optional[pd.Timestamp]:
         if m:
             try:
                 if mode == "ymd":
-                    dt = pd.to_datetime(f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", errors="coerce")
-                else:
-                    dt = pd.to_datetime(f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", errors="coerce")
-                dt = _plausible_fpi_datetime(dt)
-                return dt if pd.notna(dt) else None
+                    return _plausible_datetime(f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}")
+                return _plausible_datetime(f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}")
             except Exception:
                 pass
 
-    # 02.01. jellegű lapnév. Csak akkor, ha tényleg dátum-szerű pontozott forma.
+    # 02.01. jellegű lapnév / split. Csak akkor, ha tényleg dátumszerű pontozás van benne.
     m = re.search(r"(?<!\d)(\d{1,2})\.(\d{1,2})\.(?!\d)", s)
     if m:
         year = datetime.now().year
-        dt = pd.to_datetime(f"{year}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", errors="coerce")
-        dt = _plausible_fpi_datetime(dt)
-        return dt if pd.notna(dt) else None
+        return _plausible_datetime(f"{year}-{int(m.group(2)):02d}-{int(m.group(1)):02d}")
 
-    # Általános pandas csak akkor, ha a szöveg tartalmaz dátumelválasztót vagy hónapnevet.
-    # Így a '9946' / '9399' típusú értékek nem lesznek dátumok.
-    month_words = "jan feb mar apr may jun jul aug sep oct nov dec január januar február március marcius április aprilis május majus június junius július julius augusztus szeptember október oktober november december"
-    looks_date_like = any(ch in s for ch in ["-", "/", ".", ":"]) or any(w in s.lower() for w in month_words.split())
-    if looks_date_like:
-        dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
-        dt = _plausible_fpi_datetime(dt)
-        if pd.notna(dt):
-            return dt
-    return None
+    # Általános parser csak akkor, ha van benne dátumelválasztó vagy hónap/év jelleg.
+    if not re.search(r"[-./:]|20\d{2}", s):
+        return None
+    return _plausible_datetime(pd.to_datetime(s, errors="coerce", dayfirst=True))
+
 
 def parse_datetime_series(series: pd.Series, fallback_source: Optional[pd.Series] = None, sheet_name: str = "") -> pd.Series:
-    """Robusztus dátumfelismerés oszlopból, majd fallback Split/lapnév alapján."""
-    if series is None:
-        base = pd.Series([pd.NaT] * (len(fallback_source) if fallback_source is not None else 0))
-    else:
-        base = pd.to_datetime(series, errors="coerce", dayfirst=True)
-        base = _plausible_fpi_datetime_series(base)
-        if base.isna().mean() > 0.5:
-            base2 = series.apply(extract_date_from_text)
-            base = base.fillna(base2)
-    if fallback_source is not None:
-        fallback = fallback_source.apply(extract_date_from_text)
-        base = base.fillna(fallback)
-    sheet_dt = extract_date_from_text(sheet_name)
-    if sheet_dt is not None and pd.notna(sheet_dt):
-        base = base.fillna(sheet_dt)
-    return base
+    """Robusztus, de védett dátumfelismerés.
 
-
-# -----------------------------------------------------------------------------
-# FPI_REALFIX_2026_06_16_V055_PLAUSIBLE_DATE_GUARD
-# FPI_REALFIX_2026_06_16_V054_DATE_COLUMN_RESCUE
-# Cél: ha a mapper rossz/konstans dátumoszlopra áll, ne ragadjon minden 2026-W01-en.
-# -----------------------------------------------------------------------------
-def _date_column_name_score(col: object) -> int:
-    s = _norm_mapping_text(col)
-    score = 0
-    strong = ["date", "datum", "dátum", "nap", "day", "session date", "start date", "kezd", "split", "week", "het", "hét", "md"]
-    for token in strong:
-        if _norm_mapping_text(token) in s:
-            score += 35
-    if s in ["kezdesi ido", "kezdes", "start time", "start", "date", "datum", "session date", "split"]:
-        score += 45
-    return score
-
-
-def _as_datetime_candidate(series: pd.Series) -> pd.Series:
-    """Egy potenciális dátumoszlop robusztus próbaparsolása, irreális évek kiszűrésével."""
-    if series is None:
-        return pd.Series(dtype="datetime64[ns]")
-    parsed = pd.to_datetime(series, errors="coerce", dayfirst=True)
-    parsed = _plausible_fpi_datetime_series(parsed)
-    # Ha a pandas kevés reális dátumot talál, regex/szöveges mentés.
-    if parsed.notna().sum() < max(3, int(len(series) * 0.20)):
-        parsed2 = series.apply(extract_date_from_text)
-        parsed = parsed.fillna(parsed2)
-    parsed = pd.to_datetime(parsed, errors="coerce")
-    parsed = _plausible_fpi_datetime_series(parsed)
-    return parsed
-
-def find_best_date_series(df: pd.DataFrame, current_source: Optional[str] = None, sheet_name: str = "") -> Tuple[pd.Series, Optional[str], pd.DataFrame]:
-    """Megkeresi a legjobb dátumforrást a teljes raw df-ben.
-
-    Fontos: nem elég az, hogy sok sor dátumnak látszik; több különböző nap/hét is kell.
-    Ez oldja azt a hibát, amikor a generált 'Kezdési idő' fallback minden sorban 2026-01-01.
+    Sorrend:
+    1) Ha az oszlop eleve dátum/datetime, azt használja.
+    2) Szöveges dátumokat parse-ol.
+    3) Csak sikertelen esetben néz Split/lapnév fallbacket.
+    4) 2015-2035 közötti dátumokat fogad el.
     """
-    rows = []
-    best_score = -10**9
-    best_col = None
-    best_series = pd.Series([pd.NaT] * len(df), index=df.index)
-    current_source_clean = clean_col_name(current_source) if current_source else None
+    n = len(series) if series is not None else (len(fallback_source) if fallback_source is not None else 0)
+    if series is None:
+        base = pd.Series([pd.NaT] * n)
+    else:
+        # Excel/pandas datetime oszlopnál ez a legfontosabb út: ne fusson rá text-rescue.
+        base = pd.to_datetime(series, errors="coerce", dayfirst=True)
+        base = base.apply(lambda x: _plausible_datetime(x) if pd.notna(x) else pd.NaT)
 
-    for col in df.columns:
-        s = df[col]
-        parsed = _as_datetime_candidate(s)
-        valid = int(parsed.notna().sum())
-        unique_days = int(parsed.dt.date.nunique()) if valid else 0
-        unique_weeks = int(parsed.dt.to_period("W-SUN").nunique()) if valid else 0
-        unique_years = int(parsed.dt.year.nunique()) if valid else 0
-        valid_ratio = valid / max(1, len(df))
-        name_score = _date_column_name_score(col)
-        # Büntessük a konstans dátumot, még ha sok sorban szerepel is.
-        score = int(valid_ratio * 100) + unique_days * 18 + unique_weeks * 45 + name_score
-        if unique_days <= 1:
-            score -= 160
-        # Ha egy oszlop túl sok különböző évre szóródik, az biztosan nem dátumoszlop,
-        # hanem szám/id/érték, amit pandas évnek értelmezett.
-        if unique_years > 3:
-            score -= 1000
-        if current_source_clean and clean_col_name(col) == current_source_clean:
-            score += 8
-        rows.append({
-            "oszlop": str(col),
-            "ervenyes_datum_sor": valid,
-            "kulonbozo_nap": unique_days,
-            "kulonbozo_het": unique_weeks,
-            "kulonbozo_ev": unique_years,
-            "nev_pont": name_score,
-            "osszpont": score,
-        })
-        if score > best_score and valid >= max(3, int(len(df) * 0.20)) and unique_years <= 3:
-            best_score = score
-            best_col = col
-            best_series = parsed
+        success_rate = float(base.notna().mean()) if len(base) else 0.0
+        if success_rate < 0.60:
+            text_parsed = series.apply(extract_date_from_text)
+            text_parsed = pd.to_datetime(text_parsed, errors="coerce")
+            if len(text_parsed) and text_parsed.notna().mean() > success_rate:
+                base = base.fillna(text_parsed)
 
-    diag = pd.DataFrame(rows).sort_values("osszpont", ascending=False) if rows else pd.DataFrame()
+    if fallback_source is not None and (len(base) == 0 or base.notna().mean() < 0.60):
+        fallback = fallback_source.apply(extract_date_from_text)
+        fallback = pd.to_datetime(fallback, errors="coerce")
+        base = base.fillna(fallback)
 
-    # Ha nincs többnapos oszlop, de a lapnév dátumot tartalmaz, akkor azt használjuk.
-    if best_col is None or int(best_series.dt.date.nunique()) <= 1:
+    if len(base) and base.notna().mean() < 0.60:
         sheet_dt = extract_date_from_text(sheet_name)
         if sheet_dt is not None and pd.notna(sheet_dt):
-            best_col = f"lapnév: {sheet_name}"
-            best_series = pd.Series([sheet_dt] * len(df), index=df.index)
+            base = base.fillna(sheet_dt)
 
-    return best_series, (str(best_col) if best_col is not None else None), diag
+    return pd.to_datetime(base, errors="coerce")
 
 
-def resolve_start_time_series(df: pd.DataFrame, mapped_series: Optional[pd.Series] = None, mapped_source: Optional[str] = None, sheet_name: str = "") -> Tuple[pd.Series, Optional[str], pd.DataFrame]:
-    """Start time véglegesítése.
-
-    Ha a mappelt dátum üres vagy konstans/fallback jellegű, automatikusan keresünk jobb oszlopot.
+def make_iso_week_series(dt_series: pd.Series) -> pd.Series:
+    """Egységes ISO hét címke: 2025-W29.
+    Így a szűrőben nem pandas dátumtartomány vagy hibás év jelenik meg.
     """
-    fallback_source = None
-    for candidate in ["Split", "Dátum", "Datum", "Date", "Session Date", "Day", "Nap", "Kezdési idő", "Start Time", "Start"]:
-        if candidate in df.columns and clean_col_name(candidate) != clean_col_name(mapped_source):
-            fallback_source = df[candidate]
-            break
-    parsed = parse_datetime_series(mapped_series, fallback_source=fallback_source, sheet_name=sheet_name)
-    valid = int(parsed.notna().sum())
-    unique_days = int(parsed.dt.date.nunique()) if valid else 0
-    unique_weeks = int(parsed.dt.to_period("W-SUN").nunique()) if valid else 0
-
-    best_series, best_col, diag = find_best_date_series(df, current_source=mapped_source, sheet_name=sheet_name)
-    best_valid = int(best_series.notna().sum())
-    best_unique_days = int(best_series.dt.date.nunique()) if best_valid else 0
-    best_unique_weeks = int(best_series.dt.to_period("W-SUN").nunique()) if best_valid else 0
-
-    # Mentés diagnosztikához.
-    try:
-        st.session_state["fpi_date_rescue_diag"] = diag.head(12)
-        st.session_state["fpi_date_rescue_selected"] = best_col
-    except Exception:
-        pass
-
-    # Váltás, ha az aktuális dátum gyakorlatilag konstans, de van jobb többhetes forrás.
-    if (unique_weeks <= 1 and best_unique_weeks > unique_weeks) or (unique_days <= 1 and best_unique_days > unique_days):
-        return best_series, best_col, diag
-
-    return parsed, mapped_source, diag
+    dts = pd.to_datetime(dt_series, errors="coerce")
+    return dts.apply(lambda x: f"{int(x.isocalendar().year)}-W{int(x.isocalendar().week):02d}" if pd.notna(x) else np.nan)
 
 
 def sheet_is_likely_helper(sheet_name: str, raw_df: Optional[pd.DataFrame] = None) -> bool:
@@ -1304,22 +1182,64 @@ def sheet_is_likely_helper(sheet_name: str, raw_df: Optional[pd.DataFrame] = Non
     return sum(1 for h in data_hints if h in sample) < 2
 
 def detect_header_row(raw_df: pd.DataFrame) -> Optional[int]:
-    """Megkeresi, melyik sorban van a valódi fejléc.
-    Tipikus GPS exportnál az első sor üres, a 2. sorban van: Name, Split, Duration...
+    """Általános fejlécfelismerés GPS/Excel exportokhoz.
+
+    Nem fix sorra épít. Az első 50 sort pontozza magyar és angol GPS kulcsszavak alapján.
+    Így működik akkor is, ha a fejléc az első sorban van (MegyeI.xlsx Data lap), és akkor is,
+    ha néhány üres/logó/meta sor előzi meg.
     """
     if raw_df is None or raw_df.empty:
         return None
-    max_scan = min(10, len(raw_df))
+
+    header_keywords = {
+        "player": ["jatekos", "játékos", "player", "athlete", "name", "nev", "név"],
+        "date": ["kezdesi ido", "kezdési idő", "start time", "session date", "date", "datum", "dátum", "split"],
+        "type": ["tipus", "típus", "session type", "type", "training", "match", "edzes", "edzés", "meccs"],
+        "duration": ["idotartam", "időtartam", "duration", "minutes", "time"],
+        "distance": ["teljes tav", "teljes táv", "total distance", "distance", "dist", "tav perc", "táv perc"],
+        "speed": ["maximalis sebesseg", "maximális sebesség", "max speed", "top speed", "velocity"],
+        "load": ["edzesi terheles", "edzési terhelés", "training load", "player load", "workload", "load"],
+        "intensity": ["sprintek", "sprints", "gyorsulas", "gyorsulás", "lassitas", "lassítás", "high efforts"],
+    }
+
+    max_scan = min(50, len(raw_df))
+    best_i: Optional[int] = None
+    best_score = -999
+
     for i in range(max_scan):
-        vals = [str(v).strip().lower() for v in raw_df.iloc[i].tolist() if str(v).strip().lower() not in ["nan", "none", ""]]
-        joined = " | ".join(vals)
-        if ("name" in vals or "player" in joined or "játékos" in joined or "jatekos" in joined) and (
-            "split" in vals or "total distance" in joined or "top speed" in joined or "duration" in joined
-        ):
-            return i
-    return None
+        row = raw_df.iloc[i].tolist()
+        cells = [str(v).strip() for v in row if str(v).strip().lower() not in ["nan", "none", ""]]
+        if not cells:
+            continue
+        joined_raw = " | ".join(cells)
+        joined_norm = _norm_mapping_text(joined_raw)
 
+        score = 0
+        matched_groups = 0
+        for _, kws in header_keywords.items():
+            if any(_norm_mapping_text(k) in joined_norm for k in kws):
+                score += 10
+                matched_groups += 1
 
+        # A fejléc többnyire sok szöveges cellát tartalmaz, kevés tiszta számot.
+        numeric_like = sum(1 for c in cells if re.fullmatch(r"\d+(\.\d+)?", c))
+        text_like = len(cells) - numeric_like
+        if text_like >= 4:
+            score += 8
+        if numeric_like > max(3, text_like):
+            score -= 18
+
+        # Következő sorban legyen valamennyi adat, különben lehet címblokk.
+        if i + 1 < len(raw_df):
+            next_vals = [str(v).strip() for v in raw_df.iloc[i + 1].tolist() if str(v).strip().lower() not in ["nan", "none", ""]]
+            if len(next_vals) >= 3:
+                score += 4
+
+        if matched_groups >= 2 and score > best_score:
+            best_score = score
+            best_i = i
+
+    return best_i if best_score >= 24 else None
 
 def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.DataFrame:
     """Egy munkalap megtisztítása az app számára.
@@ -1378,15 +1298,19 @@ def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.D
     if not any(c in df.columns for c in ["Szakasz neve", "Session Name", "Session"]):
         df["Szakasz neve"] = sheet_name or "GPS mérkőzés"
 
-    # Kezdési idő kinyerése Splitből / dátumoszlopból / lapnévből, ha nincs explicit dátum.
-    # FONTOS: többé nem teszünk minden sorba 2026-01-01 fallbacket, mert ez egy hétre zárta az importot.
-    has_start = any(c in df.columns for c in ["Kezdési idő", "Start Time", "Start", "Date", "Dátum", "Datum", "Session Date", "Day", "Nap", "Split"])
+    # Kezdési idő kinyerése Splitből vagy lapnévből, ha nincs explicit dátum.
+    has_start = any(c in df.columns for c in ["Kezdési idő", "Start Time", "Start", "Date", "Dátum", "Session Date"])
     if not has_start:
-        best_series, best_col, _diag = find_best_date_series(df, current_source=None, sheet_name=sheet_name)
-        if best_series is not None and best_series.notna().any():
-            df["Kezdési idő"] = best_series
-        else:
-            df["Kezdési idő"] = pd.NaT
+        dates = []
+        split_col = "Split" if "Split" in df.columns else None
+        for _, row in df.iterrows():
+            dt = extract_date_from_text(row.get(split_col, "")) if split_col else None
+            if dt is None or pd.isna(dt):
+                dt = extract_date_from_text(sheet_name)
+            if dt is None or pd.isna(dt):
+                dt = pd.to_datetime("2026-01-01")
+            dates.append(dt.strftime("%Y-%m-%d 17:00"))
+        df["Kezdési idő"] = dates
 
     return df
 
@@ -1470,13 +1394,10 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
 
     out["player_name"] = out["player_name"].astype(str).str.strip()
     out["session_type"] = out["session_type"].apply(normalize_session_type)
-    out["start_time"], rescued_date_col, _date_diag = resolve_start_time_series(
-        df, mapped_series=out["start_time"], mapped_source=mapping.get("start_time"), sheet_name=""
-    )
-    if rescued_date_col and rescued_date_col != mapping.get("start_time"):
-        mapping["start_time"] = rescued_date_col
+    fallback_source = df["Split"] if "Split" in df.columns else None
+    out["start_time"] = parse_datetime_series(out["start_time"], fallback_source=fallback_source)
     out["session_date"] = out["start_time"].dt.date
-    out["week"] = out["start_time"].dt.to_period("W-SUN").astype(str)
+    out["week"] = make_iso_week_series(out["start_time"])
 
     if "duration" in out.columns:
         out["duration_min"] = out["duration"].apply(duration_to_minutes)
@@ -1535,13 +1456,10 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
 
     out["player_name"] = out["player_name"].astype(str).str.strip()
     out["session_type"] = out["session_type"].apply(normalize_session_type)
-    out["start_time"], rescued_date_col, _date_diag = resolve_start_time_series(
-        df, mapped_series=out["start_time"], mapped_source=mapping.get("start_time"), sheet_name=""
-    )
-    if rescued_date_col and rescued_date_col != mapping.get("start_time"):
-        mapping["start_time"] = rescued_date_col
+    fallback_source = df["Split"] if "Split" in df.columns else None
+    out["start_time"] = parse_datetime_series(out["start_time"], fallback_source=fallback_source)
     out["session_date"] = out["start_time"].dt.date
-    out["week"] = out["start_time"].dt.to_period("W-SUN").astype(str)
+    out["week"] = make_iso_week_series(out["start_time"])
     if "duration" in out.columns:
         out["duration_min"] = out["duration"].apply(duration_to_minutes)
     else:
@@ -2869,7 +2787,7 @@ def merge_with_memory(current_df: pd.DataFrame, use_memory: bool) -> pd.DataFram
     if "start_time" in combined.columns:
         combined["start_time"] = pd.to_datetime(combined["start_time"], errors="coerce")
         combined["session_date"] = combined["start_time"].dt.date
-        combined["week"] = combined["start_time"].dt.to_period("W").astype(str)
+        combined["week"] = make_iso_week_series(combined["start_time"])
     return combined
 
 
@@ -5101,7 +5019,6 @@ with st.sidebar:
     st.caption("Demo módban saját adat is feltölthető, de limitált: 8 játékos / 3 hét / 5000 sor.")
     st.divider()
     st.markdown("**Fókusz:** vezetői riport, readiness, risk, edzői teendők.")
-    st.caption("V5.5 REAL DATE RESCUE – 2026-06-16")
 
 if uploaded is None and not use_demo_data:
     st.info("Tölts fel GPS/terhelési Excel fájlt, vagy kapcsold be a minta riportot.")
@@ -5148,26 +5065,6 @@ if df.empty or "week" not in df.columns or df["week"].dropna().empty:
     st.stop()
 
 render_demo_limit_notice(demo_limit_info if 'demo_limit_info' in globals() else {})
-
-with st.sidebar.expander("Import diagnosztika V5.5", expanded=False):
-    st.markdown("**FPI_REALFIX_2026_06_16_V054_DATE_COLUMN_RESCUE**")
-    try:
-        st.json({
-            "felismert_hetek_szama": int(df["week"].nunique()) if "week" in df.columns else 0,
-            "hetek": sorted([str(x) for x in df["week"].dropna().unique().tolist()]) if "week" in df.columns else [],
-            "sorok": int(len(df)),
-            "jatekosok": int(df["player_name"].nunique()) if "player_name" in df.columns else 0,
-            "datum_min": str(df["start_time"].min()) if "start_time" in df.columns and not df.empty else None,
-            "datum_max": str(df["start_time"].max()) if "start_time" in df.columns and not df.empty else None,
-            "mapping_start_time": str(mapping.get("start_time")) if isinstance(mapping, dict) else None,
-            "date_rescue_selected": str(st.session_state.get("fpi_date_rescue_selected", "")),
-        })
-        diag_df = st.session_state.get("fpi_date_rescue_diag")
-        if isinstance(diag_df, pd.DataFrame) and not diag_df.empty:
-            st.caption("Dátumoszlop-jelöltek pontozása")
-            st.dataframe(diag_df, use_container_width=True, hide_index=True)
-    except Exception as _e:
-        st.caption(f"Diagnosztika nem elérhető: {_e}")
 
 weeks = sorted(df["week"].dropna().unique().tolist()) if "week" in df.columns else []
 players = sorted(df["player_name"].dropna().unique().tolist()) if "player_name" in df.columns else []
@@ -6007,7 +5904,7 @@ with tab5:
 
 
 st.divider()
-st.caption("V3.2 HU – Edzőbarát magyar insight nyelv + magyarázó fogalomtár + vezetői export központ.")
+st.caption("V5.7 GENERAL EXCEL IMPORT – Data lap + általános fejlécfelismerés + védett dátumkezelés + ISO hetek.")
 
 # -----------------------------------------------------------------------------
 # V4.4 Smart Excel Mapper + License UI
