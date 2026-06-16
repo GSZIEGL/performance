@@ -676,7 +676,7 @@ st.markdown(
 # Oszlopmapping
 # -----------------------------------------------------------------------------
 STANDARD_COLUMNS = {
-    "player_name": ["Játékos neve", "Player", "Player Name", "Name", "Név", "Játékos", "Athlete", "Athlete Name", "Player full name", "Full Name"],
+    "player_name": ["Játékos neve", "Player", "Player Name", "Name", "name", "Név", "Nev", "Játékos", "Jatekos", "Athlete", "Athlete Name", "Player full name", "Full Name"],
     "session_type": ["Típus", "Type", "Session Type", "Edzés/Meccs", "SessionType", "Activity Type", "Drill Type", "Event Type", "Training/Match"],
     "session_name": ["Szakasz neve", "Session", "Session Name", "Activity", "Drill", "Exercise", "Event", "Session title"],
     "position": ["Poszt", "Position", "Player Position", "Role", "Playing Position", "Post", "Pos"],
@@ -945,6 +945,7 @@ def detect_header_row(raw_df: pd.DataFrame) -> Optional[int]:
     return None
 
 
+
 def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.DataFrame:
     """Egy munkalap megtisztítása az app számára.
     Kezeli:
@@ -958,30 +959,52 @@ def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.D
 
     df = raw_df.copy()
 
-    # Ha pd.read_excel header=0 miatt Unnamed oszlopok vannak, akkor az első adatsorban lehet a valódi fejléc.
-    unnamed_ratio = sum(str(c).startswith("Unnamed") for c in df.columns) / max(1, len(df.columns))
+    # 1) Ha header=None-ból jön, keressük meg a valódi fejlécsort.
     header_row = detect_header_row(df)
-
-    if unnamed_ratio > 0.5 and header_row is not None:
-        new_cols = [clean_col_name(x) if clean_col_name(x) else f"col_{j+1}" for j, x in enumerate(df.iloc[header_row].tolist())]
+    if header_row is not None:
+        new_cols = []
+        for j, x in enumerate(df.iloc[header_row].tolist()):
+            name = clean_col_name(x)
+            new_cols.append(name if name and name.lower() not in ["nan", "none"] else f"col_{j+1}")
         df = df.iloc[header_row + 1:].copy()
         df.columns = new_cols
     else:
-        df.columns = [clean_col_name(c) for c in df.columns]
+        # 2) Ha mégis header=0 jelleggel jönne.
+        df.columns = [clean_col_name(c) if clean_col_name(c) else f"col_{i+1}" for i, c in enumerate(df.columns)]
 
-    # Üres sorok törlése.
+    # Üres és Unnamed oszlopok törlése.
     df = df.dropna(how="all")
-    df = df.loc[:, ~pd.Series(df.columns).astype(str).str.startswith("Unnamed").values]
+    keep_cols = []
+    for c in df.columns:
+        cs = str(c).strip()
+        if not cs:
+            continue
+        if cs.startswith("Unnamed"):
+            continue
+        if cs.lower() in ["nan", "none"]:
+            continue
+        keep_cols.append(c)
+    df = df[keep_cols] if keep_cols else df
+
+    # Cellák whitespace tisztítása szöveges oszlopokban.
+    for c in df.columns:
+        if df[c].dtype == object:
+            df[c] = df[c].apply(lambda x: str(x).strip() if pd.notna(x) else x)
+
+    # Tipikus GPS-export: Name nevű oszlop legyen biztosan felismerhető.
+    # Nem nevezzük át player_name-re itt, csak adunk magyar alias oszlopot, ha kell.
+    if "Name" in df.columns and "Játékos neve" not in df.columns:
+        df["Játékos neve"] = df["Name"]
 
     # Ha nincs típus, ebből a workbookból ez meccsadat.
-    if "Típus" not in df.columns and "Type" not in df.columns and "Session Type" not in df.columns:
+    if not any(c in df.columns for c in ["Típus", "Type", "Session Type", "Edzés/Meccs"]):
         df["Típus"] = "Meccs"
 
-    if "Szakasz neve" not in df.columns and "Session Name" not in df.columns:
+    if not any(c in df.columns for c in ["Szakasz neve", "Session Name", "Session"]):
         df["Szakasz neve"] = sheet_name or "GPS mérkőzés"
 
     # Kezdési idő kinyerése Splitből vagy lapnévből, ha nincs explicit dátum.
-    has_start = any(c in df.columns for c in ["Kezdési idő", "Start Time", "Start", "Date", "Dátum"])
+    has_start = any(c in df.columns for c in ["Kezdési idő", "Start Time", "Start", "Date", "Dátum", "Session Date"])
     if not has_start:
         dates = []
         split_col = "Split" if "Split" in df.columns else None
@@ -1032,6 +1055,17 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
         mapping[std_col] = source
         if source is not None:
             out[std_col] = df[source]
+
+    # GPS export fallback: ha van Name oszlop, az legyen játékosnév.
+    if "player_name" not in out.columns and "Name" in df.columns:
+        out["player_name"] = df["Name"]
+        mapping["player_name"] = "Name"
+    if "session_type" not in out.columns and "Típus" in df.columns:
+        out["session_type"] = df["Típus"]
+        mapping["session_type"] = "Típus"
+    if "start_time" not in out.columns and "Kezdési idő" in df.columns:
+        out["start_time"] = df["Kezdési idő"]
+        mapping["start_time"] = "Kezdési idő"
 
     missing_core = [c for c in CORE_REQUIRED if c not in out.columns]
     if missing_core:
@@ -1135,6 +1169,88 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
     out = out[~out["player_name"].str.lower().str.contains("benchmark|átlag|atlag|összesen|osszesen", na=False)]
     return out, fixed_mapping, []
 
+
+
+
+def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Optional[str]], missing_core: List[str]) -> None:
+    """Mapper blokk akkor is, ha az app még nem tud elemezni.
+    Cél: ne fusson hibára / st.stop előtt legyen javítási lehetőség.
+    """
+    st.markdown("### 🧭 Smart Excel Mapper – kötelező mezők javítása")
+    st.info("A fájl szerkezete eltér a várt sablontól. Állítsd be a kötelező mezőket, majd kattints az alkalmazásra.")
+
+    if raw_df is None or raw_df.empty:
+        st.error("Nincs beolvasható nyers adat.")
+        return
+
+    cols = [""] + [str(c) for c in raw_df.columns]
+    manual = dict(current_mapping or {})
+
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        default = manual.get("player_name") or ("Name" if "Name" in raw_df.columns else ("Játékos neve" if "Játékos neve" in raw_df.columns else ""))
+        manual["player_name"] = st.selectbox(
+            "Játékos neve / Name",
+            cols,
+            index=cols.index(default) if default in cols else 0,
+            key="emergency_map_player_name",
+        ) or None
+
+    with col_b:
+        default = manual.get("session_type") or ("Típus" if "Típus" in raw_df.columns else "")
+        manual["session_type"] = st.selectbox(
+            "Típus / Edzés-Meccs",
+            cols,
+            index=cols.index(default) if default in cols else 0,
+            key="emergency_map_session_type",
+        ) or None
+
+    with col_c:
+        default = manual.get("start_time") or ("Kezdési idő" if "Kezdési idő" in raw_df.columns else ("Split" if "Split" in raw_df.columns else ""))
+        manual["start_time"] = st.selectbox(
+            "Kezdési idő / dátum",
+            cols,
+            index=cols.index(default) if default in cols else 0,
+            key="emergency_map_start_time",
+        ) or None
+
+    with st.expander("Haladó oszlopok mappingje", expanded=False):
+        optional_fields = [
+            "duration", "total_distance", "distance_per_min", "max_speed", "sprints",
+            "speed_zone_4", "speed_zone_5", "training_load", "muscle_load",
+            "hr_avg", "hr_max", "acc_high", "dec_high", "high_efforts"
+        ]
+        for std_col in optional_fields:
+            default = manual.get(std_col) or ""
+            manual[std_col] = st.selectbox(
+                f"{std_col}",
+                cols,
+                index=cols.index(default) if default in cols else 0,
+                key=f"emergency_map_{std_col}",
+            ) or None
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("✅ Mapping alkalmazása", use_container_width=True, key="apply_emergency_mapping"):
+            mapped_df, fixed_mapping, missing = apply_mapping_to_raw(raw_df, manual)
+            if missing:
+                st.error(f"Még hiányzik: {', '.join(missing)}")
+            else:
+                st.session_state["mapped_df_override"] = mapped_df
+                st.session_state["manual_mapping"] = fixed_mapping
+                st.success("Mapping alkalmazva. Újratöltöm az elemzést.")
+                st.rerun()
+
+    with c2:
+        if st.button("♻️ Mapping törlése", use_container_width=True, key="clear_emergency_mapping"):
+            st.session_state.pop("mapped_df_override", None)
+            st.session_state.pop("manual_mapping", None)
+            st.rerun()
+
+    st.markdown("#### Beolvasott oszlopok")
+    st.write(list(raw_df.columns))
+    st.markdown("#### Adat előnézet")
+    st.dataframe(raw_df.head(8), use_container_width=True)
 
 
 def aggregate_weekly(df: pd.DataFrame) -> pd.DataFrame:
@@ -4153,7 +4269,9 @@ df = add_position_group(df)
 df, demo_limit_info = apply_demo_limits(df)
 
 if df.empty or "week" not in df.columns or df["week"].dropna().empty:
-    st.warning("A fájl még nem értelmezhető elemzésre. Ellenőrizd a Smart Excel Mapperben a kötelező mezőket: játékos, típus, kezdési idő.")
+    st.warning("A fájl még nem értelmezhető elemzésre. Javítsd a kötelező mezőket a Smart Excel Mapperben.")
+    render_emergency_mapper(raw_df, mapping, missing_core if "missing_core" in globals() else [])
+    st.stop()
 
 render_demo_limit_notice(demo_limit_info if 'demo_limit_info' in globals() else {})
 
@@ -4162,6 +4280,7 @@ players = sorted(df["player_name"].dropna().unique().tolist()) if "player_name" 
 session_types = sorted(df["session_type"].dropna().unique().tolist()) if "session_type" in df.columns else []
 
 if not weeks or not players:
+    render_emergency_mapper(raw_df, mapping if "mapping" in globals() else {}, missing_core if "missing_core" in globals() else [])
     st.stop()
 
 with st.sidebar:
