@@ -704,6 +704,7 @@ STANDARD_COLUMNS = {
     "dec_low": ["Gyorsulások száma (-2.49 - -2.00 m/s²)"],
     "dec_mid": ["Gyorsulások száma (-2.99 - -2.50 m/s²)"],
     "dec_high": ["Gyorsulások száma (-50.00 - -3.00 m/s²)", "Total Decelerations  ()", "Total Decelerations", "Decelerations (2+3)  ()", "Decelerations (2+3)"],
+    "high_efforts": ["High Efforts", "High Effort", "High efforts", "Nagy intenzitású erőfeszítések", "Nagy intenzitású akciók", "Explosive Efforts", "Explosive efforts", "High Intensity Efforts", "HIE", "Efforts High", "HI Efforts"],
 }
 
 CORE_REQUIRED = ["player_name", "session_type", "start_time"]
@@ -843,22 +844,35 @@ def render_mapping_score(mapping: Dict[str, Optional[str]]) -> None:
 
 
 def normalize_combined_fields(out: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> pd.DataFrame:
-    """Összevont GPS mezők kezelése, pl. Distance(4+5)."""
+    """Összevont GPS mezők kezelése, pl. Distance(4+5).
+    Ha csak 4+5 oszlop van, azt HSR-ként használjuk. A sprint distance ilyenkor becslés,
+    de az eredeti összevont értéket nem duplázzuk a HSR számításnál.
+    """
     out = out.copy()
     src_z4 = str(mapping.get("speed_zone_4") or "").lower()
+    src_z5 = str(mapping.get("speed_zone_5") or "").lower()
     combined_45 = any(x in src_z4 for x in ["4+5", "hsr", "high speed"])
     out["combined_zone_4_5_used"] = bool(combined_45)
 
-    if ("speed_zone_5" not in out.columns or out["speed_zone_5"].fillna(0).sum() == 0) and combined_45 and "speed_zone_4" in out.columns:
+    if "speed_zone_4" not in out.columns:
+        out["speed_zone_4"] = 0
+    if "speed_zone_5" not in out.columns:
+        out["speed_zone_5"] = 0
+
+    z5_missing = out["speed_zone_5"].fillna(0).sum() == 0
+    if z5_missing and combined_45 and out["speed_zone_4"].fillna(0).sum() > 0:
         out["speed_zone_5"] = out["speed_zone_4"] * 0.30
         out["estimated_sprint_distance"] = True
     else:
         out["estimated_sprint_distance"] = False
+
+    # HSR: külön z4+z5 esetén összeg, összevont 4+5 esetén maga az összevont oszlop.
+    if combined_45:
+        out["hsr_distance"] = out["speed_zone_4"]
+    else:
+        out["hsr_distance"] = out[["speed_zone_4", "speed_zone_5"]].sum(axis=1, min_count=1)
+    out["sprint_distance"] = out["speed_zone_5"]
     return out
-
-
-
-
 
 # -----------------------------------------------------------------------------
 # V4.5 - Smart Mapper fallback helpers
@@ -1044,18 +1058,85 @@ def normalize_session_type(x: object) -> str:
 
 
 def extract_date_from_text(text: object) -> Optional[pd.Timestamp]:
-    """Dátum kinyerése GPS Split/lapnév szövegből."""
-    s = str(text or "")
-    # 2026-2-1 / 2026.02.01 / 2026_02_01
-    m = re.search(r"(20\d{2})[-._/ ](\d{1,2})[-._/ ](\d{1,2})", s)
+    """Dátum kinyerése GPS Split/lapnév/szöveg mezőből.
+    Kezeli a tipikus magyar és angol formátumokat is: YYYY-MM-DD, YYYY.MM.DD,
+    DD.MM.YYYY, DD/MM/YYYY, valamint DD.MM. lapnév esetén ésszerű év fallback.
+    """
+    s = str(text or "").strip()
+    if not s or s.lower() in ["nan", "none", "nat"]:
+        return None
+
+    # Excel serial dátum fallback
+    try:
+        if re.fullmatch(r"\d{5}(\.\d+)?", s):
+            val = float(s)
+            if 25000 < val < 90000:
+                return pd.to_datetime(val, unit="D", origin="1899-12-30", errors="coerce")
+    except Exception:
+        pass
+
+    patterns = [
+        (r"(20\d{2})[-._/ ](\d{1,2})[-._/ ](\d{1,2})", "ymd"),
+        (r"(\d{1,2})[-._/ ](\d{1,2})[-._/ ](20\d{2})", "dmy"),
+    ]
+    for pat, mode in patterns:
+        m = re.search(pat, s)
+        if m:
+            try:
+                if mode == "ymd":
+                    return pd.to_datetime(f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", errors="coerce")
+                return pd.to_datetime(f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", errors="coerce")
+            except Exception:
+                pass
+
+    # 02.01. jellegű lapnév. Az évnél először az aktuális évet használjuk,
+    # de ha ez nagyon jövőbeli lenne, pandas úgyis csak heti bontáshoz használja.
+    m = re.search(r"(?<!\d)(\d{1,2})\.(\d{1,2})\.(?!\d)", s)
     if m:
-        return pd.to_datetime(f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", errors="coerce")
-    # 02.01. jellegű lapnév. Év fallback: aktuális év helyett sportidényhez 2026.
-    m = re.search(r"(\d{1,2})\.(\d{1,2})\.", s)
-    if m:
-        return pd.to_datetime(f"2026-{int(m.group(1)):02d}-{int(m.group(2)):02d}", errors="coerce")
+        year = datetime.now().year
+        return pd.to_datetime(f"{year}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", errors="coerce")
+
+    dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
+    if pd.notna(dt):
+        return dt
     return None
 
+
+def parse_datetime_series(series: pd.Series, fallback_source: Optional[pd.Series] = None, sheet_name: str = "") -> pd.Series:
+    """Robusztus dátumfelismerés oszlopból, majd fallback Split/lapnév alapján."""
+    if series is None:
+        base = pd.Series([pd.NaT] * (len(fallback_source) if fallback_source is not None else 0))
+    else:
+        base = pd.to_datetime(series, errors="coerce", dayfirst=True)
+        if base.isna().mean() > 0.5:
+            base2 = series.apply(extract_date_from_text)
+            base = base.fillna(base2)
+    if fallback_source is not None:
+        fallback = fallback_source.apply(extract_date_from_text)
+        base = base.fillna(fallback)
+    sheet_dt = extract_date_from_text(sheet_name)
+    if sheet_dt is not None and pd.notna(sheet_dt):
+        base = base.fillna(sheet_dt)
+    return base
+
+
+def sheet_is_likely_helper(sheet_name: str, raw_df: Optional[pd.DataFrame] = None) -> bool:
+    """Segédlapok kizárása az összesített adatlapból."""
+    name = _norm_mapping_text(sheet_name)
+    helper_tokens = [
+        "dashboard", "riport", "report", "summary", "osszefoglalo", "összefoglaló",
+        "benchmark", "benchmarks", "mapping", "mapper", "settings", "beallitas",
+        "útmutató", "utmutato", "guide", "help", "readme", "sablon", "template",
+        "pivot", "chart", "diagram", "grafikon", "calc", "szamitas", "reference",
+        "lista", "players", "jatekoslista", "metadata"
+    ]
+    if any(tok in name for tok in helper_tokens):
+        return True
+    if raw_df is None or raw_df.empty:
+        return True
+    sample = " ".join([str(x).lower() for x in raw_df.head(8).fillna("").astype(str).values.ravel()[:200]])
+    data_hints = ["name", "player", "játékos", "jatekos", "total distance", "teljes táv", "duration", "split", "date", "dátum", "datum"]
+    return sum(1 for h in data_hints if h in sample) < 2
 
 def detect_header_row(raw_df: pd.DataFrame) -> Optional[int]:
     """Megkeresi, melyik sorban van a valódi fejléc.
@@ -1150,20 +1231,46 @@ def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.D
 
 
 def prepare_uploaded_sheets(sheets: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-    """Minden feltöltött munkalapot normalizál, és létrehoz egy összesített lapot is."""
+    """Munkalapok normalizálása.
+    - Data/adat lap elsődleges és első helyen jelenik meg.
+    - Segédlapok nem kerülnek az összesített adatlapba.
+    - Ha van Data lap, az lesz a default; ha nincs, csak a valószínű adatlapok összesülnek.
+    """
     prepared: Dict[str, pd.DataFrame] = {}
-    frames = []
-    for name, raw in sheets.items():
+    relevant_frames: List[pd.DataFrame] = []
+    data_like_names = []
+
+    def is_data_sheet_name(n: str) -> bool:
+        nn = _norm_mapping_text(n)
+        return nn in ["data", "adat", "adatok", "gps data", "gps", "raw data", "nyers adat", "nyers adatok"]
+
+    ordered_items = sorted(sheets.items(), key=lambda kv: (0 if is_data_sheet_name(kv[0]) else 1, kv[0]))
+    for name, raw in ordered_items:
         clean = normalize_uploaded_sheet(raw, name)
-        if clean is not None and not clean.empty:
-            prepared[name] = clean
-            frames.append(clean)
-    if frames:
-        prepared = {"Összes munkalap": pd.concat(frames, ignore_index=True)} | prepared
-    return prepared if prepared else sheets
+        if clean is None or clean.empty:
+            continue
+        prepared[name] = clean
+        if not sheet_is_likely_helper(name, raw):
+            relevant_frames.append(clean)
+            data_like_names.append(name)
 
+    final: Dict[str, pd.DataFrame] = {}
+    data_names = [n for n in prepared if is_data_sheet_name(n)]
+    if data_names:
+        # Data lap legyen az elsődleges: a felhasználó ezt látja elsőként.
+        for n in data_names:
+            final[n] = prepared[n]
+        # Az összesített lap csak releváns adatlapokból épül, segédlapok nélkül.
+        frames = [prepared[n] for n in data_like_names if n in prepared]
+        if frames:
+            final["Összes releváns adatlap"] = pd.concat(frames, ignore_index=True)
+    elif relevant_frames:
+        final["Összes releváns adatlap"] = pd.concat(relevant_frames, ignore_index=True)
 
-
+    for name, df_sheet in prepared.items():
+        if name not in final:
+            final[name] = df_sheet
+    return final if final else sheets
 
 @st.cache_data(show_spinner=False)
 def read_excel_all(file) -> Dict[str, pd.DataFrame]:
@@ -1202,9 +1309,10 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
 
     out["player_name"] = out["player_name"].astype(str).str.strip()
     out["session_type"] = out["session_type"].apply(normalize_session_type)
-    out["start_time"] = pd.to_datetime(out["start_time"], errors="coerce")
+    fallback_source = df["Split"] if "Split" in df.columns else None
+    out["start_time"] = parse_datetime_series(out["start_time"], fallback_source=fallback_source)
     out["session_date"] = out["start_time"].dt.date
-    out["week"] = out["start_time"].dt.to_period("W").astype(str)
+    out["week"] = out["start_time"].dt.to_period("W-SUN").astype(str)
 
     if "duration" in out.columns:
         out["duration_min"] = out["duration"].apply(duration_to_minutes)
@@ -1263,9 +1371,10 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
 
     out["player_name"] = out["player_name"].astype(str).str.strip()
     out["session_type"] = out["session_type"].apply(normalize_session_type)
-    out["start_time"] = pd.to_datetime(out["start_time"], errors="coerce")
+    fallback_source = df["Split"] if "Split" in df.columns else None
+    out["start_time"] = parse_datetime_series(out["start_time"], fallback_source=fallback_source)
     out["session_date"] = out["start_time"].dt.date
-    out["week"] = out["start_time"].dt.to_period("W").astype(str)
+    out["week"] = out["start_time"].dt.to_period("W-SUN").astype(str)
     if "duration" in out.columns:
         out["duration_min"] = out["duration"].apply(duration_to_minutes)
     else:
@@ -4809,6 +4918,19 @@ with st.sidebar:
 
     use_demo_data = st.toggle("Minta riport mintaadatokkal", value=st.session_state.get("use_demo_data", uploaded is None if 'uploaded' in globals() else True))
     uploaded = st.file_uploader("Saját GPS/terhelési Excel feltöltése", type=["xlsx", "xls"])
+    if uploaded is not None:
+        # Új fájl feltöltésekor ne maradjon bent a régi mapping vagy régi mapped dataframe.
+        try:
+            _bytes = uploaded.getvalue()
+            _sig = hashlib.md5(_bytes).hexdigest()
+        except Exception:
+            _sig = str(getattr(uploaded, "name", "uploaded"))
+        if st.session_state.get("active_upload_signature") != _sig:
+            for _k in ["mapped_df_override", "manual_mapping", "mapper_selected_sheet", "last_raw_df"]:
+                st.session_state.pop(_k, None)
+            st.session_state["active_upload_signature"] = _sig
+    else:
+        st.session_state.pop("active_upload_signature", None)
     st.caption("Demo módban saját adat is feltölthető, de limitált: 8 játékos / 3 hét / 5000 sor.")
     st.divider()
     st.markdown("**Fókusz:** vezetői riport, readiness, risk, edzői teendők.")
@@ -4826,6 +4948,10 @@ else:
     sheet_names = list(sheets.keys())
     with st.sidebar:
         selected_sheet = st.selectbox("Melyik munkalapot használjuk?", sheet_names, index=0)
+    if st.session_state.get("mapper_selected_sheet") != selected_sheet:
+        st.session_state.pop("mapped_df_override", None)
+        st.session_state.pop("manual_mapping", None)
+        st.session_state["mapper_selected_sheet"] = selected_sheet
     raw_df = sheets[selected_sheet]
 
 # Ha a felhasználó a mapperrel már alkalmazott kézi mappinget, azt használjuk.
