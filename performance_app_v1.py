@@ -45,6 +45,8 @@ try:
 except Exception:
     create_client = None
 
+FPI_IMPORT_ENGINE_VERSION = "FPI_REALFIX_2026_06_16_V062_WEEK_RESCUE_KEEPER_PROMPT"
+
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
 # -----------------------------------------------------------------------------
@@ -683,6 +685,7 @@ STANDARD_COLUMNS = {
     "start_time": ["Kezdési idő", "Start Time", "Start", "Dátum", "Date", "Session Date", "Day", "Datum", "Kezdés", "Start date", "StartTime", "Split"],
     "end_time": ["Befejezési idő", "End Time", "End", "Finish", "Befejezés", "EndTime"],
     "duration": ["Időtartam", "Duration", "Time", "Minutes", "Idő", "Időtartam [perc]", "Duration [min]", "Duration min"],
+    "match_minutes": ["Játékperc", "Játékpercek", "Meccsperc", "Meccspercek", "Minutes played", "Minutes Played", "Playing Time", "Match Minutes", "Match minutes", "Player minutes", "On pitch minutes"],
     "total_distance": ["Teljes táv [m]", "Tel\xadjes táv [m]", "Total Distance", "Distance", "Össztáv", "Total distance (m)", "Total Dist", "Dist Total", "Distance [m]", "TD", "Total Distance m"],
     "distance_per_min": ["Táv/perc [m/min]", "Distance/min", "Distance Per Min", "m/min", "Distance per minute", "m per min", "m/minute", "Rel Distance"],
     "max_speed": ["Maximális sebesség [km/h]", "Max Speed", "Maximum Speed", "Top Speed", "Peak Speed", "Max Velocity", "Vmax"],
@@ -740,6 +743,7 @@ MAPPER_FIELD_INFO = {
     "session_type": ("Típus", "Az esemény típusa: Edzés vagy Meccs.", "szöveg", "edzés-meccs összevetés, readiness", True),
     "start_time": ("Kezdési idő / dátum – dátum/idő", "Az edzés vagy mérkőzés dátuma.", "dátum/idő", "heti bontás, mikrociklus, trendek", True),
     "duration": ("Időtartam", "Az esemény hossza.", "perc vagy hh:mm:ss", "táv/perc, intenzitás", False),
+    "match_minutes": ("Játékperc / szereplési idő", "Meccsen ténylegesen pályán töltött perc. Ha nincs külön oszlop, az app meccsnél az időtartamot használja.", "perc vagy hh:mm:ss", "per90 normalizálás, meccs-edzés összevetés", False),
     "total_distance": ("Teljes táv", "Összes megtett távolság.", "méter", "terhelési volumen, heti load, risk", False),
     "distance_per_min": ("Táv/perc", "Relatív futóteljesítmény.", "m/perc", "meccsintenzitás, játékmodell", False),
     "max_speed": ("Maximális sebesség", "Legnagyobb elért sebesség.", "km/h", "max speed trend, frissesség", False),
@@ -817,7 +821,7 @@ def mapping_compatibility_score(mapping: Dict[str, Optional[str]]) -> Tuple[int,
         "player_name": 20, "session_type": 15, "start_time": 15,
         "total_distance": 8, "duration": 5, "distance_per_min": 7,
         "max_speed": 8, "sprints": 5, "speed_zone_4": 5,
-        "speed_zone_5": 7, "training_load": 5, "acc_high": 3,
+        "speed_zone_5": 7, "training_load": 5, "match_minutes": 4, "acc_high": 3,
         "dec_high": 3, "high_efforts": 4,
     }
     total = sum(weights.values())
@@ -911,6 +915,7 @@ def smart_column_score(source_col: object, std_col: str, aliases: List[str]) -> 
         "session_type": ["type", "tipus", "match", "game", "training", "edzes", "meccs"],
         "start_time": ["date", "datum", "start", "day", "ido"],
         "duration": ["duration", "minutes", "perc", "time"],
+        "match_minutes": ["minutes played", "match minutes", "jatekp", "jatekperc", "meccsperc", "playing time"],
         "total_distance": ["distance", "tav", "dist", "total"],
         "distance_per_min": ["min", "minute", "rel", "per"],
         "max_speed": ["max", "speed", "velocity", "vmax"],
@@ -1057,23 +1062,38 @@ def normalize_session_type(x: object) -> str:
 
 
 
+def _plausible_datetime(dt: object) -> Optional[pd.Timestamp]:
+    """Csak életszerű sportadat-dátumot enged át. Mezszám/ID ne lehessen év."""
+    try:
+        ts = pd.to_datetime(dt, errors="coerce", dayfirst=True)
+        if pd.isna(ts):
+            return None
+        if 2015 <= int(ts.year) <= 2035:
+            return ts
+    except Exception:
+        return None
+    return None
+
+
 def extract_date_from_text(text: object) -> Optional[pd.Timestamp]:
-    """Dátum kinyerése GPS Split/lapnév/szöveg mezőből.
-    Kezeli a tipikus magyar és angol formátumokat is: YYYY-MM-DD, YYYY.MM.DD,
-    DD.MM.YYYY, DD/MM/YYYY, valamint DD.MM. lapnév esetén ésszerű év fallback.
+    """Dátum kinyerése szövegből, de csak valódi dátummintából.
+
+    Fontos: a puszta számokat (pl. mezszám: 49, 9946) nem értelmezzük dátumként.
+    Ez akadályozza meg a 9946-W01 típusú hibás hetek képződését.
     """
     s = str(text or "").strip()
     if not s or s.lower() in ["nan", "none", "nat"]:
         return None
 
-    # Excel serial dátum fallback
-    try:
-        if re.fullmatch(r"\d{5}(\.\d+)?", s):
+    # Puszta szám nem dátum, kivéve Excel serial tartomány.
+    if re.fullmatch(r"\d+(\.\d+)?", s):
+        try:
             val = float(s)
             if 25000 < val < 90000:
-                return pd.to_datetime(val, unit="D", origin="1899-12-30", errors="coerce")
-    except Exception:
-        pass
+                return _plausible_datetime(pd.to_datetime(val, unit="D", origin="1899-12-30", errors="coerce"))
+        except Exception:
+            pass
+        return None
 
     patterns = [
         (r"(20\d{2})[-._/ ](\d{1,2})[-._/ ](\d{1,2})", "ymd"),
@@ -1084,40 +1104,99 @@ def extract_date_from_text(text: object) -> Optional[pd.Timestamp]:
         if m:
             try:
                 if mode == "ymd":
-                    return pd.to_datetime(f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", errors="coerce")
-                return pd.to_datetime(f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", errors="coerce")
+                    return _plausible_datetime(f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}")
+                return _plausible_datetime(f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}")
             except Exception:
                 pass
 
-    # 02.01. jellegű lapnév. Az évnél először az aktuális évet használjuk,
-    # de ha ez nagyon jövőbeli lenne, pandas úgyis csak heti bontáshoz használja.
+    # 02.01. jellegű lapnév / split. Csak akkor, ha tényleg dátumszerű pontozás van benne.
     m = re.search(r"(?<!\d)(\d{1,2})\.(\d{1,2})\.(?!\d)", s)
     if m:
         year = datetime.now().year
-        return pd.to_datetime(f"{year}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", errors="coerce")
+        return _plausible_datetime(f"{year}-{int(m.group(2)):02d}-{int(m.group(1)):02d}")
 
-    dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
-    if pd.notna(dt):
-        return dt
-    return None
+    # Általános parser csak akkor, ha van benne dátumelválasztó vagy hónap/év jelleg.
+    if not re.search(r"[-./:]|20\d{2}", s):
+        return None
+    return _plausible_datetime(pd.to_datetime(s, errors="coerce", dayfirst=True))
 
 
 def parse_datetime_series(series: pd.Series, fallback_source: Optional[pd.Series] = None, sheet_name: str = "") -> pd.Series:
-    """Robusztus dátumfelismerés oszlopból, majd fallback Split/lapnév alapján."""
+    """Robusztus, de védett dátumfelismerés.
+
+    Sorrend:
+    1) Ha az oszlop eleve dátum/datetime, azt használja.
+    2) Szöveges dátumokat parse-ol.
+    3) Csak sikertelen esetben néz Split/lapnév fallbacket.
+    4) 2015-2035 közötti dátumokat fogad el.
+    """
+    n = len(series) if series is not None else (len(fallback_source) if fallback_source is not None else 0)
     if series is None:
-        base = pd.Series([pd.NaT] * (len(fallback_source) if fallback_source is not None else 0))
+        base = pd.Series([pd.NaT] * n)
     else:
+        # Excel/pandas datetime oszlopnál ez a legfontosabb út: ne fusson rá text-rescue.
         base = pd.to_datetime(series, errors="coerce", dayfirst=True)
-        if base.isna().mean() > 0.5:
-            base2 = series.apply(extract_date_from_text)
-            base = base.fillna(base2)
-    if fallback_source is not None:
+        base = base.apply(lambda x: _plausible_datetime(x) if pd.notna(x) else pd.NaT)
+
+        success_rate = float(base.notna().mean()) if len(base) else 0.0
+        if success_rate < 0.60:
+            text_parsed = series.apply(extract_date_from_text)
+            text_parsed = pd.to_datetime(text_parsed, errors="coerce")
+            if len(text_parsed) and text_parsed.notna().mean() > success_rate:
+                base = base.fillna(text_parsed)
+
+    if fallback_source is not None and (len(base) == 0 or base.notna().mean() < 0.60):
         fallback = fallback_source.apply(extract_date_from_text)
+        fallback = pd.to_datetime(fallback, errors="coerce")
         base = base.fillna(fallback)
-    sheet_dt = extract_date_from_text(sheet_name)
-    if sheet_dt is not None and pd.notna(sheet_dt):
-        base = base.fillna(sheet_dt)
-    return base
+
+    if len(base) and base.notna().mean() < 0.60:
+        sheet_dt = extract_date_from_text(sheet_name)
+        if sheet_dt is not None and pd.notna(sheet_dt):
+            base = base.fillna(sheet_dt)
+
+    return pd.to_datetime(base, errors="coerce")
+
+
+def make_iso_week_series(dt_series: pd.Series) -> pd.Series:
+    """Egységes ISO hét címke: 2025-W29.
+
+    V6.2 WEEK RESCUE:
+    - csak a dátumrészt használja, az időpontot figyelmen kívül hagyja;
+    - ha egy rövid, összefüggő dátumtartományból irreálisan sok hét keletkezne,
+      akkor a teljes blokkot a kezdődátum ISO hetére menti.
+    Ez védi az appot attól, hogy egymás utáni napokat külön heteknek vegyen,
+    ha a dátumcellában időpont vagy extra szöveg is szerepel.
+    """
+    dts = pd.to_datetime(dt_series, errors="coerce")
+    date_only = dts.dt.normalize() if hasattr(dts, "dt") else pd.to_datetime(dts, errors="coerce")
+    weeks = date_only.apply(lambda x: f"{int(x.isocalendar().year)}-W{int(x.isocalendar().week):02d}" if pd.notna(x) else np.nan)
+
+    valid = date_only.dropna()
+    if len(valid) >= 2:
+        span_days = int((valid.max() - valid.min()).days)
+        unique_weeks = weeks.dropna().nunique()
+        if span_days <= 10 and unique_weeks > 3:
+            anchor = valid.min()
+            rescue_week = f"{int(anchor.isocalendar().year)}-W{int(anchor.isocalendar().week):02d}"
+            weeks = weeks.where(date_only.isna(), rescue_week)
+            st.session_state["week_rescue_applied"] = {
+                "reason": "short_date_span_many_weeks",
+                "span_days": span_days,
+                "original_unique_weeks": int(unique_weeks),
+                "rescued_week": rescue_week,
+                "date_min": str(valid.min()),
+                "date_max": str(valid.max()),
+            }
+        else:
+            st.session_state["week_rescue_applied"] = {
+                "reason": "not_needed",
+                "span_days": span_days,
+                "unique_weeks": int(unique_weeks),
+                "date_min": str(valid.min()),
+                "date_max": str(valid.max()),
+            }
+    return weeks
 
 
 def sheet_is_likely_helper(sheet_name: str, raw_df: Optional[pd.DataFrame] = None) -> bool:
@@ -1139,22 +1218,64 @@ def sheet_is_likely_helper(sheet_name: str, raw_df: Optional[pd.DataFrame] = Non
     return sum(1 for h in data_hints if h in sample) < 2
 
 def detect_header_row(raw_df: pd.DataFrame) -> Optional[int]:
-    """Megkeresi, melyik sorban van a valódi fejléc.
-    Tipikus GPS exportnál az első sor üres, a 2. sorban van: Name, Split, Duration...
+    """Általános fejlécfelismerés GPS/Excel exportokhoz.
+
+    Nem fix sorra épít. Az első 50 sort pontozza magyar és angol GPS kulcsszavak alapján.
+    Így működik akkor is, ha a fejléc az első sorban van (MegyeI.xlsx Data lap), és akkor is,
+    ha néhány üres/logó/meta sor előzi meg.
     """
     if raw_df is None or raw_df.empty:
         return None
-    max_scan = min(10, len(raw_df))
+
+    header_keywords = {
+        "player": ["jatekos", "játékos", "player", "athlete", "name", "nev", "név"],
+        "date": ["kezdesi ido", "kezdési idő", "start time", "session date", "date", "datum", "dátum", "split"],
+        "type": ["tipus", "típus", "session type", "type", "training", "match", "edzes", "edzés", "meccs"],
+        "duration": ["idotartam", "időtartam", "duration", "minutes", "time"],
+        "distance": ["teljes tav", "teljes táv", "total distance", "distance", "dist", "tav perc", "táv perc"],
+        "speed": ["maximalis sebesseg", "maximális sebesség", "max speed", "top speed", "velocity"],
+        "load": ["edzesi terheles", "edzési terhelés", "training load", "player load", "workload", "load"],
+        "intensity": ["sprintek", "sprints", "gyorsulas", "gyorsulás", "lassitas", "lassítás", "high efforts"],
+    }
+
+    max_scan = min(50, len(raw_df))
+    best_i: Optional[int] = None
+    best_score = -999
+
     for i in range(max_scan):
-        vals = [str(v).strip().lower() for v in raw_df.iloc[i].tolist() if str(v).strip().lower() not in ["nan", "none", ""]]
-        joined = " | ".join(vals)
-        if ("name" in vals or "player" in joined or "játékos" in joined or "jatekos" in joined) and (
-            "split" in vals or "total distance" in joined or "top speed" in joined or "duration" in joined
-        ):
-            return i
-    return None
+        row = raw_df.iloc[i].tolist()
+        cells = [str(v).strip() for v in row if str(v).strip().lower() not in ["nan", "none", ""]]
+        if not cells:
+            continue
+        joined_raw = " | ".join(cells)
+        joined_norm = _norm_mapping_text(joined_raw)
 
+        score = 0
+        matched_groups = 0
+        for _, kws in header_keywords.items():
+            if any(_norm_mapping_text(k) in joined_norm for k in kws):
+                score += 10
+                matched_groups += 1
 
+        # A fejléc többnyire sok szöveges cellát tartalmaz, kevés tiszta számot.
+        numeric_like = sum(1 for c in cells if re.fullmatch(r"\d+(\.\d+)?", c))
+        text_like = len(cells) - numeric_like
+        if text_like >= 4:
+            score += 8
+        if numeric_like > max(3, text_like):
+            score -= 18
+
+        # Következő sorban legyen valamennyi adat, különben lehet címblokk.
+        if i + 1 < len(raw_df):
+            next_vals = [str(v).strip() for v in raw_df.iloc[i + 1].tolist() if str(v).strip().lower() not in ["nan", "none", ""]]
+            if len(next_vals) >= 3:
+                score += 4
+
+        if matched_groups >= 2 and score > best_score:
+            best_score = score
+            best_i = i
+
+    return best_i if best_score >= 24 else None
 
 def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.DataFrame:
     """Egy munkalap megtisztítása az app számára.
@@ -1312,7 +1433,7 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
     fallback_source = df["Split"] if "Split" in df.columns else None
     out["start_time"] = parse_datetime_series(out["start_time"], fallback_source=fallback_source)
     out["session_date"] = out["start_time"].dt.date
-    out["week"] = out["start_time"].dt.to_period("W-SUN").astype(str)
+    out["week"] = make_iso_week_series(out["start_time"])
 
     if "duration" in out.columns:
         out["duration_min"] = out["duration"].apply(duration_to_minutes)
@@ -1320,7 +1441,7 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
         out["duration_min"] = np.nan
 
     numeric_cols = [
-        "total_distance", "distance_per_min", "max_speed", "avg_speed", "sprints",
+        "total_distance", "distance_per_min", "max_speed", "avg_speed", "sprints", "match_minutes",
         "speed_zone_3", "speed_zone_4", "speed_zone_5", "training_load", "cardio_load",
         "recovery_hours", "muscle_load", "hr_avg", "hr_max", "hrv", "high_efforts", "acc_low", "acc_mid",
         "acc_high", "dec_low", "dec_mid", "dec_high",
@@ -1351,6 +1472,7 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
     out = out.dropna(subset=["start_time"])
     out = out[out["player_name"].str.len() > 0]
     out = out[~out["player_name"].str.lower().str.contains("benchmark|átlag|atlag|összesen|osszesen", na=False)]
+    out = finalize_exposure_columns(add_position_group(out))
 
     return out, mapping, []
 
@@ -1374,14 +1496,14 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
     fallback_source = df["Split"] if "Split" in df.columns else None
     out["start_time"] = parse_datetime_series(out["start_time"], fallback_source=fallback_source)
     out["session_date"] = out["start_time"].dt.date
-    out["week"] = out["start_time"].dt.to_period("W-SUN").astype(str)
+    out["week"] = make_iso_week_series(out["start_time"])
     if "duration" in out.columns:
         out["duration_min"] = out["duration"].apply(duration_to_minutes)
     else:
         out["duration_min"] = np.nan
 
     numeric_cols = [
-        "total_distance", "distance_per_min", "max_speed", "avg_speed", "sprints",
+        "total_distance", "distance_per_min", "max_speed", "avg_speed", "sprints", "match_minutes",
         "speed_zone_3", "speed_zone_4", "speed_zone_5", "training_load", "cardio_load",
         "recovery_hours", "muscle_load", "hr_avg", "hr_max", "hrv", "high_efforts", "acc_low", "acc_mid",
         "acc_high", "dec_low", "dec_mid", "dec_high",
@@ -1409,6 +1531,7 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
     out = out.dropna(subset=["start_time"])
     out = out[out["player_name"].str.len() > 0]
     out = out[~out["player_name"].str.lower().str.contains("benchmark|átlag|atlag|összesen|osszesen", na=False)]
+    out = finalize_exposure_columns(add_position_group(out))
     return out, fixed_mapping, []
 
 
@@ -1461,7 +1584,7 @@ def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Opt
 
     with st.expander("Haladó oszlopok mappingje", expanded=False):
         optional_fields = [
-            "duration", "total_distance", "distance_per_min", "max_speed", "sprints",
+            "duration", "match_minutes", "total_distance", "distance_per_min", "max_speed", "sprints",
             "speed_zone_4", "speed_zone_5", "training_load", "muscle_load",
             "hr_avg", "hr_max", "acc_high", "dec_high", "high_efforts"
         ]
@@ -1503,7 +1626,159 @@ def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Opt
     st.dataframe(raw_df.head(8), use_container_width=True)
 
 
+
+# -----------------------------------------------------------------------------
+# V6.0 - Kapus + játékperc + exposure normalizálás
+# -----------------------------------------------------------------------------
+KEEPER_POSITION_TOKENS = ["gk", "goalkeeper", "kapus", "kapusposzt", "kap", "keeper"]
+FIELD_METRICS_FOR_EXPOSURE = [
+    "total_distance", "hsr_distance", "sprint_distance", "sprints", "acc_count", "dec_count",
+    "high_efforts", "training_load", "muscle_load", "distance_per_min", "max_speed",
+]
+KEEPER_BENCHMARK_WEIGHTS = {
+    "total_distance": 0.40,
+    "distance_per_min": 0.55,
+    "hsr_distance": 0.15,
+    "sprint_distance": 0.10,
+    "sprints": 0.15,
+    "acc_count": 0.55,
+    "dec_count": 0.55,
+    "high_efforts": 0.60,
+    "training_load": 0.70,
+    "muscle_load": 0.70,
+    "max_speed": 0.45,
+}
+
+def is_keeper_position_value(value: object) -> bool:
+    txt = _norm_mapping_text(value)
+    if not txt:
+        return False
+    return any(tok in txt for tok in KEEPER_POSITION_TOKENS)
+
+def add_keeper_flag_from_position(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    if "position" in out.columns:
+        out["is_goalkeeper"] = out["position"].apply(is_keeper_position_value).astype(bool)
+    elif "position_group" in out.columns:
+        out["is_goalkeeper"] = out["position_group"].astype(str).str.lower().str.contains("kapus|gk|goalkeeper", na=False)
+    else:
+        out["is_goalkeeper"] = False
+    return out
+
+def render_keeper_controls_and_apply(df: pd.DataFrame) -> pd.DataFrame:
+    """Kapusok kezelése.
+    - Ha van poszt, automatikusan felismeri a kapusokat.
+    - Ha nincs poszt / nincs felismerés, oldalsávban rákérdez és a kiválasztott játékosokat kapusként kezeli.
+    """
+    if df is None or df.empty or "player_name" not in df.columns:
+        return df
+    out = add_keeper_flag_from_position(df)
+    players_all = sorted(out["player_name"].dropna().astype(str).unique().tolist())
+    auto_keepers = sorted(out.loc[out.get("is_goalkeeper", False), "player_name"].dropna().astype(str).unique().tolist()) if "is_goalkeeper" in out.columns else []
+    has_position_col = (
+        "position" in out.columns
+        and out["position"].notna().any()
+        and out["position"].astype(str).str.strip().replace({"": np.nan, "nan": np.nan, "None": np.nan}).notna().any()
+    )
+    if not has_position_col:
+        st.sidebar.warning("Nincs felismerhető Poszt oszlop. Kérlek add meg, vannak-e kapusok az adatokban.")
+    with st.sidebar.expander("Kapusok és játékpercek", expanded=(not has_position_col)):
+        if has_position_col:
+            st.caption("Poszt oszlop alapján automatikus kapusfelismerés aktív. Ezt felülírhatod, ha szükséges.")
+            st.write("Felismert kapusok: " + (", ".join(auto_keepers) if auto_keepers else "nincs"))
+            manual_override = st.checkbox("Kapuslista kézi felülírása", value=False, key="keeper_manual_override")
+            if manual_override:
+                selected = st.multiselect("Kapusok kiválasztása", players_all, default=auto_keepers, key="manual_keeper_players")
+                out["is_goalkeeper"] = out["player_name"].astype(str).isin(selected)
+        else:
+            st.markdown("**Kapusok kézi megadása szükséges**")
+            has_keepers = st.radio(
+                "Szerepelnek kapusok az adatok között?",
+                ["Igen", "Nem"],
+                horizontal=True,
+                key="has_goalkeepers_without_position",
+                help="Mivel nincs Poszt oszlop, az app csak így tudja külön kezelni a kapusokat."
+            )
+            if has_keepers == "Igen":
+                selected = st.multiselect(
+                    "Kapusok kiválasztása",
+                    players_all,
+                    default=st.session_state.get("manual_keeper_players_no_pos", []),
+                    key="manual_keeper_players_no_pos",
+                    help="A kiválasztott játékosokra kapus-specifikus súlyozás kerül."
+                )
+                out["is_goalkeeper"] = out["player_name"].astype(str).isin(selected)
+                if not selected:
+                    st.warning("Válaszd ki a kapus(oka)t, különben minden játékos mezőnyjátékosként kerül értékelésre.")
+            else:
+                out["is_goalkeeper"] = False
+        st.caption("A csapatszintű meccs-edzés összevetésben a mezőnyjátékos-profil az alap; kapusokra külön súlyozott benchmark kerül.")
+    return finalize_exposure_columns(out)
+
+def finalize_exposure_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Játékpercek és terhelési exposure normalizálása.
+    Fontos: egy meccsen 14 játékos szereplése nem 14x90 perc. A számítás a tényleges
+    játékospercet használja, ha van; különben meccsnél a row szintű duration_min lesz az alap.
+    Edzésnél a résztvevői percre és az egy főre jutó terhelésre normalizál.
+    """
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    if "is_goalkeeper" not in out.columns:
+        out = add_keeper_flag_from_position(out)
+    if "duration_min" not in out.columns:
+        out["duration_min"] = np.nan
+    if "match_minutes" in out.columns:
+        out["match_minutes"] = out["match_minutes"].apply(duration_to_minutes)
+    else:
+        out["match_minutes"] = np.nan
+    # player_minutes: meccsnél tényleges játékperc, ha van; ha nincs, duration_min. Edzésnél duration_min.
+    out["player_minutes"] = np.where(
+        out.get("session_type", "").astype(str).eq("Meccs"),
+        out["match_minutes"].where(out["match_minutes"].notna() & (out["match_minutes"] > 0), out["duration_min"]),
+        out["duration_min"],
+    )
+    out["player_minutes"] = pd.to_numeric(out["player_minutes"], errors="coerce")
+    out.loc[out["player_minutes"] <= 0, "player_minutes"] = np.nan
+    group_cols = ["week", "session_date", "session_type"]
+    if "session_name" in out.columns:
+        group_cols.append("session_name")
+    safe_group_cols = [c for c in group_cols if c in out.columns]
+    if safe_group_cols:
+        out["session_player_count"] = out.groupby(safe_group_cols)["player_name"].transform("nunique")
+        out["field_player_count"] = out[~out["is_goalkeeper"]].groupby(safe_group_cols)["player_name"].transform("nunique")
+        out["team_player_minutes"] = out.groupby(safe_group_cols)["player_minutes"].transform("sum")
+        field_minutes = out.loc[~out["is_goalkeeper"]].groupby(safe_group_cols)["player_minutes"].sum().rename("field_team_minutes")
+        out = out.merge(field_minutes.reset_index(), on=safe_group_cols, how="left")
+    else:
+        out["session_player_count"] = out["player_name"].nunique() if "player_name" in out.columns else np.nan
+        out["field_player_count"] = out.loc[~out["is_goalkeeper"], "player_name"].nunique() if "player_name" in out.columns else np.nan
+        out["team_player_minutes"] = out["player_minutes"].sum()
+        out["field_team_minutes"] = out.loc[~out["is_goalkeeper"], "player_minutes"].sum()
+    out["keeper_weight"] = 1.0
+    for metric, weight in KEEPER_BENCHMARK_WEIGHTS.items():
+        if metric in out.columns:
+            out[f"{metric}_keeper_adjusted"] = np.where(out["is_goalkeeper"], out[metric] / max(weight, 0.01), out[metric])
+    for metric in FIELD_METRICS_FOR_EXPOSURE:
+        if metric in out.columns:
+            out[f"{metric}_per90"] = np.where(out["player_minutes"] > 0, out[metric] / out["player_minutes"] * 90, np.nan)
+            out[f"{metric}_per_player"] = np.where(out["session_player_count"] > 0, out[metric] / out["session_player_count"], np.nan)
+            out[f"{metric}_per_field_player"] = np.where(out["field_player_count"] > 0, out[metric] / out["field_player_count"], np.nan)
+    return out
+
+def field_players_only(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    if "is_goalkeeper" in df.columns:
+        return df[~df["is_goalkeeper"].fillna(False)].copy()
+    return df.copy()
+
 def aggregate_weekly(df: pd.DataFrame) -> pd.DataFrame:
+    # Csapatszintű összevetésnél a mezőnyjátékos-profil az alap, hogy a kapusok ne húzzák le
+    # a sprint/HSR/intenzitás mutatókat. A kapusok külön szerepként maradnak a játékosszintű elemzésben.
+    work = field_players_only(finalize_exposure_columns(df)) if df is not None and not df.empty else pd.DataFrame()
+    if work.empty:
+        return pd.DataFrame()
     agg_map = {
         "total_distance": "sum",
         "training_load": "sum",
@@ -1515,16 +1790,31 @@ def aggregate_weekly(df: pd.DataFrame) -> pd.DataFrame:
         "dec_count": "sum",
         "high_efforts": "sum",
         "duration_min": "sum",
+        "player_minutes": "sum",
+        "team_player_minutes": "max",
+        "field_team_minutes": "max",
+        "session_player_count": "max",
+        "field_player_count": "max",
         "distance_per_min": "mean",
         "max_speed": "max",
         "hr_avg": "mean",
         "hrv": "mean",
     }
-    usable = {k: v for k, v in agg_map.items() if k in df.columns}
-    return df.groupby(["week", "session_type"], as_index=False).agg(usable)
+    usable = {k: v for k, v in agg_map.items() if k in work.columns}
+    res = work.groupby(["week", "session_type"], as_index=False).agg(usable)
+    # Per90 / per participant normalizált csapatmutatók: különösen meccs-edzés arányhoz.
+    for metric in ["total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts", "training_load"]:
+        if metric in res.columns and "field_team_minutes" in res.columns:
+            res[f"{metric}_per90_team"] = np.where(res["field_team_minutes"] > 0, res[metric] / res["field_team_minutes"] * 90, np.nan)
+        if metric in res.columns and "field_player_count" in res.columns:
+            res[f"{metric}_per_field_player"] = np.where(res["field_player_count"] > 0, res[metric] / res["field_player_count"], np.nan)
+    return res
 
 
 def player_weekly(df: pd.DataFrame) -> pd.DataFrame:
+    work = finalize_exposure_columns(df) if df is not None and not df.empty else pd.DataFrame()
+    if work.empty:
+        return pd.DataFrame()
     agg_map = {
         "total_distance": "sum",
         "training_load": "sum",
@@ -1536,13 +1826,19 @@ def player_weekly(df: pd.DataFrame) -> pd.DataFrame:
         "dec_count": "sum",
         "high_efforts": "sum",
         "duration_min": "sum",
+        "player_minutes": "sum",
         "distance_per_min": "mean",
         "max_speed": "max",
         "hr_avg": "mean",
         "hrv": "mean",
+        "is_goalkeeper": "max",
     }
-    usable = {k: v for k, v in agg_map.items() if k in df.columns}
-    return df.groupby(["player_name", "week", "session_type"], as_index=False).agg(usable)
+    usable = {k: v for k, v in agg_map.items() if k in work.columns}
+    res = work.groupby(["player_name", "week", "session_type"], as_index=False).agg(usable)
+    for metric in ["total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts", "training_load", "acc_count", "dec_count"]:
+        if metric in res.columns and "player_minutes" in res.columns:
+            res[f"{metric}_per90"] = np.where(res["player_minutes"] > 0, res[metric] / res["player_minutes"] * 90, np.nan)
+    return res
 
 
 def pct_change(current: float, previous: float) -> Optional[float]:
@@ -2702,7 +2998,7 @@ def merge_with_memory(current_df: pd.DataFrame, use_memory: bool) -> pd.DataFram
     if "start_time" in combined.columns:
         combined["start_time"] = pd.to_datetime(combined["start_time"], errors="coerce")
         combined["session_date"] = combined["start_time"].dt.date
-        combined["week"] = combined["start_time"].dt.to_period("W").astype(str)
+        combined["week"] = make_iso_week_series(combined["start_time"])
     return combined
 
 
@@ -3187,19 +3483,34 @@ def calculate_player_risk(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
     cur=pw[pw["week"]==selected_week].copy(); hist=pw[pw["week"].isin(weeks[max(0,idx-4):idx])].copy(); rows=[]
     for _, row in cur.iterrows():
         player=row["player_name"]; hp=hist[hist["player_name"]==player]; score=20; reasons=[]
-        for metric, hi, lo, lab in [("training_load",.30,-.35,"Terhelési pont"),("dec_count",.35,-.40,"Lassítás"),("sprint_distance",.45,-.45,"Sprinttáv")]:
+        is_gk = bool(row.get("is_goalkeeper", False))
+        # Kapusnál nem büntetjük ugyanúgy az alacsony sprint/HSR profilt.
+        # A risk fő fókusza nála a teljes load, high efforts, lassítás/gyorsulás és játékperc.
+        metric_pack = [
+            ("training_load", .35 if is_gk else .30, -0.40 if is_gk else -0.35, "Terhelési pont"),
+            ("high_efforts", .45 if is_gk else .35, -0.45 if is_gk else -0.40, "High Efforts"),
+            ("dec_count", .45 if is_gk else .35, -0.45 if is_gk else -0.40, "Lassítás"),
+        ]
+        if not is_gk:
+            metric_pack.append(("sprint_distance", .45, -0.45, "Sprinttáv"))
+        for metric, hi, lo, lab in metric_pack:
             if metric in row.index and metric in hp.columns:
                 v=row.get(metric,np.nan); base=hp[metric].mean()
                 if pd.notna(v) and pd.notna(base) and base!=0:
                     d=(v-base)/base
                     if d>hi: score+=18; reasons.append(f"{lab}: +{d:.0%} a saját átlaghoz képest")
                     elif d<lo: score+=8; reasons.append(f"{lab}: {d:.0%} a saját átlaghoz képest")
-        if "max_speed" in row.index and "max_speed" in hp.columns:
+        if "player_minutes" in row.index and "player_minutes" in hp.columns:
+            v=row.get("player_minutes",np.nan); base=hp["player_minutes"].mean()
+            if pd.notna(v) and pd.notna(base) and base>0 and abs((v-base)/base)>.35:
+                d=(v-base)/base; score+=8; reasons.append(f"Játékperc/exposure: {d:+.0%} a saját átlaghoz képest")
+        if (not is_gk) and "max_speed" in row.index and "max_speed" in hp.columns:
             v=row.get("max_speed",np.nan); base=hp["max_speed"].max()
             if pd.notna(v) and pd.notna(base) and base>0 and (v-base)/base < -.06:
                 score+=14; reasons.append(f"Max sebesség: {(v-base)/base:.0%} a saját csúcshoz képest")
         score=int(max(0,min(100,score))); level="Magas" if score>=70 else ("Közepes" if score>=45 else "Alacsony")
-        rows.append({"Játékos":player,"Típus":row.get("session_type",""),"Kockázati pontszám":score,"Kockázati szint":level,"Fő okok":"; ".join(reasons[:3]) if reasons else "Nincs jelentős eltérés a saját előzményhez képest."})
+        role = "Kapus" if is_gk else "Mezőny"
+        rows.append({"Játékos":player,"Szerep":role,"Típus":row.get("session_type",""),"Játékperc":round(row.get("player_minutes",0) or 0,1),"Kockázati pontszám":score,"Kockázati szint":level,"Fő okok":"; ".join(reasons[:3]) if reasons else "Nincs jelentős eltérés a saját előzményhez képest."})
     res=pd.DataFrame(rows); return res.sort_values("Kockázati pontszám",ascending=False) if not res.empty else res
 
 def render_premium_kpi(label: str, value: str, note: str="", color: str="#22c55e") -> None:
@@ -4865,36 +5176,407 @@ def build_demo_performance_data() -> pd.DataFrame:
                 })
     return pd.DataFrame(rows)
 
+
+
+# -----------------------------------------------------------------------------
+# V5.8 - Product report pack: vezetői / erőnléti / mikrociklus PDF + minta PDF-ek
+# -----------------------------------------------------------------------------
+
+def _fpi_to_standard_if_needed(data: pd.DataFrame) -> pd.DataFrame:
+    """Bármely támogatott Excelből vagy már standardizált DF-ből riportképes DF-et készít."""
+    if data is None or data.empty:
+        return pd.DataFrame()
+    if {"player_name", "week", "start_time"}.issubset(set(data.columns)):
+        out = data.copy()
+    else:
+        out, _, missing = standardize_dataframe(data.copy())
+        if missing:
+            return pd.DataFrame()
+    try:
+        out = add_position_group(out)
+    except Exception:
+        pass
+    return out
+
+
+def _fpi_latest_week(df: pd.DataFrame, selected_week: Optional[str] = None) -> Optional[str]:
+    if df is None or df.empty or "week" not in df.columns:
+        return selected_week
+    weeks = sorted(df["week"].dropna().astype(str).unique().tolist())
+    if selected_week in weeks:
+        return selected_week
+    return weeks[-1] if weeks else selected_week
+
+
+def _fpi_report_context(data: pd.DataFrame, selected_week: Optional[str] = None, playstyle: str = "Kiegyensúlyozott") -> Dict[str, object]:
+    """Riportok közös számítási magja. Ugyanezt használja a minta PDF és az éles PDF."""
+    df = _fpi_to_standard_if_needed(data)
+    week = _fpi_latest_week(df, selected_week)
+    if df.empty or not week:
+        return {"df": df, "selected_week": week, "error": "Nincs riportképes adat."}
+    try:
+        base = team_insights(df, week)
+        micro = microcycle_insights(df, week)
+        style = playstyle_insights(df, week, playstyle)
+        pattern = build_pattern_insights(df, week)
+        readiness_score, readiness_components, readiness_reasons = calculate_readiness_score(df, week, playstyle)
+        fingerprints = build_weekly_fingerprints(df)
+        current_fp = fingerprints[fingerprints["week"].astype(str) == str(week)] if not fingerprints.empty and "week" in fingerprints.columns else pd.DataFrame()
+        periodization_type = current_fp["periodizacios_tipus"].iloc[0] if not current_fp.empty and "periodizacios_tipus" in current_fp.columns else "Nincs elég adat"
+        insights = sorted(base + micro + style + pattern, key=lambda x: SEVERITY_RANK.get(x.severity, 9))[:18]
+        summary = build_weekly_summary(insights, week, playstyle)
+        insights = humanize_insights(insights)
+        priorities = humanize_priority_list(build_adaptive_recommendations(insights, readiness_score, periodization_type, pattern, playstyle))
+        summary = coach_friendly_phrase(summary)
+        risk = calculate_player_risk(df, week)
+        past_df, past_text = build_past_week_review(df, week, playstyle)
+        current_df, current_text = build_current_remaining_days_plan(df, week, playstyle, readiness_score, periodization_type, risk)
+        next_df, next_text = build_next_week_plan_v5(df, week, playstyle, readiness_score, periodization_type, risk, past_df, current_df)
+        player_actions = build_player_next_actions(risk, df, week)
+        weekly = aggregate_weekly(df) if "week" in df.columns else pd.DataFrame()
+        player_week = player_weekly(df) if "week" in df.columns else pd.DataFrame()
+        return {
+            "df": df,
+            "selected_week": week,
+            "playstyle": playstyle,
+            "readiness_score": readiness_score,
+            "readiness_components": readiness_components,
+            "readiness_reasons": readiness_reasons,
+            "periodization_type": periodization_type,
+            "insights": insights,
+            "insights_df": build_insight_export_df(insights),
+            "priorities": priorities,
+            "summary": summary + f"\n\nMeccskészültség: {readiness_score}/100 ({score_to_label(readiness_score)})\nPeriodizációs besorolás: {periodization_type}",
+            "risk_df": risk,
+            "past_df": past_df,
+            "past_text": past_text,
+            "current_df": current_df,
+            "current_text": current_text,
+            "next_df": next_df,
+            "next_text": next_text,
+            "player_actions_df": player_actions,
+            "weekly": weekly,
+            "player_week": player_week,
+            "fingerprints": fingerprints,
+        }
+    except Exception as exc:
+        return {"df": df, "selected_week": week, "error": str(exc)}
+
+
+def build_fpi_product_pdf_bytes(
+    data: pd.DataFrame,
+    selected_week: Optional[str] = None,
+    playstyle: str = "Kiegyensúlyozott",
+    report_type: str = "full",
+    demo_label: str = "",
+) -> Optional[bytes]:
+    """Egységes PDF motor.
+
+    report_type:
+    - executive: 1-2 oldalas vezetőedzői / sportigazgatói riport
+    - fitness: részletes erőnléti riport
+    - microcycle: múlt hét / aktuális hét / jövő hét terv
+    - full: teljes döntéstámogató csomag
+    """
+    if SimpleDocTemplate is None:
+        return None
+    from reportlab.platypus import PageBreak
+
+    ctx = _fpi_report_context(data, selected_week, playstyle)
+    if ctx.get("error"):
+        return None
+
+    df = ctx["df"]
+    week = ctx["selected_week"]
+    readiness = int(ctx["readiness_score"])
+    risk_df = ctx["risk_df"] if isinstance(ctx.get("risk_df"), pd.DataFrame) else pd.DataFrame()
+    priorities = ctx.get("priorities", []) or []
+    insights_df = ctx["insights_df"] if isinstance(ctx.get("insights_df"), pd.DataFrame) else pd.DataFrame()
+    weekly = ctx["weekly"] if isinstance(ctx.get("weekly"), pd.DataFrame) else pd.DataFrame()
+    player_week = ctx["player_week"] if isinstance(ctx.get("player_week"), pd.DataFrame) else pd.DataFrame()
+    player_actions = ctx["player_actions_df"] if isinstance(ctx.get("player_actions_df"), pd.DataFrame) else pd.DataFrame()
+    next_df = ctx["next_df"] if isinstance(ctx.get("next_df"), pd.DataFrame) else pd.DataFrame()
+    current_df = ctx["current_df"] if isinstance(ctx.get("current_df"), pd.DataFrame) else pd.DataFrame()
+    high_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Magas").sum()) if not risk_df.empty else 0
+    med_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Közepes").sum()) if not risk_df.empty else 0
+
+    font_name, font_bold = _register_pdf_font()
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=0.9*cm, leftMargin=0.9*cm, topMargin=0.7*cm, bottomMargin=0.7*cm)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("FPI58Title", parent=styles["Title"], fontName=font_bold, fontSize=20, leading=23, textColor=colors.HexColor("#0F172A"))
+    sub = ParagraphStyle("FPI58Sub", parent=styles["Normal"], fontName=font_name, fontSize=8.8, leading=11, textColor=colors.HexColor("#334155"))
+    h2 = ParagraphStyle("FPI58H2", parent=styles["Heading2"], fontName=font_bold, fontSize=11.2, leading=14, textColor=colors.HexColor("#0F172A"))
+    body = ParagraphStyle("FPI58Body", parent=styles["Normal"], fontName=font_name, fontSize=8.0, leading=10.2, textColor=colors.HexColor("#111827"))
+    small = ParagraphStyle("FPI58Small", parent=styles["Normal"], fontName=font_name, fontSize=7.0, leading=8.6, textColor=colors.HexColor("#111827"))
+    head = ParagraphStyle("FPI58Head", parent=styles["Normal"], fontName=font_bold, fontSize=7.2, leading=8.8, alignment=1, textColor=colors.white)
+    white_big = ParagraphStyle("FPI58WhiteBig", parent=styles["Normal"], fontName=font_bold, fontSize=16, leading=18, alignment=1, textColor=colors.white)
+    white_small = ParagraphStyle("FPI58WhiteSmall", parent=styles["Normal"], fontName=font_name, fontSize=7.0, leading=8.5, alignment=1, textColor=colors.white)
+
+    def clean(v: object) -> str:
+        return pdf_safe_text(v).replace("\r", "").strip()
+
+    def P(v, style=body):
+        return Paragraph(html.escape(clean(v)).replace("\n", "<br/>"), style)
+
+    def section(text: str, color: str = "#DBEAFE"):
+        t = Table([[P(text, h2)]], colWidths=[27.7*cm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor(color)),
+            ("BOX", (0,0), (-1,-1), 0.4, colors.HexColor("#93C5FD")),
+            ("LEFTPADDING", (0,0), (-1,-1), 7), ("RIGHTPADDING", (0,0), (-1,-1), 7),
+            ("TOPPADDING", (0,0), (-1,-1), 4), ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ]))
+        return t
+
+    def table(rows, widths, header_bg="#0F172A", row_bgs=None):
+        if row_bgs is None:
+            row_bgs = [colors.white, colors.HexColor("#F8FAFC")]
+        t = Table(rows, colWidths=widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor(header_bg)),
+            ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#CBD5E1")),
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), row_bgs),
+            ("LEFTPADDING", (0,0), (-1,-1), 4), ("RIGHTPADDING", (0,0), (-1,-1), 4),
+            ("TOPPADDING", (0,0), (-1,-1), 3), ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+        ]))
+        return t
+
+    def kpi(label, value, note, color):
+        t = Table([[P(label, white_small)], [P(value, white_big)], [P(note, white_small)]], colWidths=[5.25*cm], rowHeights=[0.5*cm, 0.85*cm, 0.5*cm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor(color)),
+            ("BOX", (0,0), (-1,-1), 0.4, colors.white),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING", (0,0), (-1,-1), 3), ("RIGHTPADDING", (0,0), (-1,-1), 3),
+        ]))
+        return t
+
+    story = []
+    label_prefix = f"{demo_label} | " if demo_label else ""
+    report_names = {
+        "executive": "Vezetői riport",
+        "fitness": "Erőnléti szakmai riport",
+        "microcycle": "Mikrociklus döntéstámogató riport",
+        "full": "Teljes stáb riportcsomag",
+    }
+
+    def add_cover():
+        story.append(P("Football Performance Intelligence", title))
+        story.append(P(f"{label_prefix}{report_names.get(report_type, 'Riport')} | Hét: {format_week_label(str(week))} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
+        story.append(Spacer(1, 0.25*cm))
+        kpis = [
+            kpi("READINESS", f"{readiness}/100", score_to_label(readiness), "#166534" if readiness >= 75 else "#1E3A8A" if readiness >= 60 else "#991B1B"),
+            kpi("HIGH RISK", f"{high_risk} fő", "egyéni kontroll", "#7F1D1D" if high_risk else "#166534"),
+            kpi("MEDIUM RISK", f"{med_risk} fő", "figyelendő játékos", "#92400E" if med_risk else "#166534"),
+            kpi("INSIGHT", str(len(insights_df)), "automatikus megállapítás", "#0F172A"),
+            kpi("HETEK", str(df['week'].nunique()) if 'week' in df.columns else "—", "elemzett adatbázis", "#1E3A8A"),
+        ]
+        story.append(Table([kpis], colWidths=[5.45*cm]*5))
+        story.append(Spacer(1, 0.25*cm))
+
+    def add_executive_page():
+        story.append(section("1. Vezetői oldal – 30 másodperces döntési kép", "#DBEAFE"))
+        summary_lines = [x.strip() for x in str(ctx.get("summary", "")).splitlines() if x.strip()]
+        summary_text = "\n".join(summary_lines[:9]) if summary_lines else "Nincs automatikus összefoglaló."
+        rows = [[P("Fő üzenet", head), P("Mit jelent ez a stábnak?", head), P("Következő döntés", head)]]
+        first_priority = priorities[0] if priorities else {}
+        rows.append([
+            P(summary_text, body),
+            P(f"Meccskészültség: {readiness}/100 ({score_to_label(readiness)}). Magas risk: {high_risk} fő, közepes risk: {med_risk} fő. Periodizáció: {ctx.get('periodization_type', '—')}.", body),
+            P(first_priority.get("Teendő", "Heti terhelés és egyéni risk áttekintése a következő edzés előtt."), body),
+        ])
+        story.append(table(rows, [9.2*cm, 9.2*cm, 9.3*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF")]))
+        story.append(Spacer(1, 0.22*cm))
+        story.append(section("Top edzői teendők", "#DCFCE7"))
+        pr = [[P("#", head), P("Teendő", head), P("Miért fontos?", head), P("Mikor?", head)]]
+        for i, item in enumerate(priorities[:5], 1):
+            pr.append([P(i, small), P(item.get("Teendő", item.get("Cím", "")), small), P(item.get("Miért", ""), small), P(item.get("Mikor", "Következő edzés"), small)])
+        if len(pr) == 1:
+            pr.append([P("1", small), P("Normál monitoring", small), P("Nincs kritikus jelzés.", small), P("Heti review", small)])
+        story.append(table(pr, [1.0*cm, 11.4*cm, 10.5*cm, 4.8*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
+        story.append(Spacer(1, 0.22*cm))
+        story.append(section("Játékos risk gyorsnézet", "#FEE2E2"))
+        risk_cols = [c for c in ["Játékos", "Kockázati szint", "Risk score", "Kockázati pontszám", "Fő ok", "Fő okok"] if c in risk_df.columns]
+        if not risk_cols:
+            risk_cols = ["Játékos", "Kockázati szint", "Fő ok"]
+            rrows = [[P(c, head) for c in risk_cols], [P("Nincs kiemelt risk", small), P("Alacsony", small), P("A hét alapján nincs azonnali beavatkozási jelzés.", small)]]
+        else:
+            rrows = [[P(c, head) for c in risk_cols]]
+            for _, r in risk_df.head(8).iterrows():
+                rrows.append([P(r.get(c, ""), small) for c in risk_cols])
+        story.append(table(rrows, [27.7*cm/len(rrows[0])]*len(rrows[0]), header_bg="#7F1D1D", row_bgs=[colors.white, colors.HexColor("#FEF2F2")]))
+
+    def add_fitness_page():
+        story.append(section("2. Erőnléti szakmai oldal – GPS terhelés, trend és játékosszint", "#E0F2FE"))
+        # heti csapatösszegzés
+        wk = weekly.copy()
+        if not wk.empty:
+            wk = wk[wk["week"].astype(str) == str(week)].copy()
+        cols = [c for c in ["session_type", "total_distance", "duration_min", "distance_per_min", "hsr_distance", "sprint_distance", "sprints", "high_efforts", "training_load", "max_speed"] if c in wk.columns]
+        rows = [[P("Típus", head), P("Össztáv", head), P("Perc", head), P("m/perc", head), P("HSR", head), P("Sprint táv", head), P("Sprint", head), P("High Eff.", head), P("Load", head), P("Max seb.", head)]]
+        if not wk.empty:
+            for _, r in wk.head(8).iterrows():
+                rows.append([
+                    P(r.get("session_type", ""), small),
+                    P(f"{r.get('total_distance', 0):.0f}", small),
+                    P(f"{r.get('duration_min', 0):.0f}", small),
+                    P(f"{r.get('distance_per_min', 0):.1f}", small),
+                    P(f"{r.get('hsr_distance', 0):.0f}", small),
+                    P(f"{r.get('sprint_distance', 0):.0f}", small),
+                    P(f"{r.get('sprints', 0):.0f}", small),
+                    P(f"{r.get('high_efforts', 0):.0f}", small),
+                    P(f"{r.get('training_load', 0):.0f}", small),
+                    P(f"{r.get('max_speed', 0):.1f}", small),
+                ])
+        else:
+            rows.append([P("Nincs adat", small)] + [P("—", small)]*9)
+        story.append(table(rows, [2.8*cm, 3.0*cm, 2.5*cm, 2.5*cm, 3.0*cm, 3.0*cm, 2.4*cm, 2.5*cm, 2.5*cm, 3.0*cm], header_bg="#0369A1"))
+        story.append(Spacer(1, 0.25*cm))
+        story.append(section("Top játékosok – heti terhelési profil", "#F0FDFA"))
+        pw = player_week.copy()
+        if not pw.empty and "week" in pw.columns:
+            pw = pw[pw["week"].astype(str) == str(week)].copy()
+            sort_col = "training_load" if "training_load" in pw.columns else "total_distance"
+            pw = pw.sort_values(sort_col, ascending=False)
+        prows = [[P("Játékos", head), P("Össztáv", head), P("HSR", head), P("Sprint táv", head), P("High Efforts", head), P("Load", head), P("Max seb.", head), P("Értelmezés", head)]]
+        if not pw.empty:
+            for _, r in pw.head(12).iterrows():
+                interp = "Magas heti load – regeneráció kontroll" if float(r.get("training_load", 0) or 0) >= float(pw.get("training_load", pd.Series([0])).quantile(.75) or 0) else "Normál monitoring"
+                prows.append([P(r.get("player_name", ""), small), P(f"{r.get('total_distance',0):.0f}", small), P(f"{r.get('hsr_distance',0):.0f}", small), P(f"{r.get('sprint_distance',0):.0f}", small), P(f"{r.get('high_efforts',0):.0f}", small), P(f"{r.get('training_load',0):.0f}", small), P(f"{r.get('max_speed',0):.1f}", small), P(interp, small)])
+        else:
+            prows.append([P("Nincs játékosszintű adat", small)] + [P("—", small)]*7)
+        story.append(table(prows, [4.5*cm, 3.0*cm, 3.0*cm, 3.0*cm, 3.0*cm, 3.0*cm, 2.8*cm, 5.4*cm], header_bg="#0F766E", row_bgs=[colors.white, colors.HexColor("#F0FDFA")]))
+        story.append(Spacer(1, 0.2*cm))
+        story.append(section("Erőnléti edzői értelmezés", "#FEF3C7"))
+        notes = [
+            "A riport nem váltja ki az erőnléti edző döntését: előkészíti a heti review-t, kiemeli az eltéréseket és egységes PDF-et ad a stábnak.",
+            "A High Efforts külön mezőként szerepel; ha nincs külön oszlop, az app gyorsulás/lassítás alapon becsli.",
+            "A 4-es és 5-ös sebességzóna külön is kezelhető, de összevont 4+5 export esetén is használható HSR-ként.",
+        ]
+        story.append(table([[P("Megjegyzés", head), P("Használat", head)]] + [[P(n, small), P("Heti review / stábmegbeszélés", small)] for n in notes], [20*cm, 7.7*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"), colors.white]))
+
+    def add_micro_page():
+        story.append(section("3. Mikrociklus oldal – múlt hét / aktuális hét / jövő hét", "#EDE9FE"))
+        blocks = [
+            ("Múlt hét teljes értékelése", ctx.get("past_text", ""), "#312E81"),
+            ("Aktuális hét – hátralévő napok javaslata", ctx.get("current_text", ""), "#1E3A8A"),
+            ("Jövő heti MD-bontású terv", ctx.get("next_text", ""), "#166534"),
+        ]
+        bdata = [[P("Szekció", head), P("Automatikus értékelés / javaslat", head)]]
+        for name, txt, _ in blocks:
+            bdata.append([P(name, body), P(txt or "Nincs elegendő adat a részletes szöveghez.", small)])
+        story.append(table(bdata, [6.5*cm, 21.2*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
+        story.append(Spacer(1, 0.25*cm))
+        if not next_df.empty:
+            story.append(section("Jövő hét – strukturált napi terv", "#DCFCE7"))
+            cols = [c for c in next_df.columns if c in ["Nap", "MD", "Fókusz", "Terhelés", "Javaslat", "Megjegyzés", "Cél"]]
+            if not cols:
+                cols = list(next_df.columns[:5])
+            nd = [[P(c, head) for c in cols]]
+            for _, r in next_df.head(8).iterrows():
+                nd.append([P(r.get(c, ""), small) for c in cols])
+            story.append(table(nd, [27.7*cm/len(cols)]*len(cols), header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
+        if not player_actions.empty:
+            story.append(Spacer(1, 0.25*cm))
+            story.append(section("Játékosszintű teendők", "#FEE2E2"))
+            cols = list(player_actions.columns[:5])
+            ad = [[P(c, head) for c in cols]]
+            for _, r in player_actions.head(12).iterrows():
+                ad.append([P(r.get(c, ""), small) for c in cols])
+            story.append(table(ad, [27.7*cm/len(cols)]*len(cols), header_bg="#7F1D1D", row_bgs=[colors.HexColor("#FEF2F2"), colors.white]))
+
+    add_cover()
+    if report_type in ["executive", "full"]:
+        add_executive_page()
+    if report_type == "executive":
+        pass
+    elif report_type == "fitness":
+        add_fitness_page()
+    elif report_type == "microcycle":
+        add_micro_page()
+    elif report_type == "full":
+        story.append(PageBreak()); add_fitness_page()
+        story.append(PageBreak()); add_micro_page()
+    else:
+        add_executive_page()
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def build_fpi_sample_pdf_bytes(report_type: str = "full") -> Optional[bytes]:
+    demo_raw = build_demo_performance_data()
+    demo_df, _, missing = standardize_dataframe(demo_raw)
+    if missing:
+        return None
+    demo_df = add_position_group(demo_df)
+    latest = _fpi_latest_week(demo_df)
+    return build_fpi_product_pdf_bytes(demo_df, latest, "Pressing", report_type=report_type, demo_label="MINTA RIPORT / Demo FC U19")
+
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
 render_fpi_hero()
 
 
-sample_pdf_bytes = build_marketing_sample_pdf_bytes()
+sample_pdf_bytes = build_fpi_sample_pdf_bytes("full")
+sample_exec_pdf_bytes = build_fpi_sample_pdf_bytes("executive")
+sample_fitness_pdf_bytes = build_fpi_sample_pdf_bytes("fitness")
+sample_micro_pdf_bytes = build_fpi_sample_pdf_bytes("microcycle")
 with st.container():
     st.markdown(
         """
         <div class="export-panel">
-            <h3 style="margin-top:0;">📄 Teljes minta riport letöltése</h3>
+            <h3 style="margin-top:0;">📄 Minta riportcsomag klubdemóhoz</h3>
             <p style="color:#e0f2fe;">
-                Kamu játékosnevekkel és minta GPS-adatokkal készült látványos, többoldalas vezetői PDF.
-                Ezt meg tudod mutatni érdeklődő klubnak akkor is, ha még nem töltött fel saját adatot.
+                Ugyanaz a logika készíti, mint az éles exportot: vezetői 1-2 oldal, erőnléti szakmai PDF,
+                mikrociklus PDF és teljes stábcsomag. Kamu játékosnevekkel, minta GPS-adatokkal.
             </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
     if sample_pdf_bytes is not None:
-        st.download_button(
-            "⬇️ Látványos teljes minta PDF riport letöltése",
-            data=sample_pdf_bytes,
-            file_name="performance_intelligence_laatvanyos_minta_riport.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-        
-            key="download_button_unique_1",
-        )
+        c_a, c_b, c_c, c_d = st.columns(4)
+        with c_a:
+            st.download_button(
+                "⬇️ Minta vezetői PDF",
+                data=sample_exec_pdf_bytes,
+                file_name="fpi_minta_vezetoi_riport.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_sample_executive_v58",
+            )
+        with c_b:
+            st.download_button(
+                "⬇️ Minta erőnléti PDF",
+                data=sample_fitness_pdf_bytes,
+                file_name="fpi_minta_eronleti_riport.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_sample_fitness_v58",
+            )
+        with c_c:
+            st.download_button(
+                "⬇️ Minta mikrociklus PDF",
+                data=sample_micro_pdf_bytes,
+                file_name="fpi_minta_mikrociklus_riport.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_sample_micro_v58",
+            )
+        with c_d:
+            st.download_button(
+                "⬇️ Minta teljes csomag",
+                data=sample_pdf_bytes,
+                file_name="fpi_minta_teljes_stab_riportcsomag.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_sample_full_v58",
+            )
     else:
         st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
 
@@ -4926,7 +5608,7 @@ with st.sidebar:
         except Exception:
             _sig = str(getattr(uploaded, "name", "uploaded"))
         if st.session_state.get("active_upload_signature") != _sig:
-            for _k in ["mapped_df_override", "manual_mapping", "mapper_selected_sheet", "last_raw_df"]:
+            for _k in ["mapped_df_override", "manual_mapping", "mapper_selected_sheet", "last_raw_df", "manual_keeper_players", "manual_keeper_players_no_pos", "keeper_manual_override", "has_goalkeepers_without_position"]:
                 st.session_state.pop(_k, None)
             st.session_state["active_upload_signature"] = _sig
     else:
@@ -4972,6 +5654,7 @@ if missing_core:
     df = pd.DataFrame(columns=["player_name", "session_type", "start_time", "session_date", "week"])
 
 df = add_position_group(df)
+df = render_keeper_controls_and_apply(df)
 df, demo_limit_info = apply_demo_limits(df)
 
 if df.empty or "week" not in df.columns or df["week"].dropna().empty:
@@ -4988,6 +5671,11 @@ session_types = sorted(df["session_type"].dropna().unique().tolist()) if "sessio
 if not weeks or not players:
     render_emergency_mapper(raw_df, mapping if "mapping" in globals() else {}, missing_core if "missing_core" in globals() else [])
     st.stop()
+
+with st.sidebar:
+    if st.session_state.get("week_rescue_applied"):
+        with st.expander("Hétfelismerés diagnosztika V6.2", expanded=False):
+            st.json(st.session_state.get("week_rescue_applied"))
 
 with st.sidebar:
     st.header("Szűrők")
@@ -5230,6 +5918,56 @@ with tab_exec:
         
             key="download_button_unique_5",
         )
+
+
+    st.markdown("### Új FPI riportcsomag – éles PDF-ek")
+    st.caption("Ezek ugyanazt a logikát használják, mint a minta PDF: vezetői nézet, erőnléti nézet, mikrociklus nézet és teljes stábcsomag.")
+    rp1, rp2, rp3, rp4 = st.columns(4)
+    live_report_base = analysis_base_df.copy()
+    with rp1:
+        exec_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="executive")
+        if exec_pack_pdf is not None:
+            st.download_button(
+                "⬇️ Vezetői PDF 1-2 oldal",
+                data=exec_pack_pdf,
+                file_name=f"fpi_vezetoi_riport_{safe_week_main}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_fpi_exec_pack_v58",
+            )
+    with rp2:
+        fitness_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="fitness")
+        if fitness_pack_pdf is not None:
+            st.download_button(
+                "⬇️ Erőnléti PDF",
+                data=fitness_pack_pdf,
+                file_name=f"fpi_eronleti_riport_{safe_week_main}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_fpi_fitness_pack_v58",
+            )
+    with rp3:
+        micro_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="microcycle")
+        if micro_pack_pdf is not None:
+            st.download_button(
+                "⬇️ Mikrociklus PDF",
+                data=micro_pack_pdf,
+                file_name=f"fpi_mikrociklus_riport_{safe_week_main}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_fpi_micro_pack_v58",
+            )
+    with rp4:
+        full_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="full")
+        if full_pack_pdf is not None:
+            st.download_button(
+                "⬇️ Teljes stáb PDF",
+                data=full_pack_pdf,
+                file_name=f"fpi_teljes_stab_riport_{safe_week_main}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_fpi_full_pack_v58",
+            )
 
 
 with tab_intro:
@@ -5491,6 +6229,60 @@ with tab_export:
         
             key="download_button_unique_9",
         )
+
+
+    # -------------------------------------------------------------------------
+    # V6.1 - Product Report Pack visszaemelve az Export fülre is
+    # -------------------------------------------------------------------------
+    st.markdown("### FPI riportcsomag – minta PDF-ek")
+    st.caption("Klubdemóhoz: vezetői, erőnléti, mikrociklus és teljes stáb PDF ugyanazzal a logikával, mint az éles export.")
+    if 'build_fpi_sample_pdf_bytes' in globals():
+        try:
+            sample_exec_pdf_bytes_export = build_fpi_sample_pdf_bytes("executive")
+            sample_fitness_pdf_bytes_export = build_fpi_sample_pdf_bytes("fitness")
+            sample_micro_pdf_bytes_export = build_fpi_sample_pdf_bytes("microcycle")
+            sample_full_pdf_bytes_export = build_fpi_sample_pdf_bytes("full")
+        except Exception:
+            sample_exec_pdf_bytes_export = sample_fitness_pdf_bytes_export = sample_micro_pdf_bytes_export = sample_full_pdf_bytes_export = None
+        sm1, sm2, sm3, sm4 = st.columns(4)
+        with sm1:
+            if sample_exec_pdf_bytes_export is not None:
+                st.download_button("⬇️ Minta vezetői PDF", data=sample_exec_pdf_bytes_export, file_name="fpi_minta_vezetoi_riport.pdf", mime="application/pdf", use_container_width=True, key="download_sample_executive_v61_export")
+        with sm2:
+            if sample_fitness_pdf_bytes_export is not None:
+                st.download_button("⬇️ Minta erőnléti PDF", data=sample_fitness_pdf_bytes_export, file_name="fpi_minta_eronleti_riport.pdf", mime="application/pdf", use_container_width=True, key="download_sample_fitness_v61_export")
+        with sm3:
+            if sample_micro_pdf_bytes_export is not None:
+                st.download_button("⬇️ Minta mikrociklus PDF", data=sample_micro_pdf_bytes_export, file_name="fpi_minta_mikrociklus_riport.pdf", mime="application/pdf", use_container_width=True, key="download_sample_micro_v61_export")
+        with sm4:
+            if sample_full_pdf_bytes_export is not None:
+                st.download_button("⬇️ Minta teljes stáb PDF", data=sample_full_pdf_bytes_export, file_name="fpi_minta_teljes_stab_riportcsomag.pdf", mime="application/pdf", use_container_width=True, key="download_sample_full_v61_export")
+        if all(x is None for x in [sample_exec_pdf_bytes_export, sample_fitness_pdf_bytes_export, sample_micro_pdf_bytes_export, sample_full_pdf_bytes_export]):
+            st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
+
+    st.markdown("### FPI riportcsomag – éles PDF-ek")
+    st.caption("Az aktuális feltöltött / minta adatokból: vezetői 1-2 oldal, erőnléti riport, mikrociklus riport, teljes stábcsomag.")
+    if 'build_fpi_product_pdf_bytes' in globals():
+        live_report_base_export = analysis_base_df.copy() if 'analysis_base_df' in globals() else df.copy()
+        rp1e, rp2e, rp3e, rp4e = st.columns(4)
+        with rp1e:
+            exec_pack_pdf_export = build_fpi_product_pdf_bytes(live_report_base_export, selected_week, selected_playstyle, report_type="executive")
+            if exec_pack_pdf_export is not None:
+                st.download_button("⬇️ Éles vezetői PDF", data=exec_pack_pdf_export, file_name=f"fpi_vezetoi_riport_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_exec_pack_v61_export")
+        with rp2e:
+            fitness_pack_pdf_export = build_fpi_product_pdf_bytes(live_report_base_export, selected_week, selected_playstyle, report_type="fitness")
+            if fitness_pack_pdf_export is not None:
+                st.download_button("⬇️ Éles erőnléti PDF", data=fitness_pack_pdf_export, file_name=f"fpi_eronleti_riport_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_fitness_pack_v61_export")
+        with rp3e:
+            micro_pack_pdf_export = build_fpi_product_pdf_bytes(live_report_base_export, selected_week, selected_playstyle, report_type="microcycle")
+            if micro_pack_pdf_export is not None:
+                st.download_button("⬇️ Éles mikrociklus PDF", data=micro_pack_pdf_export, file_name=f"fpi_mikrociklus_riport_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_micro_pack_v61_export")
+        with rp4e:
+            full_pack_pdf_export = build_fpi_product_pdf_bytes(live_report_base_export, selected_week, selected_playstyle, report_type="full")
+            if full_pack_pdf_export is not None:
+                st.download_button("⬇️ Éles teljes stáb PDF", data=full_pack_pdf_export, file_name=f"fpi_teljes_stab_riport_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_full_pack_v61_export")
+    else:
+        st.warning("A V5.8 Product Report Pack függvényei nem érhetők el ebben a fájlban.")
 
 
 with tab_intel:
@@ -5819,7 +6611,7 @@ with tab5:
 
 
 st.divider()
-st.caption("V3.2 HU – Edzőbarát magyar insight nyelv + magyarázó fogalomtár + vezetői export központ.")
+st.caption("V5.7 GENERAL EXCEL IMPORT – Data lap + általános fejlécfelismerés + védett dátumkezelés + ISO hetek.")
 
 # -----------------------------------------------------------------------------
 # V4.4 Smart Excel Mapper + License UI
