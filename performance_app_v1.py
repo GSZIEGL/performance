@@ -4,6 +4,10 @@
 
 from __future__ import annotations
 
+# FPI_REALFIX_2026_06_16_V053: multi-week import/date parsing and full evaluation patch
+APP_VERSION = "V5.3 REAL MULTI-WEEK FIX – 2026-06-16"
+
+
 import html
 import io
 import hashlib
@@ -680,7 +684,7 @@ STANDARD_COLUMNS = {
     "session_type": ["Típus", "Type", "Session Type", "Edzés/Meccs", "SessionType", "Activity Type", "Drill Type", "Event Type", "Training/Match"],
     "session_name": ["Szakasz neve", "Session", "Session Name", "Activity", "Drill", "Exercise", "Event", "Session title"],
     "position": ["Poszt", "Position", "Player Position", "Role", "Playing Position", "Post", "Pos"],
-    "start_time": ["Kezdési idő", "Start Time", "Start", "Dátum", "Date", "Session Date", "Day", "Datum", "Kezdés", "Start date", "StartTime", "Split"],
+    "start_time": ["FPI dátum", "FPI datetime", "Kezdési idő", "Start Time", "Start", "Dátum", "Date", "Session Date", "Day", "Datum", "Kezdés", "Start date", "StartTime", "Split"],
     "end_time": ["Befejezési idő", "End Time", "End", "Finish", "Befejezés", "EndTime"],
     "duration": ["Időtartam", "Duration", "Time", "Minutes", "Idő", "Időtartam [perc]", "Duration [min]", "Duration min"],
     "total_distance": ["Teljes táv [m]", "Tel\xadjes táv [m]", "Total Distance", "Distance", "Össztáv", "Total distance (m)", "Total Dist", "Dist Total", "Distance [m]", "TD", "Total Distance m"],
@@ -1120,6 +1124,61 @@ def parse_datetime_series(series: pd.Series, fallback_source: Optional[pd.Series
     return base
 
 
+
+def build_fpi_robust_datetime_column(df: pd.DataFrame, sheet_name: str = "") -> pd.Series:
+    """Sor-szintű, Excel/GPS-export kompatibilis dátumoszlop.
+
+    Miért kell?
+    Sok GPS exportban a Start Time csak óra, miközben a valódi dátum a Split/Date/lapnév
+    mezőben van. A sima pd.to_datetime ilyenkor minden sort ugyanarra az alapdátumra tesz,
+    ezért az app csak egyetlen hetet lát. Ez a függvény először tényleges dátumot keres,
+    majd opcionálisan hozzáteszi a start-időpont óráját.
+    """
+    if df is None or df.empty:
+        return pd.Series(dtype="datetime64[ns]")
+
+    date_cols = [
+        "FPI dátum", "Date", "Dátum", "Datum", "Session Date", "Day", "Nap", "Split",
+        "Kezdési idő", "Start Time", "Start", "Start date", "StartTime"
+    ]
+    time_cols = ["Start Time", "Kezdési idő", "Start", "StartTime", "Kezdés"]
+    out = []
+    sheet_dt = extract_date_from_text(sheet_name)
+
+    for _, row in df.iterrows():
+        dt = None
+        for c in date_cols:
+            if c in df.columns:
+                dt = extract_date_from_text(row.get(c))
+                if dt is not None and pd.notna(dt):
+                    break
+        if dt is None or pd.isna(dt):
+            dt = sheet_dt
+
+        # Óra/perc megtartása, ha a Start Time csak időpontot tartalmaz.
+        hour = minute = second = 0
+        for c in time_cols:
+            if c in df.columns:
+                v = row.get(c)
+                try:
+                    if hasattr(v, "hour") and hasattr(v, "minute"):
+                        hour, minute, second = int(v.hour), int(v.minute), int(getattr(v, "second", 0))
+                        break
+                    txt = str(v or "")
+                    m = re.search(r"(?<!\d)(\d{1,2}):(\d{2})(?::(\d{2}))?", txt)
+                    if m:
+                        hour, minute, second = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+                        break
+                except Exception:
+                    pass
+        if dt is not None and pd.notna(dt):
+            try:
+                dt = pd.Timestamp(dt).replace(hour=hour, minute=minute, second=second)
+            except Exception:
+                dt = pd.Timestamp(dt)
+        out.append(dt if dt is not None and pd.notna(dt) else pd.NaT)
+    return pd.to_datetime(pd.Series(out, index=df.index), errors="coerce")
+
 def sheet_is_likely_helper(sheet_name: str, raw_df: Optional[pd.DataFrame] = None) -> bool:
     """Segédlapok kizárása az összesített adatlapból."""
     name = _norm_mapping_text(sheet_name)
@@ -1213,8 +1272,14 @@ def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.D
     if not any(c in df.columns for c in ["Szakasz neve", "Session Name", "Session"]):
         df["Szakasz neve"] = sheet_name or "GPS mérkőzés"
 
+    # FPI V5.3: mindig készítünk egy saját, robusztus dátumoszlopot.
+    # Ez megakadályozza, hogy a Start Time csak időként értelmeződjön, és emiatt minden sor ugyanarra a hétre essen.
+    robust_dt = build_fpi_robust_datetime_column(df, sheet_name)
+    if robust_dt.notna().any():
+        df["FPI dátum"] = robust_dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+
     # Kezdési idő kinyerése Splitből vagy lapnévből, ha nincs explicit dátum.
-    has_start = any(c in df.columns for c in ["Kezdési idő", "Start Time", "Start", "Date", "Dátum", "Session Date"])
+    has_start = any(c in df.columns for c in ["FPI dátum", "Kezdési idő", "Start Time", "Start", "Date", "Dátum", "Session Date"])
     if not has_start:
         dates = []
         split_col = "Split" if "Split" in df.columns else None
@@ -1310,9 +1375,14 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
     out["player_name"] = out["player_name"].astype(str).str.strip()
     out["session_type"] = out["session_type"].apply(normalize_session_type)
     fallback_source = df["Split"] if "Split" in df.columns else None
-    out["start_time"] = parse_datetime_series(out["start_time"], fallback_source=fallback_source)
+    if "FPI dátum" in df.columns:
+        out["start_time"] = parse_datetime_series(df["FPI dátum"], fallback_source=fallback_source)
+        mapping["start_time"] = "FPI dátum"
+    else:
+        out["start_time"] = parse_datetime_series(out["start_time"], fallback_source=fallback_source)
     out["session_date"] = out["start_time"].dt.date
-    out["week"] = out["start_time"].dt.to_period("W-SUN").astype(str)
+    iso = out["start_time"].dt.isocalendar()
+    out["week"] = iso["year"].astype(str) + "-W" + iso["week"].astype(str).str.zfill(2)
 
     if "duration" in out.columns:
         out["duration_min"] = out["duration"].apply(duration_to_minutes)
@@ -1372,9 +1442,14 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
     out["player_name"] = out["player_name"].astype(str).str.strip()
     out["session_type"] = out["session_type"].apply(normalize_session_type)
     fallback_source = df["Split"] if "Split" in df.columns else None
-    out["start_time"] = parse_datetime_series(out["start_time"], fallback_source=fallback_source)
+    if "FPI dátum" in df.columns:
+        out["start_time"] = parse_datetime_series(df["FPI dátum"], fallback_source=fallback_source)
+        fixed_mapping["start_time"] = "FPI dátum"
+    else:
+        out["start_time"] = parse_datetime_series(out["start_time"], fallback_source=fallback_source)
     out["session_date"] = out["start_time"].dt.date
-    out["week"] = out["start_time"].dt.to_period("W-SUN").astype(str)
+    iso = out["start_time"].dt.isocalendar()
+    out["week"] = iso["year"].astype(str) + "-W" + iso["week"].astype(str).str.zfill(2)
     if "duration" in out.columns:
         out["duration_min"] = out["duration"].apply(duration_to_minutes)
     else:
@@ -4985,6 +5060,18 @@ weeks = sorted(df["week"].dropna().unique().tolist()) if "week" in df.columns el
 players = sorted(df["player_name"].dropna().unique().tolist()) if "player_name" in df.columns else []
 session_types = sorted(df["session_type"].dropna().unique().tolist()) if "session_type" in df.columns else []
 
+with st.sidebar.expander("🔎 Import diagnosztika V5.3", expanded=True):
+    st.caption(APP_VERSION)
+    st.write({
+        "felismert_hetek_szama": len(weeks),
+        "hetek": weeks,
+        "sorok": int(len(df)),
+        "jatekosok": int(len(players)),
+        "datum_min": str(pd.to_datetime(df["start_time"], errors="coerce").min()) if "start_time" in df.columns and not df.empty else "",
+        "datum_max": str(pd.to_datetime(df["start_time"], errors="coerce").max()) if "start_time" in df.columns and not df.empty else "",
+        "mapping_start_time": mapping.get("start_time") if isinstance(mapping, dict) else "",
+    })
+
 if not weeks or not players:
     render_emergency_mapper(raw_df, mapping if "mapping" in globals() else {}, missing_core if "missing_core" in globals() else [])
     st.stop()
@@ -5891,3 +5978,6 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
             )
     else:
         st.info("Mapping ellenőrzéshez előbb tölts fel egy Excel/CSV fájlt.")
+
+st.caption("" + APP_VERSION + " | FPI_REALFIX_2026_06_16_V053")
+
