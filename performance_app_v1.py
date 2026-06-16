@@ -2981,6 +2981,69 @@ def insights_to_pdf_bytes(insights_df: pd.DataFrame, selected_week: str) -> Opti
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     story.append(table)
+
+    # V5 PDF pages - past/current/next split planning
+    try:
+        _past_review = globals().get("past_week_review_df", pd.DataFrame())
+        _past_text = globals().get("past_week_review_text", "")
+        _current_plan = globals().get("current_remaining_plan_df", pd.DataFrame())
+        _current_text = globals().get("current_remaining_text", "")
+        _next_week_plan = globals().get("next_week_plan_df", pd.DataFrame())
+        _next_week_text = globals().get("next_week_plan_text", "")
+        _player_actions = globals().get("player_next_actions_df", pd.DataFrame())
+
+        try:
+            from reportlab.platypus import PageBreak
+        except Exception:
+            PageBreak = None
+
+        if PageBreak:
+            story.append(PageBreak())
+        story.append(P("Múlt hét / aktuális hét / jövő hét", title))
+        story.append(P("Teljes múlt heti értékelés, aktuális hét hátralévő napjai, és jövő heti mikrociklus terv.", subtitle))
+
+        story.append(section_bar("1) Múlt hét -> javaslat erre a hétre"))
+        story.append(data_table([[P("Összefoglaló", header)], [P(_past_text, body)]], [27.7 * cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF")]))
+        if _past_review is not None and not _past_review.empty:
+            cols = [c for c in ["Prioritás", "Múlt heti megállapítás", "Súlyosság", "Javaslat erre a hétre"] if c in _past_review.columns]
+            pdata = [[P(c, header) for c in cols]]
+            for _, rr in _past_review.head(6).iterrows():
+                pdata.append([P(rr.get(c, ""), tiny) for c in cols])
+            story.append(data_table(pdata, [1.7 * cm, 7.0 * cm, 3.0 * cm, 16.0 * cm][:len(cols)], header_bg="#0F172A", row_bgs=[colors.white, colors.HexColor("#F8FAFC")]))
+
+        story += [Spacer(1, 0.25 * cm)]
+        story.append(section_bar("2) Aktuális hét -> hátralévő napok"))
+        story.append(data_table([[P("Összefoglaló", header)], [P(_current_text, body)]], [27.7 * cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5")]))
+        if _current_plan is not None and not _current_plan.empty:
+            cols = [c for c in ["Hátralévő pont", "Fókusz", "Ajánlott terhelés", "Javaslat"] if c in _current_plan.columns]
+            cdata = [[P(c, header) for c in cols]]
+            for _, rr in _current_plan.head(6).iterrows():
+                cdata.append([P(rr.get(c, ""), tiny) for c in cols])
+            story.append(data_table(cdata, [3.2 * cm, 4.8 * cm, 3.5 * cm, 16.2 * cm][:len(cols)], header_bg="#166534", row_bgs=[colors.white, colors.HexColor("#ECFDF5")]))
+
+        if PageBreak:
+            story.append(PageBreak())
+        story.append(P("Jövő heti mikrociklus terv", title))
+        story.append(P(_next_week_text, subtitle))
+        if _next_week_plan is not None and not _next_week_plan.empty:
+            cols = [c for c in ["Nap", "Szerep", "Fő cél", "Ajánlott terhelés", "Javaslat", "Tervezési alap"] if c in _next_week_plan.columns]
+            ndata = [[P(c, header) for c in cols]]
+            for _, rr in _next_week_plan.head(8).iterrows():
+                ndata.append([P(rr.get(c, ""), tiny) for c in cols])
+            story.append(data_table(ndata, [1.7 * cm, 3.2 * cm, 4.0 * cm, 3.0 * cm, 8.8 * cm, 7.0 * cm][:len(cols)], header_bg="#312E81", row_bgs=[colors.white, colors.HexColor("#F5F3FF")]))
+
+        if _player_actions is not None and not _player_actions.empty:
+            story += [Spacer(1, 0.25 * cm)]
+            story.append(section_bar("Játékosszintű következő teendők"))
+            cols = [c for c in ["Játékos", "Prioritás", "Holnap / következő edzés", "Következő hét", "Indok"] if c in _player_actions.columns]
+            adata = [[P(c, header) for c in cols]]
+            for _, rr in _player_actions.head(8).iterrows():
+                adata.append([P(rr.get(c, ""), tiny) for c in cols])
+            story.append(data_table(adata, [3.3 * cm, 2.5 * cm, 7.0 * cm, 7.0 * cm, 7.9 * cm][:len(cols)], header_bg="#7F1D1D", row_bgs=[colors.white, colors.HexColor("#FFF7ED")]))
+    except Exception:
+        pass
+
+
     doc.build(story)
     return output.getvalue()
 
@@ -3042,6 +3105,382 @@ def render_risk_cards(risk_df: pd.DataFrame, limit: int=5) -> None:
     for _, row in risk_df.head(limit).iterrows():
         level=row.get("Kockázati szint","Alacsony"); css="risk-high" if level=="Magas" else ("risk-medium" if level=="Közepes" else "risk-low")
         st.markdown(f"""<div class='insight-card {css}'><div class='insight-title'>{html.escape(str(row.get('Játékos','')))} · {html.escape(str(level))} kockázat · {row.get('Kockázati pontszám',0)}/100</div><div class='insight-label'>Fő okok</div><div class='insight-text'>{html.escape(str(row.get('Fő okok','')))}</div></div>""", unsafe_allow_html=True)
+
+
+
+
+
+# -----------------------------------------------------------------------------
+# V5 - Past / current / next microcycle planning
+# -----------------------------------------------------------------------------
+def week_completeness_summary(df: pd.DataFrame, selected_week: str) -> Dict[str, object]:
+    """Részleges hét értelmezése.
+    Nem kell teljes hét: 1-2-3 edzés alapján is adunk folyamat közbeni visszajelzést.
+    """
+    if df is None or df.empty or "week" not in df.columns:
+        return {
+            "status": "Nincs adat",
+            "sessions": 0,
+            "train_days": 0,
+            "match_days": 0,
+            "days": 0,
+            "last_day": None,
+            "message": "Nincs értelmezhető heti adat.",
+        }
+
+    week_df = df[df["week"] == selected_week].copy()
+    if week_df.empty:
+        return {
+            "status": "Nincs adat",
+            "sessions": 0,
+            "train_days": 0,
+            "match_days": 0,
+            "days": 0,
+            "last_day": None,
+            "message": "Az aktuális hétre nincs adat.",
+        }
+
+    week_df["session_date_dt"] = pd.to_datetime(week_df["session_date"], errors="coerce")
+    sessions = len(week_df[["session_date_dt", "session_type"]].drop_duplicates()) if "session_type" in week_df.columns else week_df["session_date_dt"].nunique()
+    train_days = week_df.loc[week_df["session_type"] == "Edzés", "session_date_dt"].dt.date.nunique() if "session_type" in week_df.columns else 0
+    match_days = week_df.loc[week_df["session_type"] == "Meccs", "session_date_dt"].dt.date.nunique() if "session_type" in week_df.columns else 0
+    days = week_df["session_date_dt"].dt.date.nunique()
+    last_day = week_df["session_date_dt"].max()
+
+    if match_days > 0:
+        status = "Teljes / meccsel együtt értelmezhető hét"
+    elif train_days <= 2:
+        status = "Aktuális / folyamatban lévő hét - korai jelzés"
+    elif train_days <= 4:
+        status = "Aktuális / folyamatban lévő hét - tervezési pont"
+    else:
+        status = "Majdnem teljes edzéshet"
+
+    message = (
+        f"{status}. Eddig {train_days} edzésnap és {match_days} meccsnap látható. "
+        "A javaslatokat a rendelkezésre álló adatokhoz igazítjuk, nem feltételezzük, hogy a hét teljes."
+    )
+
+    return {
+        "status": status,
+        "sessions": sessions,
+        "train_days": train_days,
+        "match_days": match_days,
+        "days": days,
+        "last_day": last_day,
+        "message": message,
+    }
+
+
+def get_surrounding_week_context(df: pd.DataFrame, selected_week: str) -> Dict[str, Optional[str]]:
+    weeks_sorted = sorted(df["week"].dropna().unique().tolist()) if df is not None and not df.empty and "week" in df.columns else []
+    if selected_week not in weeks_sorted:
+        return {"previous_week": None, "current_week": selected_week, "next_data_week": None}
+    i = weeks_sorted.index(selected_week)
+    return {
+        "previous_week": weeks_sorted[i - 1] if i > 0 else None,
+        "current_week": selected_week,
+        "next_data_week": weeks_sorted[i + 1] if i < len(weeks_sorted) - 1 else None,
+    }
+
+
+def build_past_week_review(
+    df: pd.DataFrame,
+    selected_week: str,
+    playstyle: str,
+) -> Tuple[pd.DataFrame, str]:
+    """Múlt hét teljes elemzése + javaslat az aktuális hétre."""
+    ctx = get_surrounding_week_context(df, selected_week)
+    prev_week = ctx.get("previous_week")
+    if not prev_week:
+        return pd.DataFrame(), "Nincs előző hét adat. Az aktuális javaslat csak a kiválasztott hét alapján készül."
+
+    prev_insights = (
+        team_insights(df, prev_week)
+        + microcycle_insights(df, prev_week)
+        + playstyle_insights(df, prev_week, playstyle)
+        + build_pattern_insights(df, prev_week)
+    )
+    prev_insights = sorted(prev_insights, key=lambda x: SEVERITY_RANK.get(x.severity, 9))[:10]
+    prev_readiness, _, _ = calculate_readiness_score(df, prev_week, playstyle)
+
+    prev_fp = build_weekly_fingerprints(df)
+    prev_period = "Nincs elég adat"
+    if prev_fp is not None and not prev_fp.empty and "week" in prev_fp.columns:
+        row = prev_fp[prev_fp["week"] == prev_week]
+        if not row.empty and "periodizacios_tipus" in row.columns:
+            prev_period = row["periodizacios_tipus"].iloc[0]
+
+    rows = []
+    for i, ins in enumerate(prev_insights, 1):
+        rows.append({
+            "Prioritás": i,
+            "Múlt heti megállapítás": ins.title,
+            "Súlyosság": ins.severity,
+            "Mit láttunk?": ins.observation,
+            "Javaslat erre a hétre": ins.recommendation,
+        })
+
+    if not rows:
+        rows.append({
+            "Prioritás": 1,
+            "Múlt heti megállapítás": "Stabil hét",
+            "Súlyosság": "INFORMÁCIÓ",
+            "Mit láttunk?": "Nem látható kiemelt negatív eltérés.",
+            "Javaslat erre a hétre": "A struktúra megtartható, de sprint/load/risk monitoring maradjon aktív.",
+        })
+
+    txt = (
+        f"Múlt hét: {format_week_label(prev_week)}\n"
+        f"Readiness: {prev_readiness}/100 ({score_to_label(prev_readiness)})\n"
+        f"Periodizáció: {prev_period}\n\n"
+        "Ebből erre a hétre a fő cél: a kritikus/figyelmeztető pontok kezelése, "
+        "miközben a frissességet és az egyéni risket kontroll alatt tartjuk."
+    )
+    return pd.DataFrame(rows), txt
+
+
+def build_current_remaining_days_plan(
+    df: pd.DataFrame,
+    selected_week: str,
+    playstyle: str,
+    readiness_score: int,
+    periodization_type: str,
+    player_risk_df: pd.DataFrame,
+) -> Tuple[pd.DataFrame, str]:
+    """Aktuális hét: eddigi feltöltött napok alapján javaslat a hátralévő napokra."""
+    week_df = df[df["week"] == selected_week].copy() if df is not None and "week" in df.columns else pd.DataFrame()
+    if week_df.empty:
+        return pd.DataFrame(), "Nincs aktuális heti adat."
+
+    week_df["session_date_dt"] = pd.to_datetime(week_df["session_date"], errors="coerce")
+    last_day = week_df["session_date_dt"].max()
+    match_day = detect_match_day(week_df)
+    has_match = match_day is not None
+    ws = week_completeness_summary(df, selected_week)
+
+    if has_match and pd.notna(last_day) and match_day is not None and last_day.date() >= match_day.date():
+        md_slots = ["MD+1", "Következő edzés", "Jövő hét előkészítés"]
+    elif has_match:
+        md_slots = ["Hátralévő edzés", "MD-2", "MD-1", "MD"]
+    else:
+        if ws.get("train_days", 0) <= 1:
+            md_slots = ["Holnap", "Következő 2. edzés", "Következő 3. edzés", "Hétvégi meccs / referencia"]
+        elif ws.get("train_days", 0) <= 3:
+            md_slots = ["Holnap", "Hátralévő fő edzés", "Meccs előtti aktiváció", "Hétvégi meccs / referencia"]
+        else:
+            md_slots = ["Következő edzés", "Aktiváció", "Meccs / referencia"]
+
+    high_risk = []
+    if player_risk_df is not None and not player_risk_df.empty and "Kockázati szint" in player_risk_df.columns:
+        high_risk = player_risk_df.loc[player_risk_df["Kockázati szint"] == "Magas", "Játékos"].head(5).tolist() if "Játékos" in player_risk_df.columns else []
+
+    low_sprint = False
+    intensity_gap = False
+    train = week_df[week_df["session_type"] == "Edzés"] if "session_type" in week_df.columns else pd.DataFrame()
+    match = week_df[week_df["session_type"] == "Meccs"] if "session_type" in week_df.columns else pd.DataFrame()
+    if not train.empty:
+        if "sprint_distance" in train.columns and train["sprint_distance"].mean() < 250:
+            low_sprint = True
+        if not match.empty and "distance_per_min" in week_df.columns and match["distance_per_min"].mean() > 0:
+            intensity_gap = (train["distance_per_min"].mean() / match["distance_per_min"].mean()) < 0.88
+
+    rows = []
+    for slot in md_slots:
+        if "MD+1" in slot:
+            focus = "Regeneráció / pótló terhelés"
+            rec = "Sokat játszóknak regeneráció, keveset játszóknak kontrollált kiegészítő blokk."
+            load = "egyéni"
+        elif "MD-1" in slot or "aktiváció" in slot.lower():
+            focus = "Frissesség"
+            rec = "Rövid aktiváció, alacsony volumen. Ne legyen új fárasztó inger."
+            load = "alacsony"
+        elif "MD-2" in slot:
+            focus = "Taktikai kontroll"
+            rec = "Taktikai fókusz, kevés lassítás/excentrikus terhelés. Magas risk játékosoknál limit."
+            load = "alacsony-közepes"
+        elif low_sprint or intensity_gap:
+            focus = "Hiányzó intenzitás pótlása"
+            rec = "Rövid, kontrollált sprint/max sebesség vagy magas tempójú játékblokk, kis volumennel."
+            load = "közepes"
+        else:
+            focus = "Struktúra megtartása"
+            rec = "A heti terv tartható, de egyéni risk és readiness kontroll javasolt."
+            load = "közepes"
+
+        if high_risk and load != "alacsony":
+            rec += " Magas risk játékosoknál egyéni csökkentés: " + ", ".join(high_risk[:3]) + "."
+
+        rows.append({
+            "Hátralévő pont": slot,
+            "Fókusz": focus,
+            "Ajánlott terhelés": load,
+            "Javaslat": rec,
+            "Miért?": f"Eddig feltöltve: {ws.get('train_days', 0)} edzésnap, {ws.get('match_days', 0)} meccsnap. Readiness: {readiness_score}/100.",
+        })
+
+    txt = (
+        f"Aktuális hét állapota: {ws.get('status')}\n"
+        f"{ws.get('message')}\n\n"
+        "A hátralévő napokra a javaslat nem teljes heti minősítés, hanem folyamat közbeni döntéstámogatás."
+    )
+    return pd.DataFrame(rows), txt
+
+
+def build_next_microcycle_plan(
+    df: pd.DataFrame,
+    selected_week: str,
+    playstyle: str,
+    readiness_score: int,
+    periodization_type: str,
+    player_risk_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Jövő hét / következő mikrociklus javaslat MD-bontásban az eddigiek alapján."""
+    week_df = df[df["week"] == selected_week].copy() if df is not None and "week" in df.columns else pd.DataFrame()
+
+    low_sprint = False
+    intensity_gap = False
+    high_risk_players = []
+    if player_risk_df is not None and not player_risk_df.empty:
+        high_risk_players = player_risk_df.loc[player_risk_df["Kockázati szint"] == "Magas", "Játékos"].head(5).tolist() if "Kockázati szint" in player_risk_df.columns and "Játékos" in player_risk_df.columns else []
+
+    if not week_df.empty:
+        train = week_df[week_df["session_type"] == "Edzés"] if "session_type" in week_df.columns else pd.DataFrame()
+        match = week_df[week_df["session_type"] == "Meccs"] if "session_type" in week_df.columns else pd.DataFrame()
+        if not train.empty and not match.empty:
+            if "sprint_distance" in week_df.columns and match["sprint_distance"].mean() > 0:
+                low_sprint = (train["sprint_distance"].mean() / match["sprint_distance"].mean()) < 0.75
+            if "distance_per_min" in week_df.columns and match["distance_per_min"].mean() > 0:
+                intensity_gap = (train["distance_per_min"].mean() / match["distance_per_min"].mean()) < 0.88
+        elif not train.empty:
+            if "sprint_distance" in train.columns and train["sprint_distance"].mean() < 250:
+                low_sprint = True
+
+    if readiness_score < 60:
+        global_tone = "frissítés és terheléskontroll"
+        volume = "alacsony-közepes"
+    elif "alulterhelt" in str(periodization_type).lower() or low_sprint:
+        global_tone = "kontrollált inger pótlása"
+        volume = "közepes"
+    else:
+        global_tone = "struktúra megtartása és finomhangolás"
+        volume = "közepes"
+
+    md_structure = [
+        ("MD-4", "Fő terhelési nap", "volumen + játékmodell-specifikus intenzitás"),
+        ("MD-3", "Sebesség / intenzitás nap", "rövid maximális sebesség vagy high effort blokk"),
+        ("MD-2", "Kontrollált taktikai nap", "alacsonyabb neuromuszkuláris teher, kevesebb lassítás"),
+        ("MD-1", "Aktiváció", "rövid, frissítő, nem fárasztó inger"),
+        ("MD", "Mérkőzés", "referencianap"),
+        ("MD+1", "Regeneráció / pótlás", "játszók regeneráció, kevesebbet játszók kiegészítő munka"),
+    ]
+
+    rows = []
+    for md, role, base_goal in md_structure:
+        if md == "MD-4":
+            recommendation = "Legyen ez a hét fő terhelési napja. Játékmodellhez illeszkedő játékok, nagyobb volumen."
+            if readiness_score < 60:
+                recommendation = "Csak óvatos fő nap: ne legyen nagy load spike, inkább kontrollált volumen."
+        elif md == "MD-3":
+            if low_sprint:
+                recommendation = "Tegyél be rövid, kontrollált sprint/max sebesség blokkot. Kevés ismétlés, jó minőség."
+            elif intensity_gap:
+                recommendation = "Rövidebb, magasabb tempójú játékokkal közelítsd a meccsintenzitást."
+            else:
+                recommendation = "Tartsd meg a minőségi sebesség/intenzitás ingert, de ne volumenből oldd meg."
+        elif md == "MD-2":
+            recommendation = "Taktikai fókusz, kontrollált terhelés. Kerüld a túl sok lassítást és excentrikus terhet."
+            if high_risk_players:
+                recommendation += " Magas risk játékosoknál egyéni limit javasolt."
+        elif md == "MD-1":
+            recommendation = "Rövid aktiváció, frissesség megtartása. Ne legyen új terhelési inger."
+        elif md == "MD":
+            recommendation = "Mérkőzés referencia. A következő heti edzésterhelést ehhez viszonyítsd."
+        else:
+            recommendation = "Regeneráció a sokat játszóknak, kiegészítő kontrollált terhelés a kevesebbet játszóknak."
+
+        rows.append({
+            "Nap": md,
+            "Szerep": role,
+            "Fő cél": base_goal,
+            "Ajánlott terhelés": volume if md in ["MD-4", "MD-3"] else "alacsony-közepes" if md in ["MD-2", "MD+1"] else "alacsony" if md == "MD-1" else "meccs",
+            "Javaslat": recommendation,
+            "Tervezési alap": f"A jelenlegi hét értelmezése: {global_tone}. Readiness: {readiness_score}/100, periodizáció: {periodization_type}.",
+        })
+
+    return pd.DataFrame(rows)
+
+
+def build_player_next_actions(player_risk_df: pd.DataFrame, df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
+    """Játékosszintű holnapi/következő heti teendők."""
+    if player_risk_df is None or player_risk_df.empty:
+        return pd.DataFrame(columns=["Játékos", "Prioritás", "Holnap / következő edzés", "Következő hét", "Indok"])
+
+    rows = []
+    for _, r in player_risk_df.head(12).iterrows():
+        name = r.get("Játékos", r.get("player_name", ""))
+        level = str(r.get("Kockázati szint", ""))
+        score = r.get("Kockázati pontszám", r.get("Risk score", ""))
+        reason = r.get("Fő okok", r.get("Fő ok", ""))
+
+        if level == "Magas":
+            tomorrow = "Terheléskontroll, extra sprint/lassítás kerülése, frissességi check-in."
+            next_week = "Egyéni limit MD-4/MD-3 napon; minőségi, de alacsony volumenű sebességinger."
+            priority = "Magas"
+        elif level == "Közepes":
+            tomorrow = "Normál edzés, de sprint/lassítás mennyiség figyelése."
+            next_week = "Fokozatos terhelés, ne legyen hirtelen load spike."
+            priority = "Közepes"
+        else:
+            tomorrow = "Normál terhelés folytatható."
+            next_week = "Csapatprogram szerint, egyéni monitoringgal."
+            priority = "Alacsony"
+
+        rows.append({
+            "Játékos": name,
+            "Prioritás": priority,
+            "Holnap / következő edzés": tomorrow,
+            "Következő hét": next_week,
+            "Indok": f"Risk: {score}. {reason}",
+        })
+
+    return pd.DataFrame(rows)
+
+
+def build_next_week_plan_v5(
+    df: pd.DataFrame,
+    selected_week: str,
+    playstyle: str,
+    readiness_score: int,
+    periodization_type: str,
+    player_risk_df: pd.DataFrame,
+    past_review_df: pd.DataFrame,
+    current_remaining_df: pd.DataFrame,
+) -> Tuple[pd.DataFrame, str]:
+    """Jövő hét: múlt hét + aktuális részadat + risk alapján."""
+    base_plan = build_next_microcycle_plan(df, selected_week, playstyle, readiness_score, periodization_type, player_risk_df)
+    if base_plan is None or base_plan.empty:
+        return base_plan, "Nincs elég adat következő hét tervhez."
+
+    high_risk_count = 0
+    if player_risk_df is not None and not player_risk_df.empty and "Kockázati szint" in player_risk_df.columns:
+        high_risk_count = int((player_risk_df["Kockázati szint"] == "Magas").sum())
+
+    past_warn = 0
+    if past_review_df is not None and not past_review_df.empty and "Súlyosság" in past_review_df.columns:
+        past_warn = int(past_review_df["Súlyosság"].astype(str).isin(["KRITIKUS", "FIGYELMEZTETÉS"]).sum())
+
+    base_plan = base_plan.copy()
+    base_plan["Tervezési alap"] = (
+        f"Múlt heti figyelmeztetések: {past_warn}; aktuális readiness: {readiness_score}/100; "
+        f"magas risk játékosok: {high_risk_count}; periodizáció: {periodization_type}."
+    )
+
+    txt = (
+        "A jövő heti mikrociklus a múlt teljesebb értékelésére, az aktuális hét eddig feltöltött napjaira "
+        "és a játékosszintű risk jelzésekre épül."
+    )
+    return base_plan, txt
 
 
 def build_premium_pdf_bytes(
@@ -4477,6 +4916,40 @@ weekly_summary_text += (
 player_risk_df = calculate_player_risk(analysis_base_df, selected_week)
 high_risk_count = int((player_risk_df["Kockázati szint"] == "Magas").sum()) if not player_risk_df.empty else 0
 medium_risk_count = int((player_risk_df["Kockázati szint"] == "Közepes").sum()) if not player_risk_df.empty else 0
+week_status_info = week_completeness_summary(analysis_base_df, selected_week)
+past_week_review_df, past_week_review_text = build_past_week_review(
+    analysis_base_df,
+    selected_week,
+    selected_playstyle,
+)
+current_remaining_plan_df, current_remaining_text = build_current_remaining_days_plan(
+    analysis_base_df,
+    selected_week,
+    selected_playstyle,
+    readiness_score,
+    periodization_type,
+    player_risk_df,
+)
+next_week_plan_df, next_week_plan_text = build_next_week_plan_v5(
+    analysis_base_df,
+    selected_week,
+    selected_playstyle,
+    readiness_score,
+    periodization_type,
+    player_risk_df,
+    past_week_review_df,
+    current_remaining_plan_df,
+)
+next_microcycle_plan_df = next_week_plan_df
+player_next_actions_df = build_player_next_actions(player_risk_df, analysis_base_df, selected_week)
+forward_summary_text = (
+    "MÚLT HÉT -> ERRE A HÉTRE\n"
+    + str(past_week_review_text)
+    + "\n\nAKTUÁLIS HÉT -> HÁTRALÉVŐ NAPOK\n"
+    + str(current_remaining_text)
+    + "\n\nJÖVŐ HÉT\n"
+    + str(next_week_plan_text)
+)
 
 # Tabok
 tab_exec, tab_intro, tab1, tab_premium, tab_export, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.tabs([
@@ -4535,7 +5008,16 @@ with tab_exec:
         st.metric("Elemzett hetek", mem_weeks)
 
     st.markdown("### Heti vezetői összefoglaló")
+    st.info(week_status_info.get("message", ""))
     render_weekly_summary_card(weekly_summary_text)
+
+    with st.expander("🧭 Múlt / aktuális / jövő fókusz", expanded=False):
+        st.markdown("**Múlt hét -> erre a hétre**")
+        render_weekly_summary_card(past_week_review_text)
+        st.markdown("**Aktuális hét -> hátralévő napok**")
+        render_weekly_summary_card(current_remaining_text)
+        st.markdown("**Jövő hét**")
+        render_weekly_summary_card(next_week_plan_text)
 
     left, right = st.columns([1.05, 1])
     with left:
@@ -4655,6 +5137,19 @@ with tab1:
         st.metric("Elemzett hetek", mem_weeks)
     st.markdown("### Top 3 adaptív edzői teendő")
     render_coaching_priorities(coaching_priorities)
+
+    st.markdown("### Múlt hét alapján: javaslat erre a hétre")
+    render_weekly_summary_card(past_week_review_text)
+
+    st.markdown("### Aktuális hét: maradék napok")
+    render_weekly_summary_card(current_remaining_text)
+    if current_remaining_plan_df is not None and not current_remaining_plan_df.empty:
+        st.dataframe(current_remaining_plan_df, use_container_width=True, hide_index=True)
+
+    st.markdown("### Jövő hét / következő mikrociklus")
+    render_weekly_summary_card(next_week_plan_text)
+    if next_week_plan_df is not None and not next_week_plan_df.empty:
+        st.dataframe(next_week_plan_df, use_container_width=True, hide_index=True)
 
     weekly = aggregate_weekly(df[df["session_type"].isin(selected_types)])
     st.markdown("### Heti trendek")
@@ -5000,6 +5495,30 @@ with tab_micro:
             render_insight_cards(micro_insights)
         else:
             st.success("A mikrociklus struktúrában nem látszik kiemelt figyelmeztetés az aktuális szabályok alapján.")
+
+
+
+    st.markdown("## 🧭 Múlt hét -> aktuális hét -> jövő hét")
+    st.caption("A rendszer külön kezeli: múlt hét teljes elemzése, aktuális hét hátralévő napjai, jövő heti mikrociklus.")
+
+    st.markdown("### 1) Múlt hét teljes elemzése és javaslat erre a hétre")
+    render_weekly_summary_card(past_week_review_text)
+    if past_week_review_df is not None and not past_week_review_df.empty:
+        st.dataframe(past_week_review_df, use_container_width=True, hide_index=True)
+
+    st.markdown("### 2) Aktuális hét eddig feltöltött napjai és hátralévő napok")
+    render_weekly_summary_card(current_remaining_text)
+    if current_remaining_plan_df is not None and not current_remaining_plan_df.empty:
+        st.dataframe(current_remaining_plan_df, use_container_width=True, hide_index=True)
+
+    st.markdown("### 3) Jövő hét / következő mikrociklus az eddigiek alapján")
+    render_weekly_summary_card(next_week_plan_text)
+    if next_week_plan_df is not None and not next_week_plan_df.empty:
+        st.dataframe(next_week_plan_df, use_container_width=True, hide_index=True)
+
+    st.markdown("### 4) Játékosszintű következő teendők")
+    if player_next_actions_df is not None and not player_next_actions_df.empty:
+        st.dataframe(player_next_actions_df, use_container_width=True, hide_index=True)
 
 
 with tab_risk:
