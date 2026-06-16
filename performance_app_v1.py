@@ -732,6 +732,135 @@ PLAYSTYLE_OPTIONS = {
 
 
 # -----------------------------------------------------------------------------
+# Smart Mapper v2 - magyarázat és összevont GPS mezők
+# -----------------------------------------------------------------------------
+MAPPER_FIELD_INFO = {
+    "player_name": ("Játékos neve", "A játékos azonosítója / neve.", "szöveg", "minden játékos szintű elemzés, risk motor", True),
+    "session_type": ("Típus", "Az esemény típusa: Edzés vagy Meccs.", "szöveg", "edzés-meccs összevetés, readiness", True),
+    "start_time": ("Kezdési idő / dátum – dátum/idő", "Az edzés vagy mérkőzés dátuma.", "dátum/idő", "heti bontás, mikrociklus, trendek", True),
+    "duration": ("Időtartam", "Az esemény hossza.", "perc vagy hh:mm:ss", "táv/perc, intenzitás", False),
+    "total_distance": ("Teljes táv", "Összes megtett távolság.", "méter", "terhelési volumen, heti load, risk", False),
+    "distance_per_min": ("Táv/perc", "Relatív futóteljesítmény.", "m/perc", "meccsintenzitás, játékmodell", False),
+    "max_speed": ("Maximális sebesség", "Legnagyobb elért sebesség.", "km/h", "max speed trend, frissesség", False),
+    "sprints": ("Sprintek száma", "Sprint akciók darabszáma, nem méter.", "darab", "sprint expozíció", False),
+    "speed_zone_4": ("Nagy sebességű futás / Zone 4 vagy 4+5", "Nagy sebességű távolság. Ha csak Distance(4+5) van, ide válaszd.", "méter", "HSR, játékmodell, load profil", False),
+    "speed_zone_5": ("Sprint táv / Zone 5", "Sprint zónában megtett távolság. Ez méter, nem darabszám.", "méter", "sprintterhelés, sprint fit", False),
+    "training_load": ("Edzési terhelési pont", "GPS/rendszer által számolt load pont.", "pont", "heti terhelés, risk", False),
+    "muscle_load": ("Izomterhelés", "Mechanikus/izomterhelési mutató.", "pont", "neuromuszkuláris kockázat", False),
+    "hr_avg": ("Átlagpulzus", "Átlagos pulzus.", "bpm", "belső terhelés", False),
+    "hr_max": ("Max pulzus", "Maximális pulzus.", "bpm", "belső terhelés", False),
+    "acc_high": ("Gyorsulások", "Nagy intenzitású vagy összesített gyorsulások száma.", "darab", "neuromuszkuláris terhelés", False),
+    "dec_high": ("Lassítások", "Nagy intenzitású vagy összesített lassítások száma.", "darab", "excentrikus terhelés, risk", False),
+    "high_efforts": ("High Efforts", "Nagy intenzitású akciók összesített mutatója.", "darab / pont", "pressing/transition profil", False),
+}
+
+
+def mapper_label(std_col: str) -> str:
+    return MAPPER_FIELD_INFO.get(std_col, (std_col, "", "", "", False))[0]
+
+
+def mapper_unit(std_col: str) -> str:
+    return MAPPER_FIELD_INFO.get(std_col, ("", "", "", "", False))[2]
+
+
+def mapper_desc(std_col: str) -> str:
+    label, meaning, unit, used_for, required = MAPPER_FIELD_INFO.get(std_col, (std_col, "", "", "", False))
+    extra = ""
+    if std_col == "speed_zone_4":
+        extra = " Összevont 4+5 zóna esetén ezt válaszd ide; az app HSR-ként kezeli."
+    elif std_col == "speed_zone_5":
+        extra = " Ide ne darabszámot válassz, hanem méter alapú sprinttávot."
+    elif std_col == "sprints":
+        extra = " Ide darabszám kell, nem sprinttáv méterben."
+    elif std_col in ["acc_high", "dec_high"]:
+        extra = " Ha csak összesített oszlop van, az is használható."
+    return f"{meaning} Várt egység: {unit}. Ebből számolódik: {used_for}.{extra}"
+
+
+def mapper_warning(std_col: str, source_col: object) -> str:
+    s = _norm_mapping_text(source_col)
+    if not s:
+        return ""
+    if std_col == "sprints" and any(x in s for x in ["distance", "tav", "meter", "metre"]):
+        return "⚠ Sprintekhez darabszám kell, ez inkább sprinttávnak tűnik."
+    if std_col == "speed_zone_5" and any(x in s for x in ["count", "darab"]):
+        return "⚠ Sprint távhoz méter kell, ez inkább sprint darabszámnak tűnik."
+    if std_col in ["speed_zone_4", "speed_zone_5", "total_distance"] and any(x in s for x in ["count", "darab"]):
+        return "⚠ Ehhez távolság kellene, nem darabszám."
+    if std_col in ["acc_high", "dec_high", "sprints"] and any(x in s for x in ["distance", "meter", "metre"]):
+        return "⚠ Ehhez darabszám jellegű oszlop kellene, nem méter."
+    return ""
+
+
+def enhanced_mapping_quality_df(raw_df: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> pd.DataFrame:
+    rows = []
+    for std_col, aliases in STANDARD_COLUMNS.items():
+        src = mapping.get(std_col)
+        score = smart_column_score(src, std_col, aliases) if src else 0
+        required = MAPPER_FIELD_INFO.get(std_col, ("", "", "", "", std_col in CORE_REQUIRED))[4]
+        rows.append({
+            "App mező": mapper_label(std_col),
+            "Technikai mező": std_col,
+            "Mit jelent?": mapper_desc(std_col),
+            "Várt egység": mapper_unit(std_col),
+            "Kiválasztott Excel oszlop": src or "",
+            "Bizonyosság": score,
+            "Kötelező": "igen" if required else "nem",
+            "Figyelmeztetés": mapper_warning(std_col, src),
+        })
+    return pd.DataFrame(rows)
+
+
+def mapping_compatibility_score(mapping: Dict[str, Optional[str]]) -> Tuple[int, List[str]]:
+    weights = {
+        "player_name": 20, "session_type": 15, "start_time": 15,
+        "total_distance": 8, "duration": 5, "distance_per_min": 7,
+        "max_speed": 8, "sprints": 5, "speed_zone_4": 5,
+        "speed_zone_5": 7, "training_load": 5, "acc_high": 3,
+        "dec_high": 3, "high_efforts": 4,
+    }
+    total = sum(weights.values())
+    got = 0
+    missing = []
+    for k, w in weights.items():
+        if mapping.get(k):
+            got += w
+        else:
+            missing.append(mapper_label(k))
+    return int(round(got / total * 100)), missing
+
+
+def render_mapping_score(mapping: Dict[str, Optional[str]]) -> None:
+    score, missing = mapping_compatibility_score(mapping)
+    if score >= 85:
+        st.success(f"GPS fájl kompatibilitás: {score}% – nagyon jó")
+    elif score >= 65:
+        st.warning(f"GPS fájl kompatibilitás: {score}% – használható, de néhány mező hiányzik")
+    else:
+        st.error(f"GPS fájl kompatibilitás: {score}% – javítsd a mappinget")
+    if missing:
+        st.caption("Hiányzó fontos mezők: " + ", ".join(missing[:8]) + ("..." if len(missing) > 8 else ""))
+
+
+def normalize_combined_fields(out: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> pd.DataFrame:
+    """Összevont GPS mezők kezelése, pl. Distance(4+5)."""
+    out = out.copy()
+    src_z4 = str(mapping.get("speed_zone_4") or "").lower()
+    combined_45 = any(x in src_z4 for x in ["4+5", "hsr", "high speed"])
+    out["combined_zone_4_5_used"] = bool(combined_45)
+
+    if ("speed_zone_5" not in out.columns or out["speed_zone_5"].fillna(0).sum() == 0) and combined_45 and "speed_zone_4" in out.columns:
+        out["speed_zone_5"] = out["speed_zone_4"] * 0.30
+        out["estimated_sprint_distance"] = True
+    else:
+        out["estimated_sprint_distance"] = False
+    return out
+
+
+
+
+
+# -----------------------------------------------------------------------------
 # V4.5 - Smart Mapper fallback helpers
 # -----------------------------------------------------------------------------
 def _norm_mapping_text(text: object) -> str:
@@ -1105,6 +1234,8 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
     else:
         out["high_efforts"] = to_numeric(out["high_efforts"])
 
+    out = normalize_combined_fields(out, mapping)
+
     if "distance_per_min" not in out.columns or out["distance_per_min"].isna().all():
         if "total_distance" in out.columns:
             out["distance_per_min"] = out["total_distance"] / out["duration_min"]
@@ -1161,6 +1292,8 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
         out["high_efforts"] = out[["acc_mid", "acc_high", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
     else:
         out["high_efforts"] = to_numeric(out["high_efforts"])
+    out = normalize_combined_fields(out, mapping)
+
     if "distance_per_min" not in out.columns or out["distance_per_min"].isna().all():
         if "total_distance" in out.columns:
             out["distance_per_min"] = out["total_distance"] / out["duration_min"]
@@ -1178,6 +1311,9 @@ def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Opt
     """
     st.markdown("### 🧭 Smart Excel Mapper – kötelező mezők javítása")
     st.info("A fájl szerkezete eltér a várt sablontól. Állítsd be a kötelező mezőket, majd kattints az alkalmazásra.")
+    render_mapping_score(current_mapping)
+    st.markdown("#### App mezők magyarázata")
+    st.dataframe(enhanced_mapping_quality_df(raw_df, current_mapping), use_container_width=True)
 
     if raw_df is None or raw_df.empty:
         st.error("Nincs beolvasható nyers adat.")
@@ -1190,7 +1326,7 @@ def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Opt
     with col_a:
         default = manual.get("player_name") or ("Name" if "Name" in raw_df.columns else ("Játékos neve" if "Játékos neve" in raw_df.columns else ""))
         manual["player_name"] = st.selectbox(
-            "Játékos neve / Name",
+            "Játékos neve / Name – szöveg",
             cols,
             index=cols.index(default) if default in cols else 0,
             key="emergency_map_player_name",
@@ -1199,7 +1335,7 @@ def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Opt
     with col_b:
         default = manual.get("session_type") or ("Típus" if "Típus" in raw_df.columns else "")
         manual["session_type"] = st.selectbox(
-            "Típus / Edzés-Meccs",
+            "Típus – Edzés vagy Meccs",
             cols,
             index=cols.index(default) if default in cols else 0,
             key="emergency_map_session_type",
@@ -1208,7 +1344,7 @@ def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Opt
     with col_c:
         default = manual.get("start_time") or ("Kezdési idő" if "Kezdési idő" in raw_df.columns else ("Split" if "Split" in raw_df.columns else ""))
         manual["start_time"] = st.selectbox(
-            "Kezdési idő / dátum",
+            "Kezdési idő / dátum – dátum/idő",
             cols,
             index=cols.index(default) if default in cols else 0,
             key="emergency_map_start_time",
@@ -1223,11 +1359,15 @@ def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Opt
         for std_col in optional_fields:
             default = manual.get(std_col) or ""
             manual[std_col] = st.selectbox(
-                f"{std_col}",
+                f"{mapper_label(std_col)} | {mapper_unit(std_col)}",
                 cols,
                 index=cols.index(default) if default in cols else 0,
                 key=f"emergency_map_{std_col}",
+                help=mapper_desc(std_col),
             ) or None
+            warn = mapper_warning(std_col, manual.get(std_col))
+            if warn:
+                st.warning(warn)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -1247,6 +1387,7 @@ def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Opt
             st.session_state.pop("manual_mapping", None)
             st.rerun()
 
+    st.caption("Tipp: Distance(4+5) = összevont nagysebességű táv, ezt a Zone 4 / HSR mezőhöz érdemes tenni. Sprints count = darab, Total sprints distance = méter.")
     st.markdown("#### Beolvasott oszlopok")
     st.write(list(raw_df.columns))
     st.markdown("#### Adat előnézet")
@@ -5045,8 +5186,9 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
         raw_df = raw_df_for_mapper
         current_mapping = st.session_state.get("manual_mapping", None)
         if current_mapping is None:
-            current_mapping = suggest_mapping(raw_df) if 'suggest_mapping' in globals() else {}
-            st.session_state["manual_mapping"] = current_mapping
+            current_mapping = suggest_mapping(raw_df)
+        render_mapping_score(current_mapping)
+        st.session_state["manual_mapping"] = current_mapping
 
         profile_upload = st.file_uploader("Korábban mentett mapping profil betöltése (.json)", type=["json"], key="mapping_profile_upload")
         if profile_upload is not None:
@@ -5056,7 +5198,7 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
                 current_mapping = loaded_mapping
                 st.success("Mapping profil betöltve.")
 
-        st.dataframe(mapping_quality_df(raw_df, current_mapping) if 'mapping_quality_df' in globals() else pd.DataFrame(), use_container_width=True)
+        st.dataframe(enhanced_mapping_quality_df(raw_df, current_mapping), use_container_width=True)
 
         if st.button("♻️ Mapping override törlése", use_container_width=True, key="clear_mapping_override"):
             st.session_state.pop("mapped_df_override", None)
