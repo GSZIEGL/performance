@@ -45,7 +45,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_REALFIX_2026_06_16_V062_WEEK_RESCUE_KEEPER_PROMPT"
+FPI_IMPORT_ENGINE_VERSION = "FPI_REALFIX_2026_06_16_V063_METHODOLOGY_EDITION"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5487,6 +5487,34 @@ def build_fpi_product_pdf_bytes(
                 ad.append([P(r.get(c, ""), small) for c in cols])
             story.append(table(ad, [27.7*cm/len(cols)]*len(cols), header_bg="#7F1D1D", row_bgs=[colors.HexColor("#FEF2F2"), colors.white]))
 
+    def add_methodology_page():
+        story.append(section("Módszertani összefoglaló – hogyan számol az FPI?", "#DBEAFE"))
+        intro = (
+            "Az FPI döntéstámogató rendszer: a GPS-exportokból egységesíti a heti terhelési képet, "
+            "kiemeli a kockázatokat és edzői/erőnléti javaslatokat ad. Nem helyettesíti a szakmai stábot; "
+            "a végső döntés mindig edzői, erőnléti és orvosi kontroll mellett történik."
+        )
+        story.append(Paragraph(pdf_safe_text(intro), body))
+        story.append(Spacer(1, 0.20*cm))
+
+        meth_rows = [
+            [P("Terület", head), P("FPI metodika", head)],
+            [P("Adatimport", small), P("A Data/Adat lap elsődleges. A segédlapokat az app igyekszik kizárni. A Smart Mapper magyar és angol GPS oszlopneveket is kezel.", small)],
+            [P("Dátum és hét", small), P("A Week Rescue Engine a dátumot időponttal vagy extra szöveggel együtt is értelmezi, majd ISO hétre csoportosít. Rövid dátumtartományból képződő irreálisan sok hét esetén védelmi újraértelmezést alkalmaz.", small)],
+            [P("Kapusok", small), P("Ha van Poszt/Position oszlop, a kapusok automatikusan felismerhetők. Ha nincs, az app kézi kapusválasztást kér. A kapusok sprint/HSR értelmezése csökkentett súlyú.", small)],
+            [P("Játékpercek", small), P("A meccsterhelésnél az app figyelembe veszi, hogy nem minden játékos játszik 90 percet. Ahol elérhető, per90 és csapatperc alapú normalizálást alkalmaz.", small)],
+            [P("Edzés-meccs normalizálás", small), P("Az összevetés nem csak nyers csapatösszeg alapján történik, mert edzésen és meccsen eltérhet a játékosszám és a játékidő. A résztvevők száma és az időtartam is számít.", small)],
+            [P("Sebességzónák", small), P("A 4-es és 5-ös zóna külön vagy összevont 4+5 exportként is kezelhető. Összevont oszlopnál az app HSR-ként használja az értéket.", small)],
+            [P("High Efforts", small), P("Ha külön High Efforts oszlop van, azt használja. Ha nincs, gyorsulás/lassítás jellegű mutatókból becsült nagy intenzitású akciót képez.", small)],
+            [P("Benchmark", small), P("A jelenlegi benchmark általános referencia. Későbbi verzióban korosztály, szint, poszt és játékmodell szerint finomíthető.", small)],
+            [P("Mikrociklus", small), P("A múlt hét, aktuális hét és következő hét javaslatai a volumen, HSR, sprint, High Efforts, readiness és játékosszintű risk jelzések alapján készülnek.", small)],
+            [P("Korlátok", small), P("Az eredmények adatminőségtől, GPS-exporttól és mappingtől függenek. Hibás vagy hiányos input esetén szakmai ellenőrzés szükséges.", small)],
+        ]
+        story.append(table(meth_rows, [5.2*cm, 22.5*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
+        story.append(Spacer(1, 0.20*cm))
+        story.append(Paragraph(pdf_safe_text(f"Technikai státusz: {FPI_IMPORT_ENGINE_VERSION} | Smart Mapper: aktív | Week Rescue: aktív | Keeper Logic: aktív | Minutes Normalization: aktív | Microcycle Engine: aktív"), small))
+
+
     add_cover()
     if report_type in ["executive", "full"]:
         add_executive_page()
@@ -5501,6 +5529,9 @@ def build_fpi_product_pdf_bytes(
         story.append(PageBreak()); add_micro_page()
     else:
         add_executive_page()
+
+    story.append(PageBreak())
+    add_methodology_page()
 
     doc.build(story)
     buffer.seek(0)
@@ -5765,13 +5796,149 @@ forward_summary_text = (
     + str(next_week_plan_text)
 )
 
+
+def render_methodology_tab() -> None:
+    """FPI V6.3 metodikai oldal – transzparens számítási és értelmezési logika."""
+    st.markdown("## 📚 FPI metodika")
+    st.markdown(
+        """
+        <div class="fpi-summary-card">
+            <h3>Football Performance Intelligence – módszertani áttekintés</h3>
+            <p>
+            Az FPI döntéstámogató rendszer. Célja, hogy a GPS-exportokból gyorsan értelmezhető,
+            edzői és erőnléti döntéseket támogató riportot készítsen. Nem helyettesíti a szakmai stábot,
+            hanem rendszerezi az adatokat, kiemeli az eltéréseket és javaslatokat ad.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(
+            """
+            <div class="fpi-kpi-panel">
+                <div class="label">Smart Mapper</div>
+                <div class="value">Aktív</div>
+                <div class="note">Magyar és angol GPS exportok oszlopfelismerése.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            """
+            <div class="fpi-kpi-panel">
+                <div class="label">Week Rescue Engine</div>
+                <div class="value">Aktív</div>
+                <div class="note">Robusztus dátum- és hétfelismerés időponttal vagy extra szöveggel is.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c3:
+        st.markdown(
+            """
+            <div class="fpi-kpi-panel">
+                <div class="label">Keeper + Minutes Logic</div>
+                <div class="value">Aktív</div>
+                <div class="note">Kapusok, játékpercek, per90 és edzés-meccs normalizálás kezelése.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("### 1. Adatimport és Smart Mapper")
+    st.info(
+        "Az app a Data/Adat lapot preferálja, a segédlapokat igyekszik kizárni az összesített adatból. "
+        "A Smart Mapper magyar és angol oszlopneveket is kezel, például: Játékos neve / Player, "
+        "Kezdési idő / Start Time, Teljes táv / Total Distance, High Efforts."
+    )
+
+    st.markdown("### 2. Dátum- és hétfelismerés")
+    st.write(
+        "A rendszer a dátumoszlopot robusztusan értelmezi. Támogatott példák: "
+        "`2025-07-16`, `2025-07-16 09:38:13`, `16.07.2025`, `Training - 2025-07-16 17:00`. "
+        "A csoportosítás ISO hét alapján történik, például `2025-W29`."
+    )
+    st.warning(
+        "Ha rövid, néhány napos dátumtartományból irreálisan sok hét keletkezne, a Week Rescue Engine "
+        "védelmi logikája újraértelmezi a heteket, és diagnosztikát ad az oldalsávban."
+    )
+
+    st.markdown("### 3. Kapuskezelés")
+    st.write(
+        "Ha van Poszt/Position oszlop, az app automatikusan keresi a kapusokat "
+        "(`GK`, `Goalkeeper`, `Kapus`, `KAPUS`). Ha nincs posztoszlop, az oldalsávban kézzel lehet megadni, "
+        "hogy vannak-e kapusok, és ki(k) azok."
+    )
+    st.write(
+        "A kapusok nem ugyanazzal a logikával értékelendők, mint a mezőnyjátékosok. "
+        "A sprint- és HSR-alapú mutatók csökkentett súllyal szerepelnek, míg a teljes terhelés, "
+        "High Efforts és Training Load értelmezése megmarad."
+    )
+
+    st.markdown("### 4. Játékpercek és per90 normalizálás")
+    st.write(
+        "A rendszer figyelembe veszi, hogy egy meccsen nem minden játékos 90 percet játszik. "
+        "A 14 pályára lépő játékos terhelése nem `14×90 perc`. Ahol elérhető az időtartam/játékperc, "
+        "az app per90 és csapatperc alapú normalizálást is használ."
+    )
+
+    st.markdown("### 5. Edzés–meccs összevetés")
+    st.write(
+        "Az edzés és a meccs összehasonlítása nem pusztán nyers csapatösszeg alapján történik, "
+        "mert edzésen 18–22 játékos, meccsen pedig 13–16 játékos is szerepelhet eltérő percekkel. "
+        "Az FPI ezért figyelembe veszi a résztvevők számát, az időtartamot és az egy főre jutó terhelést."
+    )
+
+    st.markdown("### 6. Sebességzónák és High Efforts")
+    st.write(
+        "A 4-es és 5-ös sebességzónát az app külön kezeli, de összevont `4+5` export esetén is használható. "
+        "Ha a High Efforts mező külön szerepel az exportban, azt használja; ha nem, gyorsulás/lassítás jellegű "
+        "mutatókból becsült nagy intenzitású terhelést képez."
+    )
+
+    st.markdown("### 7. Benchmarkok és readiness")
+    st.write(
+        "A benchmarkok jelenleg általános referenciaértékek. Későbbi verzióban korosztály, szint, poszt és "
+        "játékmodell szerint finomíthatók. A readiness és risk pontszámok döntéstámogatók, nem orvosi diagnózisok."
+    )
+
+    st.markdown("### 8. Mikrociklus motor")
+    st.write(
+        "A mikrociklus modul három szintet kezel: múlt hét értékelése, aktuális hét eddig feltöltött napjai, "
+        "és jövő heti MD-bontású javaslat. A javaslatok a heti volumenből, HSR/sprint terhelésből, High Effortsből, "
+        "játékosszintű eltérésekből és kockázati jelzésekből épülnek."
+    )
+
+    st.markdown("### 9. Korlátok")
+    st.error(
+        "Az FPI nem helyettesíti a vezetőedzőt, erőnléti edzőt, orvosi stábot vagy a klub szakmai döntéseit. "
+        "Az app adatminőségtől függ: hibás GPS-export, rossz mapping vagy hiányzó játékpercek esetén az értelmezést "
+        "szakmai kontrollal kell kezelni."
+    )
+
+    st.markdown("### 10. Technikai státusz")
+    st.json({
+        "FPI_VERSION": FPI_IMPORT_ENGINE_VERSION,
+        "Smart Mapper": "aktív",
+        "Week Rescue Engine": "aktív",
+        "Keeper Logic": "aktív",
+        "Minutes Normalization": "aktív",
+        "Microcycle Engine": "aktív",
+        "Benchmark Engine": "aktív",
+    })
+
 # Tabok
-tab_exec, tab_intro, tab1, tab_premium, tab_export, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.tabs([
+tab_exec, tab_intro, tab1, tab_premium, tab_export, tab_methodology, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.tabs([
     "🏠 Dashboard",
     "ℹ️ Rendszer",
     "📌 Áttekintő",
     "🎛️ Cockpit",
     "📄 Export",
+    "📚 Metodika",
     "🧠 Intelligence",
     "📅 Mikrociklus",
     "🚨 Kockázat",
@@ -5780,6 +5947,10 @@ tab_exec, tab_intro, tab1, tab_premium, tab_export, tab_intel, tab_micro, tab_ri
     "✅ Adatminőség",
     "🧾 Nyers adatok",
 ])
+
+with tab_methodology:
+    render_methodology_tab()
+
 
 
 
