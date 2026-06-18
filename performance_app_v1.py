@@ -25,6 +25,23 @@ try:
 except Exception:
     pdfplumber = None
 
+PYMUPDF_AVAILABLE = True
+try:
+    import fitz  # PyMuPDF
+except Exception:
+    PYMUPDF_AVAILABLE = False
+    fitz = None
+
+PYPDF_AVAILABLE = True
+try:
+    from pypdf import PdfReader
+except Exception:
+    try:
+        from PyPDF2 import PdfReader
+    except Exception:
+        PYPDF_AVAILABLE = False
+        PdfReader = None
+
 try:
     from docx import Document
     from docx.shared import Inches, Pt
@@ -50,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V077_PDF_FALLBACK_TOPIC_ENGINE_2026_06_17"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V078_MULTI_READER_INTEGRATED_REPORT_2026_06_17"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5630,6 +5647,51 @@ def build_fpi_product_pdf_bytes(
         out.append("A javaslat nem kész meccsterv helyett van, hanem a stáb döntését készíti elő.")
         return out
 
+
+    def _integrated_conclusion_rows(tactical_context: Dict[str, object]) -> List[Tuple[str, str]]:
+        risks = tactical_context.get("risks", []) or []
+        plan_a = tactical_context.get("plan_a", "KIE – kiegyensúlyozott")
+        rows = [
+            ("Vezetői konklúzió", f"A javasolt alapirány: {plan_a}. A döntés alapja: saját fizikai állapot + taktikai inputok + ellenfélprofil."),
+            ("Fő közös üzenet", "A GPS nem külön, hanem a meccsterv megvalósíthatóságát mutatja: mennyire bírja el a csapat a javasolt taktikai intenzitást."),
+        ]
+        if risks:
+            rows.append(("Top kockázat", "; ".join(str(x) for x in risks[:3])))
+        else:
+            rows.append(("Top kockázat", "Nincs erős taktikai input; ilyenkor GPS/readiness-alapú terhelési döntéstámogatás működik."))
+        rows.append(("Edzői döntés", "A mikrociklusban minden napnak legyen erőnléti és taktikai célja, ne két külön riportként kezeljük."))
+        return rows
+
+    def _combined_md_rows(tactical_context: Dict[str, object]) -> List[Tuple[str, str, str, str]]:
+        md = tactical_context.get("md_plan", []) or []
+        out = []
+        for item in md[:6]:
+            try:
+                day, focus, why = item
+            except Exception:
+                continue
+            fitness_goal = "Terheléskontroll / readiness fenntartása"
+            tactical_goal = str(focus)
+            why_txt = str(why)
+            f_low = tactical_goal.lower()
+            if "sprint" in f_low or "hsr" in f_low:
+                fitness_goal = "HSR / sprint inger kontrollált adagolása"
+            elif "regener" in f_low:
+                fitness_goal = "Regeneráció, frissítés, neuromuszkuláris visszarendezés"
+            elif "aktiv" in f_low:
+                fitness_goal = "Aktiváció, frissesség, döntési gyorsaság"
+            elif "volumen" in f_low:
+                fitness_goal = "Csapatvolumen és munkasűrűség felépítése"
+            out.append((str(day), fitness_goal, tactical_goal, why_txt))
+        if not out:
+            out = [
+                ("MD-4", "Csapatvolumen felépítése", "Saját játékmodell ismétlése", "GPS-only vagy hiányos taktikai input esetén alap mikrociklus."),
+                ("MD-3", "HSR / sprint kontrollált inger", "Átmeneti játék vagy meccsintenzitás", "A meccsterhelés előkészítése."),
+                ("MD-2", "Terheléscsökkentés", "Meccsterv finomítás", "Frissesség és taktikai tisztaság."),
+                ("MD-1", "Aktiváció", "Pontrúgások, döntési gyorsaság", "Rövid, frissítő nap."),
+            ]
+        return out
+
     def add_tactical_executive_page():
         def _pdf_tactical_key_numbers_summary(metrics: Dict[str, float]) -> str:
             """PDF-safe local helper. Avoids NameError if the UI helper is defined later or not available."""
@@ -5664,7 +5726,7 @@ def build_fpi_product_pdf_bytes(
                         parts.append(f"{lab}: {v}")
             return " | ".join(parts[:8]) if parts else "Nincs kiemelkedő taktikai KPI."
 
-        story.append(section("Tactical Pro+ – saját csapat + ellenfél döntéselőkészítés", "#E0F2FE"))
+        story.append(section("Integrált vezetői konklúzió – GPS + Tactical", "#E0F2FE"))
         if not tactical_context:
             story.append(Paragraph(pdf_safe_text(
                 "Ehhez a riporthoz nem volt taktikai PDF/Excel feltöltve. A vezetői értékelés GPS-only módban készült. "
@@ -5680,6 +5742,13 @@ def build_fpi_product_pdf_bytes(
             [P("Plan A", head), P(str(tactical_context.get("plan_a", "n.a.")), small)],
         ]
         story.append(table(status_rows, [6.0*cm, 21.7*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
+        story.append(Spacer(1, 0.20*cm))
+
+        story.append(section("Egy fedél alatti konklúzió", "#DBEAFE"))
+        concl_rows = [[P("Elem", head), P("Konklúzió", head)]]
+        for k, v in _integrated_conclusion_rows(tactical_context):
+            concl_rows.append([P(k, small), P(v, small)])
+        story.append(table(concl_rows, [5.4*cm, 22.3*cm], header_bg="#1E40AF", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
         story.append(Spacer(1, 0.20*cm))
 
         story.append(section("Mit jelent ez magyarul?", "#DCFCE7"))
@@ -5724,11 +5793,11 @@ def build_fpi_product_pdf_bytes(
         story.append(Spacer(1, 0.20*cm))
 
         if tactical_context.get("md_plan"):
-            story.append(section("Taktikailag támogatott MD-terv", "#EDE9FE"))
-            md_rows = [[P("Nap", head), P("Fókusz", head), P("Indoklás", head)]]
-            for a, b, c in (tactical_context.get("md_plan") or [])[:6]:
-                md_rows.append([P(a, small), P(b, small), P(c, small)])
-            story.append(table(md_rows, [4.0*cm, 9.5*cm, 14.2*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
+            story.append(section("Integrált mikrociklus – erőnléti + taktikai cél", "#EDE9FE"))
+            md_rows = [[P("Nap", head), P("Erőnléti cél", head), P("Taktikai cél", head), P("Indoklás", head)]]
+            for a, b, c, d in _combined_md_rows(tactical_context):
+                md_rows.append([P(a, small), P(b, small), P(c, small), P(d, small)])
+            story.append(table(md_rows, [3.0*cm, 7.5*cm, 8.0*cm, 9.2*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
 
     def add_methodology_page():
         story.append(section("Módszertani összefoglaló – hogyan számol az FPI?", "#DBEAFE"))
@@ -6695,12 +6764,9 @@ def _fpi_tactical_parse_player_excel(df2: pd.DataFrame, mapping: Dict[str, Optio
         "duel_players": out.sort_values("defensive_challenges", ascending=False)[["player", "position", "defensive_challenges"]].head(5).reset_index(drop=True),
     }
 
-def _fpi_tactical_page_text_v76(page) -> str:
-    """Robusztusabb PDF oldalszöveg-kinyerés.
-    Több pdfplumber módszert kombinál: sima text, layout text, words, tables.
-    """
+def _fpi_tactical_page_text_pdfplumber_v78(page) -> str:
+    """pdfplumber oldalszöveg – text + layout + words + tables."""
     chunks = []
-    # 1) Sima text – sok PDF-nél ez jó
     for kwargs in [
         {"x_tolerance": 1, "y_tolerance": 3},
         {"x_tolerance": 2, "y_tolerance": 4},
@@ -6708,29 +6774,25 @@ def _fpi_tactical_page_text_v76(page) -> str:
     ]:
         try:
             txt = page.extract_text(**kwargs) or ""
-            if txt and txt.strip():
+            if txt.strip():
                 chunks.append(txt)
         except Exception:
             pass
 
-    # 2) Words fallback – ha extract_text gyenge, de kijelölhető szavak vannak
     try:
         words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
-        if words:
-            word_text = " ".join(str(w.get("text", "")).strip() for w in words if str(w.get("text", "")).strip())
-            if word_text:
-                chunks.append(word_text)
+        word_text = " ".join(str(w.get("text", "")).strip() for w in words if str(w.get("text", "")).strip())
+        if word_text.strip():
+            chunks.append(word_text)
     except Exception:
         try:
             words = page.extract_words() or []
-            if words:
-                word_text = " ".join(str(w.get("text", "")).strip() for w in words if str(w.get("text", "")).strip())
-                if word_text:
-                    chunks.append(word_text)
+            word_text = " ".join(str(w.get("text", "")).strip() for w in words if str(w.get("text", "")).strip())
+            if word_text.strip():
+                chunks.append(word_text)
         except Exception:
             pass
 
-    # 3) Táblázat fallback – sok taktikai PDF KPI táblázatokban tartja az adatokat
     try:
         tables = page.extract_tables() or []
         for tbl in tables:
@@ -6741,27 +6803,110 @@ def _fpi_tactical_page_text_v76(page) -> str:
     except Exception:
         pass
 
-    # Duplikátumok csökkentése
-    seen = set()
-    out = []
-    for ch in chunks:
-        ch = re.sub(r"\s+", " ", str(ch)).strip()
-        if len(ch) < 3:
-            continue
-        key = ch[:500]
-        if key not in seen:
-            seen.add(key)
-            out.append(ch)
-    return "\n".join(out)
+    return _fpi_clean_pdf_text_v78("\n".join(chunks))
 
-def _fpi_tactical_extract_pdf_text(files: List[object], max_pages: int = 120) -> Tuple[str, List[dict]]:
-    """V7.6 robust Tactical PDF reader.
-    Nem csak extract_text()-et használ, hanem extract_words() és extract_tables() fallbacket is.
-    Ezért szöveges, de furán tagolt PDF-eknél is nagyobb eséllyel talál tartalmat.
-    """
+
+def _fpi_clean_pdf_text_v78(txt: str) -> str:
+    txt = str(txt or "")
+    txt = txt.replace("\ufb01", "fi").replace("\ufb02", "fl")
+    txt = txt.replace("‐", "-").replace("‑", "-").replace("–", "-").replace("—", "-")
+    txt = txt.replace("\x00", " ")
+    txt = re.sub(r"[ \t]+", " ", txt)
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+    return txt.strip()
+
+
+def _fpi_tactical_extract_with_pdfplumber_v78(file_bytes: bytes, fname: str, max_pages: int) -> Tuple[str, List[dict]]:
     pages, texts = [], []
     if pdfplumber is None:
         return "", pages
+    try:
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for i, page in enumerate(pdf.pages[:max_pages]):
+                txt = _fpi_tactical_page_text_pdfplumber_v78(page)
+                pages.append({
+                    "file": fname, "page": i + 1, "reader": "pdfplumber",
+                    "chars": len(txt or ""), "has_text": bool((txt or "").strip()),
+                    "text": txt[:3000],
+                })
+                if txt.strip():
+                    texts.append(f"[{fname} / oldal {i+1} / pdfplumber]\n{txt}")
+    except Exception as e:
+        pages.append({"file": fname, "page": None, "reader": "pdfplumber", "chars": 0, "has_text": False, "error": str(e), "text": ""})
+    return "\n\n".join(texts), pages
+
+
+def _fpi_tactical_extract_with_pymupdf_v78(file_bytes: bytes, fname: str, max_pages: int) -> Tuple[str, List[dict]]:
+    pages, texts = [], []
+    if not PYMUPDF_AVAILABLE or fitz is None:
+        return "", pages
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        for i in range(min(len(doc), max_pages)):
+            page = doc[i]
+            chunks = []
+            for mode in ["text", "blocks", "words"]:
+                try:
+                    if mode == "text":
+                        t = page.get_text("text") or ""
+                    elif mode == "blocks":
+                        blocks = page.get_text("blocks") or []
+                        t = "\n".join(str(b[4]).strip() for b in blocks if len(b) >= 5 and str(b[4]).strip())
+                    else:
+                        words = page.get_text("words") or []
+                        t = " ".join(str(w[4]).strip() for w in words if len(w) >= 5 and str(w[4]).strip())
+                    if t.strip():
+                        chunks.append(t)
+                except Exception:
+                    pass
+            txt = _fpi_clean_pdf_text_v78("\n".join(chunks))
+            pages.append({
+                "file": fname, "page": i + 1, "reader": "pymupdf",
+                "chars": len(txt or ""), "has_text": bool((txt or "").strip()),
+                "text": txt[:3000],
+            })
+            if txt.strip():
+                texts.append(f"[{fname} / oldal {i+1} / pymupdf]\n{txt}")
+        doc.close()
+    except Exception as e:
+        pages.append({"file": fname, "page": None, "reader": "pymupdf", "chars": 0, "has_text": False, "error": str(e), "text": ""})
+    return "\n\n".join(texts), pages
+
+
+def _fpi_tactical_extract_with_pypdf_v78(file_bytes: bytes, fname: str, max_pages: int) -> Tuple[str, List[dict]]:
+    pages, texts = [], []
+    if not PYPDF_AVAILABLE or PdfReader is None:
+        return "", pages
+    try:
+        reader = PdfReader(io.BytesIO(file_bytes))
+        for i, page in enumerate(reader.pages[:max_pages]):
+            try:
+                txt = _fpi_clean_pdf_text_v78(page.extract_text() or "")
+            except Exception:
+                txt = ""
+            pages.append({
+                "file": fname, "page": i + 1, "reader": "pypdf",
+                "chars": len(txt or ""), "has_text": bool((txt or "").strip()),
+                "text": txt[:3000],
+            })
+            if txt.strip():
+                texts.append(f"[{fname} / oldal {i+1} / pypdf]\n{txt}")
+    except Exception as e:
+        pages.append({"file": fname, "page": None, "reader": "pypdf", "chars": 0, "has_text": False, "error": str(e), "text": ""})
+    return "\n\n".join(texts), pages
+
+
+def _fpi_tactical_extract_pdf_text(files: List[object], max_pages: int = 120) -> Tuple[str, List[dict]]:
+    """V7.8 több PDF-olvasós taktikai motor.
+
+    Sorrend:
+    1. pdfplumber text/layout/words/tables
+    2. PyMuPDF text/blocks/words
+    3. pypdf / PyPDF2 fallback
+
+    A végén mindig a legtöbb karaktert adó readert választja, de a diagnosztikában mindhárom látszik.
+    """
+    all_pages, chosen_texts = [], []
     for f in files or []:
         if f is None:
             continue
@@ -6770,28 +6915,31 @@ def _fpi_tactical_extract_pdf_text(files: List[object], max_pages: int = 120) ->
             file_bytes = f.getvalue()
         except Exception:
             continue
-        try:
-            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                for i, page in enumerate(pdf.pages[:max_pages]):
-                    txt = _fpi_tactical_page_text_v76(page)
-                    page_info = {
-                        "file": fname,
-                        "page": i + 1,
-                        "text": txt,
-                        "chars": len(txt or ""),
-                        "has_text": bool((txt or "").strip()),
-                    }
-                    pages.append(page_info)
-                    if txt.strip():
-                        texts.append(f"[{fname} / oldal {i+1}]\n{txt}")
-        except Exception as e:
-            pages.append({"file": fname, "page": None, "text": "", "chars": 0, "has_text": False, "error": str(e)})
-            continue
-    full_text = "\n\n".join(texts)
-    # normalizálás: ligatúrák, furcsa kötőjelek, kontroll karakterek
-    full_text = full_text.replace("\ufb01", "fi").replace("\ufb02", "fl")
-    full_text = full_text.replace("‐", "-").replace("‑", "-").replace("–", "-").replace("—", "-")
-    return full_text, pages
+
+        attempts = []
+        for reader_name, fn in [
+            ("pdfplumber", _fpi_tactical_extract_with_pdfplumber_v78),
+            ("pymupdf", _fpi_tactical_extract_with_pymupdf_v78),
+            ("pypdf", _fpi_tactical_extract_with_pypdf_v78),
+        ]:
+            txt, pages = fn(file_bytes, fname, max_pages)
+            attempts.append((reader_name, txt, pages, len(txt or "")))
+            all_pages.extend(pages)
+
+        best_reader, best_text, best_pages, best_chars = max(attempts, key=lambda x: x[3]) if attempts else ("none", "", [], 0)
+        all_pages.append({
+            "file": fname,
+            "page": "BEST",
+            "reader": best_reader,
+            "chars": best_chars,
+            "has_text": best_chars > 0,
+            "text": (best_text or "")[:3000],
+        })
+        if best_text.strip():
+            chosen_texts.append(best_text)
+
+    full_text = _fpi_clean_pdf_text_v78("\n\n".join(chosen_texts))
+    return full_text, all_pages
 
 def _fpi_tactical_split_units_v76(text: str) -> List[str]:
     raw = str(text or "").replace("\r", "\n")
@@ -7132,7 +7280,15 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     has_team_excel = opp_team_xlsx is not None or own_team_xlsx is not None
     has_player_excel = opp_player_xlsx is not None or own_player_xlsx is not None
     level, level_label = _fpi_analysis_level(has_gps, has_pdf, has_team_excel, has_player_excel)
-    st.info(f"Elemzési szint: Level {level} – {level_label}")
+    st.markdown(
+        f"""
+        <div class="tactical-readable-box">
+        <b>Elemzési szint:</b> Level {level}<br>
+        <b>Mit jelent:</b> {level_label}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(own_pdfs or [])
     opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
@@ -7195,14 +7351,36 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
             ("Saját", own_pdf_pages, own_pdf_insights),
             ("Ellenfél", opp_pdf_pages, opp_pdf_insights),
         ]:
+            real_pages = [p for p in pages if isinstance(p.get("page"), int)]
+            best_rows = [p for p in pages if p.get("page") == "BEST"]
+            best_reader = best_rows[-1].get("reader", "n.a.") if best_rows else "n.a."
+            best_chars = best_rows[-1].get("chars", 0) if best_rows else 0
             diag_rows.append({
                 "Oldal": side,
-                "PDF oldalak": len(pages),
-                "Kinyert karakter": int(insights.get("raw_text_len", 0) or 0),
+                "Fájl feltöltve": "igen" if (side == "Saját" and own_pdf_uploaded) or (side == "Ellenfél" and opp_pdf_uploaded) else "nem",
+                "Valós PDF oldalak": len({(p.get("file"), p.get("page")) for p in real_pages if isinstance(p.get("page"), int)}),
+                "Legjobb reader": best_reader,
+                "Legjobb karakter": best_chars,
+                "Riportba kerülő karakter": int(insights.get("raw_text_len", 0) or 0),
                 "Felismert témák": len(insights.get("topics", []) or []),
-                "Reader": insights.get("reader_version", ""),
             })
         st.dataframe(pd.DataFrame(diag_rows), use_container_width=True, hide_index=True)
+
+        with st.expander("Reader-részletek oldalanként", expanded=False):
+            all_reader_rows = []
+            for side, pages in [("Saját", own_pdf_pages), ("Ellenfél", opp_pdf_pages)]:
+                for p in pages:
+                    all_reader_rows.append({
+                        "Oldal": side,
+                        "Fájl": p.get("file"),
+                        "PDF oldal": p.get("page"),
+                        "Reader": p.get("reader"),
+                        "Karakter": p.get("chars"),
+                        "Van szöveg": p.get("has_text"),
+                        "Hiba": p.get("error", ""),
+                    })
+            if all_reader_rows:
+                st.dataframe(pd.DataFrame(all_reader_rows), use_container_width=True, hide_index=True)
 
         d1, d2 = st.columns(2)
         with d1:
@@ -7236,9 +7414,12 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     ]
     st.dataframe(pd.DataFrame(comp_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("### 3. Training Planner AI – heti MD-terv")
-    md_df = pd.DataFrame(plan["md_plan"], columns=["Nap", "Fókusz", "Miért?"])
-    st.dataframe(md_df, use_container_width=True)
+    st.markdown("### 3. Integrált mikrociklus – erőnléti + taktikai cél")
+    try:
+        md_df = pd.DataFrame(_combined_md_rows(executive_ctx), columns=["Nap", "Erőnléti cél", "Taktikai cél", "Indoklás"])
+    except Exception:
+        md_df = pd.DataFrame(plan["md_plan"], columns=["Nap", "Taktikai cél", "Indoklás"])
+    st.dataframe(md_df, use_container_width=True, hide_index=True)
 
     st.markdown("### 4. Játékosszintű/taktikai fókusz")
     if plan["player_focus"]:
