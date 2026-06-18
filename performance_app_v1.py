@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V088_TACTICAL_APP_PDF_READER_BYTES_FIX_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V089_DIRECT_UPLOAD_PDF_TEXT_STORE_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5673,6 +5673,29 @@ def _fpi_tactical_app_combine_pdf_texts_v88(items: List[dict]) -> Tuple[str, Lis
 
 
 
+
+def _fpi_tactical_app_combine_uploadfiles_v89(files: List[object]) -> Tuple[str, List[dict], List[dict]]:
+    """Aktuális file_uploader objektumból azonnal olvas. Ez a régi Tactical app útja."""
+    items = _fpi_uploaded_files_to_bytes_v88(files or [])
+    text, pages = _fpi_tactical_app_combine_pdf_texts_v88(items)
+    return text, pages, items
+
+def _fpi_store_current_pdf_text_v89(side: str, text: str, pages: List[dict], items: List[dict]) -> None:
+    st.session_state[f"tactical_pro_{side}_pdf_text_store_v89"] = {
+        "text": text or "",
+        "pages": pages or [],
+        "items": items or [],
+        "chars": len(text or ""),
+        "page_count": len([p for p in (pages or []) if p.get("has_text") or p.get("text")]),
+        "files": [x.get("name", "") for x in (items or [])],
+        "signature": "|".join([f"{x.get('name')}:{x.get('size')}:{x.get('md5')}" for x in (items or [])]),
+        "reader": "direct_upload_legacy_tactical_reader_v89",
+    }
+
+def _fpi_get_pdf_text_store_v89(side: str) -> Dict[str, object]:
+    return st.session_state.get(f"tactical_pro_{side}_pdf_text_store_v89") or {}
+
+
 def _fpi_uploaded_file_signature_v87(files: List[object]) -> str:
     parts = []
     for f in files or []:
@@ -5684,52 +5707,56 @@ def _fpi_uploaded_file_signature_v87(files: List[object]) -> str:
     return "|".join(parts)
 
 def _fpi_build_pdf_only_context_from_session_v87(gps_context: Dict[str, object]) -> Optional[Dict[str, object]]:
-    """V8.8: export előtti kényszerített PDF context rebuild, STABIL BYTE-TÁROLÁSBÓL.
-    A régi Tactical app PDF-olvasóját használjuk elsődlegesen.
+    """V8.9: export előtti PDF context rebuild a már kinyert PDF-SZÖVEGBŐL.
+    Először text-store, utána byte-store, utána UploadFile fallback.
     """
     try:
-        own_items = st.session_state.get("tactical_pro_own_pdf_bytes_v88") or []
-        opp_items = st.session_state.get("tactical_pro_opp_pdf_bytes_v88") or []
+        own_store = _fpi_get_pdf_text_store_v89("own")
+        opp_store = _fpi_get_pdf_text_store_v89("opp")
 
-        # fallback, ha valamiért a byte-store még nem töltődött fel
-        if not own_items:
-            own_items = _fpi_uploaded_files_to_bytes_v88(st.session_state.get("tactical_pro_own_pdfs") or [])
-        if not opp_items:
-            opp_items = _fpi_uploaded_files_to_bytes_v88(st.session_state.get("tactical_pro_opp_pdfs") or [])
+        own_pdf_text = own_store.get("text", "") or ""
+        opp_pdf_text = opp_store.get("text", "") or ""
+        own_pdf_pages = own_store.get("pages", []) or []
+        opp_pdf_pages = opp_store.get("pages", []) or []
+        own_items = own_store.get("items", []) or []
+        opp_items = opp_store.get("items", []) or []
+
+        if not own_pdf_text:
+            own_items = st.session_state.get("tactical_pro_own_pdf_bytes_v88") or _fpi_uploaded_files_to_bytes_v88(st.session_state.get("tactical_pro_own_pdfs") or [])
+            own_pdf_text, own_pdf_pages = _fpi_tactical_app_combine_pdf_texts_v88(own_items)
+        if not opp_pdf_text:
+            opp_items = st.session_state.get("tactical_pro_opp_pdf_bytes_v88") or _fpi_uploaded_files_to_bytes_v88(st.session_state.get("tactical_pro_opp_pdfs") or [])
+            opp_pdf_text, opp_pdf_pages = _fpi_tactical_app_combine_pdf_texts_v88(opp_items)
+
+        if not own_pdf_text and own_items:
+            own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(_fpi_restore_uploaded_file_wrappers_v88(own_items))
+        if not opp_pdf_text and opp_items:
+            opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(_fpi_restore_uploaded_file_wrappers_v88(opp_items))
     except Exception:
         return None
 
-    if not own_items and not opp_items:
+    has_any_pdf = bool(own_items or opp_items or own_pdf_text or opp_pdf_text)
+    if not has_any_pdf:
         return None
-
-    # 1:1 régi Tactical reader
-    own_pdf_text, own_pdf_pages = _fpi_tactical_app_combine_pdf_texts_v88(own_items)
-    opp_pdf_text, opp_pdf_pages = _fpi_tactical_app_combine_pdf_texts_v88(opp_items)
-
-    # Ha a régi reader valamiért mégsem ad szöveget, fallback a meglévő multi-readerre
-    if not own_pdf_text and own_items:
-        own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(_fpi_restore_uploaded_file_wrappers_v88(own_items))
-    if not opp_pdf_text and opp_items:
-        opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(_fpi_restore_uploaded_file_wrappers_v88(opp_items))
 
     own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "sportsbase_findings": [], "sportsbase_lines": []}
     opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "sportsbase_findings": [], "sportsbase_lines": []}
 
-    own_real_pages = len({(p.get("file"), p.get("page_number", p.get("page"))) for p in own_pdf_pages if p.get("has_text")})
-    opp_real_pages = len({(p.get("file"), p.get("page_number", p.get("page"))) for p in opp_pdf_pages if p.get("has_text")})
+    own_real_pages = len({(p.get("file"), p.get("page_number", p.get("page"))) for p in own_pdf_pages if p.get("has_text") or p.get("text")})
+    opp_real_pages = len({(p.get("file"), p.get("page_number", p.get("page"))) for p in opp_pdf_pages if p.get("has_text") or p.get("text")})
 
-    own_pdf_insights["pdf_uploaded"] = bool(own_items)
+    own_pdf_insights["pdf_uploaded"] = bool(own_items or own_pdf_text)
     own_pdf_insights["pdf_pages"] = own_real_pages
     own_pdf_insights["raw_text_len"] = len(own_pdf_text or "")
-    own_pdf_insights["upload_signature"] = "|".join([f"{x.get('name')}:{x.get('size')}:{x.get('md5')}" for x in own_items])
-    own_pdf_insights["reader_version"] = "V8.8 legacy Tactical app PDF reader + fallback"
+    own_pdf_insights["upload_signature"] = own_store.get("signature", "") or "|".join([f"{x.get('name')}:{x.get('size')}:{x.get('md5')}" for x in own_items])
+    own_pdf_insights["reader_version"] = "V8.9 direct UploadFile text-store + legacy Tactical reader"
     own_pdf_insights["page_debug"] = own_pdf_pages[:10]
 
-    opp_pdf_insights["pdf_uploaded"] = bool(opp_items)
+    opp_pdf_insights["pdf_uploaded"] = bool(opp_items or opp_pdf_text)
     opp_pdf_insights["pdf_pages"] = opp_real_pages
     opp_pdf_insights["raw_text_len"] = len(opp_pdf_text or "")
-    opp_pdf_insights["upload_signature"] = "|".join([f"{x.get('name')}:{x.get('size')}:{x.get('md5')}" for x in opp_items])
-    opp_pdf_insights["reader_version"] = "V8.8 legacy Tactical app PDF reader + fallback"
+    opp_pdf_insights["upload_signature"] = opp_store.get("signature", "") or "|".join([f"{x.get('name')}:{x.get('size')}:{x.get('md5')}" for x in opp_items])
+    opp_pdf_insights["reader_version"] = "V8.9 direct UploadFile text-store + legacy Tactical reader"
     opp_pdf_insights["page_debug"] = opp_pdf_pages[:10]
 
     merged_pdf_insights = _merge_tactical_pdf_insights(own_pdf_insights, opp_pdf_insights)
@@ -5737,6 +5764,8 @@ def _fpi_build_pdf_only_context_from_session_v87(gps_context: Dict[str, object])
     previous = st.session_state.get("tactical_pro_context") or {}
     own_team_metrics = previous.get("own_team_metrics", {}) or {}
     opp_team_metrics = previous.get("opp_team_metrics", {}) or {}
+    own_player_tables = previous.get("own_player_tables", {}) or {}
+    opp_player_tables = previous.get("opp_player_tables", {}) or {}
 
     has_excel = bool(own_team_metrics or opp_team_metrics or previous.get("has_own_player_excel") or previous.get("has_opp_player_excel"))
     level_label = "Full Intelligence – GPS + frissített taktikai PDF + meglévő Excel context" if has_excel else "GPS + frissített taktikai PDF"
@@ -5745,9 +5774,9 @@ def _fpi_build_pdf_only_context_from_session_v87(gps_context: Dict[str, object])
         "analysis_level_label": level_label,
         "pdf_insights": merged_pdf_insights,
         "team_metrics": opp_team_metrics,
-        "player_tables": {},
-        "own": {"pdf_insights": own_pdf_insights, "team_metrics": own_team_metrics, "player_tables": {}},
-        "opponent": {"pdf_insights": opp_pdf_insights, "team_metrics": opp_team_metrics, "player_tables": {}},
+        "player_tables": opp_player_tables,
+        "own": {"pdf_insights": own_pdf_insights, "team_metrics": own_team_metrics, "player_tables": own_player_tables},
+        "opponent": {"pdf_insights": opp_pdf_insights, "team_metrics": opp_team_metrics, "player_tables": opp_player_tables},
     }
     plan = _fpi_build_adaptive_match_training_plan(gps_context or {}, tactical_ctx_for_plan)
     ctx = _build_tactical_executive_context(gps_context or {}, tactical_ctx_for_plan, plan)
@@ -5758,12 +5787,13 @@ def _fpi_build_pdf_only_context_from_session_v87(gps_context: Dict[str, object])
     ctx["own_pdf_pages"] = own_real_pages
     ctx["opp_pdf_pages"] = opp_real_pages
     ctx["pdf_reader_debug"] = {
-        "own_files": [x.get("name") for x in own_items],
-        "opp_files": [x.get("name") for x in opp_items],
+        "own_files": own_store.get("files", []) or [x.get("name") for x in own_items],
+        "opp_files": opp_store.get("files", []) or [x.get("name") for x in opp_items],
         "own_chars": len(own_pdf_text or ""),
         "opp_chars": len(opp_pdf_text or ""),
         "own_pages": own_real_pages,
         "opp_pages": opp_real_pages,
+        "source": "v89_text_store_first",
     }
     return ctx
 
@@ -5777,7 +5807,11 @@ def _fpi_context_for_export_v87(gps_context: Dict[str, object]) -> Optional[Dict
     if fresh:
         fresh_score = int(fresh.get("pdf_direct_findings_count", 0) or 0) + int(fresh.get("pdf_direct_lines_count", 0) or 0)
         old_score = int((old or {}).get("pdf_direct_findings_count", 0) or 0) + int((old or {}).get("pdf_direct_lines_count", 0) or 0)
-        if fresh_score > 0 or fresh_score >= old_score:
+        fresh_pages = int(fresh.get("own_pdf_pages", 0) or 0) + int(fresh.get("opp_pdf_pages", 0) or 0)
+        fresh_chars = int(fresh.get("own_pdf_chars", 0) or 0) + int(fresh.get("opp_pdf_chars", 0) or 0)
+        old_pages = int((old or {}).get("own_pdf_pages", 0) or 0) + int((old or {}).get("opp_pdf_pages", 0) or 0)
+        old_chars = int((old or {}).get("own_pdf_chars", 0) or 0) + int((old or {}).get("opp_pdf_chars", 0) or 0)
+        if fresh_pages > 0 or fresh_chars > 0 or fresh_score > 0 or (old_pages == 0 and old_chars == 0):
             st.session_state["tactical_pro_context"] = fresh
             return fresh
     return old
@@ -8777,7 +8811,7 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         st.caption("Tipp: a feltöltött fájl törléséhez használd a fájlnév melletti kis X-et. Ha nem látszik, ez a verzió javítja a kontrasztot. Teljes resethez frissítsd az oldalt vagy használd az alábbi gombot.")
         if st.button("🧹 Tactical feltöltések / mapping reset", key="tactical_pro_reset_upload_mapping"):
             for k in list(st.session_state.keys()):
-                if str(k).startswith(("own_team_tactical", "opp_team_tactical", "own_player_tactical", "opp_player_tactical", "tactical_pro_context", "tactical_pro_own_pdf_bytes_v88", "tactical_pro_opp_pdf_bytes_v88")):
+                if str(k).startswith(("own_team_tactical", "opp_team_tactical", "own_player_tactical", "opp_player_tactical", "tactical_pro_context", "tactical_pro_own_pdf_bytes_v88", "tactical_pro_opp_pdf_bytes_v88", "tactical_pro_own_pdf_text_store_v89", "tactical_pro_opp_pdf_text_store_v89")):
                     st.session_state.pop(k, None)
             st.success("A taktikai mapping/session állapot törölve. A fájlok törléséhez szükség esetén frissítsd az oldalt.")
 
@@ -8796,16 +8830,28 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         unsafe_allow_html=True,
     )
 
-    own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(own_pdfs or [])
-    opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
+    # V8.9: az aktuális UploadFile objektumokat közvetlenül, azonnal olvassuk ki.
+    # Nem session_state fájlobjektumból próbáljuk újranyitni exportkor.
+    own_pdf_text, own_pdf_pages, own_items_v89 = _fpi_tactical_app_combine_uploadfiles_v89(own_pdfs or [])
+    opp_pdf_text, opp_pdf_pages, opp_items_v89 = _fpi_tactical_app_combine_uploadfiles_v89(opp_pdfs or [])
+
+    # Multi-reader csak fallback.
+    if not own_pdf_text:
+        own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(own_pdfs or [])
+    if not opp_pdf_text:
+        opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
+
+    _fpi_store_current_pdf_text_v89("own", own_pdf_text, own_pdf_pages, own_items_v89)
+    _fpi_store_current_pdf_text_v89("opp", opp_pdf_text, opp_pdf_pages, opp_items_v89)
+
     own_pdf_uploaded = bool(own_pdfs)
     opp_pdf_uploaded = bool(opp_pdfs)
     own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": own_pdf_uploaded, "pdf_pages": len(own_pdf_pages)}
     opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": opp_pdf_uploaded, "pdf_pages": len(opp_pdf_pages)}
     own_pdf_insights["pdf_uploaded"] = own_pdf_uploaded
-    own_pdf_insights["pdf_pages"] = len(own_pdf_pages)
+    own_pdf_insights["pdf_pages"] = len([p for p in own_pdf_pages if p.get("has_text") or p.get("text")])
     opp_pdf_insights["pdf_uploaded"] = opp_pdf_uploaded
-    opp_pdf_insights["pdf_pages"] = len(opp_pdf_pages)
+    opp_pdf_insights["pdf_pages"] = len([p for p in opp_pdf_pages if p.get("has_text") or p.get("text")])
     merged_pdf_insights = _merge_tactical_pdf_insights(own_pdf_insights, opp_pdf_insights)
 
     own_team_metrics, opp_team_metrics = {}, {}
@@ -8845,6 +8891,11 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     k2.metric("Saját PDF oldalak", len([p for p in own_pdf_pages if p.get("has_text")]))
     k3.metric("Ellenfél PDF oldalak", len([p for p in opp_pdf_pages if p.get("has_text")]))
     k4.metric("Taktikai KPI-k", len([v for v in {**own_team_metrics, **opp_team_metrics}.values() if v not in [0, 0.0, None]]))
+
+    st.caption(
+        f"PDF reader státusz: saját {len(own_pdf_text or '')} karakter / {len([p for p in own_pdf_pages if p.get('has_text') or p.get('text')])} oldal; "
+        f"ellenfél {len(opp_pdf_text or '')} karakter / {len([p for p in opp_pdf_pages if p.get('has_text') or p.get('text')])} oldal."
+    )
 
     if own_pdf_uploaded and not own_pdf_text:
         st.warning("Saját PDF feltöltve, de nem sikerült szöveget kinyerni belőle. Valószínűleg képalapú/scannelt PDF, ezért a taktikai témák nem jelennek meg.")
