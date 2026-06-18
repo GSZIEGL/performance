@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V092_STABLE_PDF_UPLOAD_MANAGER_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V095_KTE_GPS_ONLY_MICROCYCLE_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5484,9 +5484,11 @@ def _fpi_readiness_short_v82(score: int) -> str:
         return "figyelendő, terheléskontroll szükséges"
     return "magas kockázat, óvatos mikrociklus"
 
-def _fpi_top_tactical_messages_v82(tactical_context: Optional[Dict[str, object]], limit: int = 3) -> List[str]:
-    if not tactical_context:
-        return ["Nincs taktikai input, GPS-alapú heti terv."]
+def _fpi_top_tactical_messages_v82(tactical_context: Optional[Dict[str, object]], limit: int = 3, gps_context: Optional[Dict[str, object]] = None, readiness: Optional[int] = None, priorities: Optional[List[dict]] = None, week: Optional[str] = None) -> List[str]:
+    if not _fpi_has_tactical_signal_v95(tactical_context):
+        if gps_context is not None:
+            return _fpi_gps_only_conclusions_v95(gps_context, priorities or [], int(readiness or 70), str(week or gps_context.get("selected_week", "")), limit=max(limit, 5))
+        return ["GPS-only mód: nincs taktikai input, ezért a javaslat az erőnléti/GPS adatokra épül."]
     out = []
     findings = tactical_context.get("tactical_findings") or []
     pdf_first = [f for f in findings if str(f.get("Téma", "")).lower().startswith("pdf") or "PDF" in str(f.get("Forrás", ""))]
@@ -5547,8 +5549,10 @@ def _fpi_compact_player_risk_rows_v82(risk_df: pd.DataFrame, max_rows: int = 4) 
         ])
     return rows
 
-def _fpi_md_plan_rows_v82(tactical_context: Optional[Dict[str, object]]) -> List[Tuple[str, str, str]]:
-    # output: nap, erőnléti cél, taktikai cél
+def _fpi_md_plan_rows_v82(tactical_context: Optional[Dict[str, object]], gps_context: Optional[Dict[str, object]] = None, readiness: Optional[int] = None, priorities: Optional[List[dict]] = None, week: Optional[str] = None) -> List[Tuple[str, str, str]]:
+    # output: nap, erőnléti cél, taktikai/GPS cél
+    if not _fpi_has_tactical_signal_v95(tactical_context) and gps_context is not None:
+        return _fpi_gps_only_md_plan_v95(gps_context, int(readiness or 70), priorities or [], str(week or gps_context.get("selected_week", "")))
     if tactical_context:
         md = tactical_context.get("md_plan", []) or []
         out = []
@@ -5581,8 +5585,11 @@ def _fpi_md_plan_rows_v82(tactical_context: Optional[Dict[str, object]]) -> List
         ("MD-1", "Aktiváció", "Pontrúgás + frissítés"),
     ]
 
-def _fpi_plan_why_v82(tactical_context: Optional[Dict[str, object]], readiness: int) -> str:
-    if not tactical_context:
+def _fpi_plan_why_v82(tactical_context: Optional[Dict[str, object]], readiness: int, gps_context: Optional[Dict[str, object]] = None, priorities: Optional[List[dict]] = None, week: Optional[str] = None) -> str:
+    if not _fpi_has_tactical_signal_v95(tactical_context):
+        if gps_context is not None:
+            msgs = _fpi_gps_only_conclusions_v95(gps_context, priorities or [], readiness, str(week or gps_context.get("selected_week", "")), limit=2)
+            return _fpi_clean_sentence_v82("; ".join(msgs), 260)
         return f"GPS alapján: readiness {readiness}/100, taktikai input nélkül."
     msgs = _fpi_top_tactical_messages_v82(tactical_context, 2)
     return _fpi_clean_sentence_v82("; ".join(msgs), 260)
@@ -5972,6 +5979,446 @@ def _fpi_context_for_export_v87(gps_context: Dict[str, object]) -> Optional[Dict
     return old
 
 
+
+# =========================================================
+# V9.3 - Edzés / meccs százalékos referencia motor
+# =========================================================
+
+FPI_NB2_ADULT_REFERENCE_RANGES_V93 = {
+    "total_distance": {
+        "label": "Volumen / össztáv",
+        "unit": "m",
+        "weekly_ref": "280–420%",
+        "avg_ref": "60–100%",
+        "low": 280,
+        "high": 420,
+        "avg_low": 60,
+        "avg_high": 100,
+        "explain": "Heti összmunka. A heti edzésösszeg jellemzően több meccsterhelésnyi, az egy edzés átlaga viszont általában 1 meccs alatt marad.",
+    },
+    "hsr_distance": {
+        "label": "HSR",
+        "unit": "m",
+        "weekly_ref": "150–250%",
+        "avg_ref": "35–70%",
+        "low": 150,
+        "high": 250,
+        "avg_low": 35,
+        "avg_high": 70,
+        "explain": "High Speed Running: nagy sebességű futás, tipikusan kb. 19,8–20 km/h felett.",
+    },
+    "sprint_distance": {
+        "label": "Sprint táv",
+        "unit": "m",
+        "weekly_ref": "100–200%",
+        "avg_ref": "25–55%",
+        "low": 100,
+        "high": 200,
+        "avg_low": 25,
+        "avg_high": 55,
+        "explain": "Sprintzónában megtett méter, jellemzően kb. 25 km/h felett vagy rendszer-specifikus sprintküszöb felett.",
+    },
+    "sprints": {
+        "label": "Sprint count",
+        "unit": "db",
+        "weekly_ref": "100–220%",
+        "avg_ref": "25–60%",
+        "low": 100,
+        "high": 220,
+        "avg_low": 25,
+        "avg_high": 60,
+        "explain": "Sprintakciók darabszáma. Nem ugyanaz, mint a sprint táv.",
+    },
+    "high_efforts": {
+        "label": "High Efforts",
+        "unit": "db/pont",
+        "weekly_ref": "150–280%",
+        "avg_ref": "35–75%",
+        "low": 150,
+        "high": 280,
+        "avg_low": 35,
+        "avg_high": 75,
+        "explain": "Nagy intenzitású akciók összesített mutatója. Rendszertől függően sprint, gyorsulás, lassítás vagy robbanékony effort is lehet benne.",
+    },
+}
+
+def _fpi_session_kind_v93(x: object) -> str:
+    s = _norm_mapping_text(x)
+    if any(k in s for k in ["edzes", "training", "train"]):
+        return "training"
+    if any(k in s for k in ["meccs", "merkozes", "match", "game"]):
+        return "match"
+    return "other"
+
+def _fpi_safe_pct_v93(num: float, den: float) -> Optional[float]:
+    try:
+        num = float(num or 0)
+        den = float(den or 0)
+        if den <= 0:
+            return None
+        return num / den * 100
+    except Exception:
+        return None
+
+def _fpi_ratio_status_v93(value: Optional[float], low: float, high: float) -> str:
+    if value is None:
+        return "n.a."
+    if value < low:
+        return "alacsony"
+    if value > high:
+        return "magas"
+    return "célzónában"
+
+def _fpi_ratio_note_v93(metric: str, weekly_pct: Optional[float], avg_pct: Optional[float]) -> str:
+    ref = FPI_NB2_ADULT_REFERENCE_RANGES_V93.get(metric, {})
+    status_w = _fpi_ratio_status_v93(weekly_pct, ref.get("low", 0), ref.get("high", 9999))
+    status_a = _fpi_ratio_status_v93(avg_pct, ref.get("avg_low", 0), ref.get("avg_high", 9999))
+    if weekly_pct is None:
+        return "Nincs meccs referencia vagy nincs értelmezhető adat."
+    if status_w == "alacsony" and metric in ["hsr_distance", "sprint_distance", "sprints"]:
+        return "Heti inger alacsony lehet; érdemes kontrollált sebesség/sprint expozíciót tervezni."
+    if status_w == "magas":
+        return "Heti összterhelés magas; nézd meg, egy napra koncentrálódik-e."
+    if avg_pct is not None and status_a == "magas":
+        return "Az edzésátlag magas; egy-egy edzés közel meccsterhelésű lehet."
+    if status_w == "célzónában" and status_a == "célzónában":
+        return "A heti összeg és az edzésátlag is referenciazónában van."
+    return f"Heti: {status_w}, edzésátlag: {status_a}."
+
+def _fpi_event_count_v93(df: pd.DataFrame) -> int:
+    if df is None or df.empty:
+        return 0
+    candidates = [c for c in ["session_id", "session_name", "start_time", "date", "session_date"] if c in df.columns]
+    if candidates:
+        tmp = df[candidates].astype(str).agg(" | ".join, axis=1)
+        return int(tmp.nunique())
+    return 1
+
+def _fpi_match_ratio_reference_df_v93(df: pd.DataFrame, week: str) -> pd.DataFrame:
+    """Edzés összes / meccs összes és edzésátlag / meccs arány.
+    NB2 felnőtt referenciazónával.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    data = df.copy()
+    if "week" in data.columns and week is not None:
+        data = data[data["week"].astype(str) == str(week)].copy()
+    if data.empty or "session_type" not in data.columns:
+        return pd.DataFrame()
+
+    data["_kind_v93"] = data["session_type"].apply(_fpi_session_kind_v93)
+    train = data[data["_kind_v93"] == "training"].copy()
+    match = data[data["_kind_v93"] == "match"].copy()
+
+    rows = []
+    training_events = max(_fpi_event_count_v93(train), 1) if not train.empty else 0
+
+    for metric, ref in FPI_NB2_ADULT_REFERENCE_RANGES_V93.items():
+        if metric not in data.columns:
+            continue
+        train_total = float(pd.to_numeric(train.get(metric, pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if not train.empty else 0.0
+        match_total = float(pd.to_numeric(match.get(metric, pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if not match.empty else 0.0
+        train_avg = train_total / training_events if training_events else 0.0
+        weekly_pct = _fpi_safe_pct_v93(train_total, match_total)
+        avg_pct = _fpi_safe_pct_v93(train_avg, match_total)
+
+        rows.append({
+            "Mutató": ref["label"],
+            "Mit mér?": ref["explain"],
+            "Edzés heti összes": train_total,
+            "Meccs összes": match_total,
+            "Edzés/heti meccs %": weekly_pct,
+            "Edzésátlag/meccs %": avg_pct,
+            "NB2 felnőtt heti ref.": ref["weekly_ref"],
+            "NB2 felnőtt edzésátlag ref.": ref["avg_ref"],
+            "Értékelés": _fpi_ratio_note_v93(metric, weekly_pct, avg_pct),
+        })
+
+    return pd.DataFrame(rows)
+
+def _fpi_fmt_pct_v93(x: Optional[float]) -> str:
+    if x is None or pd.isna(x):
+        return "n.a."
+    return f"{float(x):.0f}%"
+
+def _fpi_fmt_num_v93(x: object) -> str:
+    try:
+        return f"{float(x):.0f}"
+    except Exception:
+        return "0"
+
+
+
+# =========================================================
+# V9.4 - Meccsnap / ellenfél / hétkeveredés guard
+# =========================================================
+
+def _fpi_iso_week_from_date_v94(d: object) -> Optional[str]:
+    try:
+        if d is None or pd.isna(d):
+            return None
+        ts = pd.to_datetime(d, errors="coerce")
+        if pd.isna(ts):
+            return None
+        return f"{int(ts.isocalendar().year)}-W{int(ts.isocalendar().week):02d}"
+    except Exception:
+        return None
+
+def _fpi_selected_match_context_v94() -> Dict[str, object]:
+    return st.session_state.get("fpi_match_context_v94", {}) or {}
+
+def _fpi_session_kind_simple_v94(x: object) -> str:
+    return _fpi_session_kind_v93(x)
+
+def _fpi_week_context_df_v94(df: pd.DataFrame, match_date: Optional[object] = None) -> pd.DataFrame:
+    """Hetek és feltöltött események áttekintése.
+    Cél: ne keveredjenek a különböző hetek / előző hét / aktuális hét / meccshét fájlok.
+    """
+    if df is None or df.empty or "week" not in df.columns:
+        return pd.DataFrame()
+    data = df.copy()
+    if "session_date" in data.columns:
+        data["_date_v94"] = pd.to_datetime(data["session_date"], errors="coerce")
+    elif "start_time" in data.columns:
+        data["_date_v94"] = pd.to_datetime(data["start_time"], errors="coerce")
+    else:
+        data["_date_v94"] = pd.NaT
+    data["_kind_v94"] = data["session_type"].apply(_fpi_session_kind_simple_v94) if "session_type" in data.columns else "other"
+
+    match_week = _fpi_iso_week_from_date_v94(match_date)
+    today = pd.Timestamp.today().normalize()
+    today_week = _fpi_iso_week_from_date_v94(today)
+
+    rows = []
+    for week, g in data.groupby("week", dropna=True):
+        dates = g["_date_v94"].dropna()
+        train_events = _fpi_event_count_v93(g[g["_kind_v94"] == "training"])
+        match_events = _fpi_event_count_v93(g[g["_kind_v94"] == "match"])
+        label = []
+        if str(week) == str(today_week):
+            label.append("aktuális hét")
+        if match_week and str(week) == str(match_week):
+            label.append("meccshét")
+        if match_week and str(week) < str(match_week):
+            label.append("előző / felvezető hét")
+        if match_week and str(week) > str(match_week):
+            label.append("meccs utáni / jövő hét")
+        if not label:
+            label.append("feltöltött hét")
+        rows.append({
+            "Hét": str(week),
+            "Státusz": ", ".join(label),
+            "Dátum min": dates.min().strftime("%Y-%m-%d") if len(dates) else "n.a.",
+            "Dátum max": dates.max().strftime("%Y-%m-%d") if len(dates) else "n.a.",
+            "Edzés esemény": int(train_events),
+            "Meccs esemény": int(match_events),
+            "Sor": int(len(g)),
+            "Játékos": int(g["player_name"].nunique()) if "player_name" in g.columns else 0,
+        })
+    return pd.DataFrame(rows).sort_values("Hét")
+
+def _fpi_match_week_warning_v94(df: pd.DataFrame, selected_week: str, match_date: Optional[object]) -> List[str]:
+    warnings = []
+    if df is None or df.empty or "week" not in df.columns:
+        return ["Nincs értelmezhető hétadat."]
+    weeks = sorted([str(x) for x in df["week"].dropna().unique()])
+    match_week = _fpi_iso_week_from_date_v94(match_date)
+    today_week = _fpi_iso_week_from_date_v94(pd.Timestamp.today().normalize())
+
+    if match_date is None:
+        warnings.append("Nincs megadva meccsnap. Add meg, hogy melyik mérkőzésre készül a riport.")
+    elif match_week and str(selected_week) != str(match_week):
+        warnings.append(f"A kiválasztott hét ({selected_week}) nem egyezik a meccsnap hetével ({match_week}). Ellenőrizd, hogy nem előző heti / másik heti fájlokat nézel-e.")
+
+    if len(weeks) > 1:
+        warnings.append(f"Több hét van a feltöltött adatban: {', '.join(weeks[:6])}{'…' if len(weeks)>6 else ''}. A riport a kiválasztott hétre készül, de a feltöltés több hetet tartalmaz.")
+    if today_week and str(selected_week) != str(today_week):
+        warnings.append(f"Mai nap alapján az aktuális hét: {today_week}. Most a kiválasztott hét: {selected_week}. Ez lehet szándékos, de érdemes ellenőrizni.")
+    return warnings
+
+def _fpi_match_context_label_v94() -> str:
+    ctx = _fpi_selected_match_context_v94()
+    opponent = ctx.get("opponent") or "n.a."
+    md = ctx.get("match_date")
+    mw = ctx.get("match_week") or "n.a."
+    md_txt = str(md) if md else "n.a."
+    return f"Ellenfél: {opponent} | Meccsnap: {md_txt} | Meccshét: {mw}"
+
+
+
+# =========================================================
+# V9.5 - KTE/Kecskemét saját csapat + GPS-only mikrociklus
+# =========================================================
+
+FPI_OWN_TEAM_ALIASES_V95 = [
+    "kecskemet", "kecskemeti", "kecskeméti", "kecskemeti te", "kecskeméti te",
+    "kecskemeti te hufbau", "kecskeméti te hufbau", "kecskemeti lc", "kecskemeti lc kte",
+    "kte", "kte hufbau", "kecskemet te", "kecskemét", "kecskemét te",
+]
+
+def _fpi_norm_team_v95(x: object) -> str:
+    s = unicodedata.normalize("NFKD", str(x or "").lower())
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+def _fpi_is_own_team_v95(name: object) -> bool:
+    n = _fpi_norm_team_v95(name)
+    if not n:
+        return False
+    return any(alias in n for alias in [_fpi_norm_team_v95(a) for a in FPI_OWN_TEAM_ALIASES_V95])
+
+def _fpi_pretty_team_name_v95(name: object) -> str:
+    return "KTE / Kecskemét" if _fpi_is_own_team_v95(name) else str(name or "").strip()
+
+def _fpi_mark_own_opponent_teams_v95(teams: Dict[str, str]) -> Dict[str, str]:
+    out = dict(teams or {})
+    a = out.get("team_a", "")
+    b = out.get("team_b", "")
+    if _fpi_is_own_team_v95(a):
+        out["own_team"] = _fpi_pretty_team_name_v95(a)
+        out["opponent_team"] = str(b or "Ellenfél")
+        out["own_side"] = "a"
+    elif _fpi_is_own_team_v95(b):
+        out["own_team"] = _fpi_pretty_team_name_v95(b)
+        out["opponent_team"] = str(a or "Ellenfél")
+        out["own_side"] = "b"
+    else:
+        out["own_team"] = "KTE / Kecskemét"
+        out["opponent_team"] = str(b or a or "Ellenfél")
+        out["own_side"] = "unknown"
+    return out
+
+def _fpi_has_tactical_signal_v95(tactical_context: Optional[Dict[str, object]]) -> bool:
+    if not tactical_context:
+        return False
+    keys = ["tactical_findings", "pdf_provider_lines", "pdf_provider_findings", "own_topics", "opp_topics", "team_comparison"]
+    for k in keys:
+        v = tactical_context.get(k)
+        if isinstance(v, list) and len(v) > 0:
+            return True
+        if isinstance(v, dict) and len(v) > 0:
+            return True
+    if tactical_context.get("has_own_team_excel") or tactical_context.get("has_opp_team_excel") or tactical_context.get("has_own_pdf") or tactical_context.get("has_opp_pdf"):
+        return True
+    return False
+
+def _fpi_gps_week_metrics_v95(ctx: Dict[str, object], week: str) -> Dict[str, object]:
+    df = ctx.get("df")
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return {}
+    d = df.copy()
+    if "week" in d.columns:
+        d = d[d["week"].astype(str) == str(week)].copy()
+    if d.empty:
+        return {}
+    ratio = _fpi_match_ratio_reference_df_v93(d, week)
+    ratio_map = {}
+    if isinstance(ratio, pd.DataFrame) and not ratio.empty:
+        for _, r in ratio.iterrows():
+            ratio_map[str(r.get("Mutató", ""))] = {
+                "weekly_pct": r.get("Edzés/heti meccs %"),
+                "avg_pct": r.get("Edzésátlag/meccs %"),
+                "eval": r.get("Értékelés", ""),
+            }
+    return {
+        "ratio": ratio,
+        "ratio_map": ratio_map,
+        "periodization": ctx.get("periodization_type", "Nincs elég adat"),
+        "summary": ctx.get("summary", ""),
+    }
+
+def _fpi_gps_only_conclusions_v95(ctx: Dict[str, object], priorities: List[dict], readiness: int, week: str, limit: int = 6) -> List[str]:
+    out = []
+    gps = _fpi_gps_week_metrics_v95(ctx, week)
+    ratio = gps.get("ratio")
+    if isinstance(ratio, pd.DataFrame) and not ratio.empty:
+        for _, r in ratio.iterrows():
+            mut = str(r.get("Mutató", ""))
+            ev = str(r.get("Értékelés", ""))
+            wp = _fpi_fmt_pct_v93(r.get("Edzés/heti meccs %"))
+            ap = _fpi_fmt_pct_v93(r.get("Edzésátlag/meccs %"))
+            if any(k in ev.lower() for k in ["alacsony", "magas", "kontroll", "referencia", "inger"]):
+                out.append(f"{mut}: heti {wp}, edzésátlag {ap}. {ev}")
+    for p in priorities or []:
+        t = p.get("Teendő", p.get("Cím", "")) if isinstance(p, dict) else str(p)
+        why = p.get("Miért", "") if isinstance(p, dict) else ""
+        if t:
+            out.append(f"{t}. {why}".strip())
+    if readiness < 55:
+        out.insert(0, f"Readiness {readiness}/100: óvatos, csökkentett volumenű hét javasolt.")
+    elif readiness < 70:
+        out.insert(0, f"Readiness {readiness}/100: vállalható hét, de a HSR/sprint inger adagolását kontrollálni kell.")
+    else:
+        out.insert(0, f"Readiness {readiness}/100: jó alapállapot, tervezhető specifikus HSR/sprint expozíció.")
+    out.append(f"Periodizációs jelleg: {gps.get('periodization', 'Nincs elég adat')}.")
+    # unique, compact
+    uniq = []
+    seen = set()
+    for x in out:
+        y = _fpi_clean_sentence_v82(x, 190)
+        if y and y not in seen:
+            uniq.append(y); seen.add(y)
+    return uniq[:limit]
+
+def _fpi_gps_only_md_plan_v95(ctx: Dict[str, object], readiness: int, priorities: List[dict], week: str) -> List[Tuple[str, str, str]]:
+    """Taktikai input nélkül is GPS-alapú, változó mikrociklus.
+    Nem fix sablon: a readiness, HSR/sprint/High Effort arányok és priority-k alapján állít fókuszt.
+    """
+    ratio = _fpi_match_ratio_reference_df_v93(ctx.get("df", pd.DataFrame()), week)
+    low_hsr = low_sprint = high_vol = high_eff = False
+    if isinstance(ratio, pd.DataFrame) and not ratio.empty:
+        for _, r in ratio.iterrows():
+            m = str(r.get("Mutató", "")).lower()
+            eval_txt = str(r.get("Értékelés", "")).lower()
+            weekly = r.get("Edzés/heti meccs %")
+            if "hsr" in m and ("alacsony" in eval_txt or (pd.notna(weekly) and float(weekly) < 150)):
+                low_hsr = True
+            if "sprint" in m and ("alacsony" in eval_txt or (pd.notna(weekly) and float(weekly) < 100)):
+                low_sprint = True
+            if "volumen" in m and (pd.notna(weekly) and float(weekly) > 420):
+                high_vol = True
+            if "high efforts" in m and (pd.notna(weekly) and float(weekly) > 280):
+                high_eff = True
+
+    ptxt = " ".join([str(p.get("Teendő", p.get("Cím", ""))) for p in priorities or [] if isinstance(p, dict)]).lower()
+    if "sprint" in ptxt:
+        low_sprint = True
+    if "hsr" in ptxt or "nagy sebess" in ptxt:
+        low_hsr = True
+    if "terhel" in ptxt and ("magas" in ptxt or "csökk" in ptxt):
+        high_vol = True
+
+    if readiness < 55:
+        return [
+            ("MD-4", "Regeneráció + alacsony/közepes volumen", "Terhelési visszarendezés, readiness javítása."),
+            ("MD-3", "Rövid HSR/sprint expozíció", "Csak idegrendszeri inger, alacsony ismétlésszám."),
+            ("MD-2", "Frissítés + technikai intenzitás", "Rövid blokkok, terhelés kontroll."),
+            ("MD-1", "Aktiváció", "Rövid gyors döntések, friss láb prioritás."),
+        ]
+    if high_vol or high_eff:
+        return [
+            ("MD-4", "Volumen kontroll + aerob visszarendezés", "A heti összterhelés/High Effort magas, ne halmozzunk új terhelést."),
+            ("MD-3", "Minőségi, rövid HSR/sprint inger", "Sebességexpozíció volumen nélkül."),
+            ("MD-2", "Alacsony volumen + reakciógyorsaság", "Readiness megtartása, frissítés."),
+            ("MD-1", "Aktiváció + mobilitás", "Idegrendszeri frissítés, minimális fárasztás."),
+        ]
+    if low_hsr or low_sprint:
+        return [
+            ("MD-4", "Stabil csapatvolumen", "Általános heti alap terhelés felépítése."),
+            ("MD-3", "HSR/sprint expozíció nap", "Hiányzó nagy sebességű/sprint inger pótlása kontrolláltan."),
+            ("MD-2", "High Effort + rövid intenzív blokkok", "Pressing/transition jellegű fizikai inger, de rövid volumen."),
+            ("MD-1", "Aktiváció", "Frissítés, 3-5 rövid gyors akció."),
+        ]
+    return [
+        ("MD-4", "Fő terhelési nap", "Volumen és HSR referenciazóna fenntartása."),
+        ("MD-3", "Specifikus intenzitási nap", "HSR/sprint/High Effort kontrollált meccsinger."),
+        ("MD-2", "Terhelés csökkentése", "Frissesség megtartása, egyéni risk kontroll."),
+        ("MD-1", "Aktiváció", "Rövid gyorsasági és döntési inger."),
+    ]
+
+
 def build_fpi_product_pdf_bytes(
     data: pd.DataFrame,
     selected_week: Optional[str] = None,
@@ -6076,6 +6523,7 @@ def build_fpi_product_pdf_bytes(
     def add_cover():
         story.append(P("Football Performance Intelligence", title))
         story.append(P(f"{label_prefix}{report_names.get(report_type, 'Riport')} | Hét: {format_week_label(str(week))} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
+        story.append(P(_fpi_match_context_label_v94(), sub))
         story.append(Spacer(1, 0.25*cm))
         kpis = [
             kpi("READINESS", f"{readiness}/100", score_to_label(readiness), "#166534" if readiness >= 75 else "#1E3A8A" if readiness >= 60 else "#991B1B"),
@@ -6090,18 +6538,29 @@ def build_fpi_product_pdf_bytes(
     def add_executive_page():
         story.append(section("1. Vezetői oldal – heti meccs- és edzésterv", "#DBEAFE"))
 
-        tactical_plan = tactical_context.get("plan_a", "KIE – kiegyensúlyozott") if tactical_context else "KIE – kiegyensúlyozott"
-        fitness_msgs = _fpi_top_fitness_messages_v82(ctx, priorities, readiness, 3)
-        tactical_msgs = _fpi_top_tactical_messages_v82(tactical_context, 3)
-        md_rows_simple = _fpi_md_plan_rows_v82(tactical_context)
+        match_ctx = _fpi_selected_match_context_v94()
+        match_warnings = _fpi_match_week_warning_v94(df, week, match_ctx.get("match_date"))
+        ctx_rows = [[P("Meccskontextus", head), P("Hétellenőrzés", head)]]
+        ctx_rows.append([
+            P(_fpi_match_context_label_v94(), small),
+            P("<br/>".join([pdf_safe_text(x) for x in match_warnings[:3]]) if match_warnings else "Hét és meccsnap összhangban.", small),
+        ])
+        story.append(table(ctx_rows, [10.0*cm, 17.7*cm], header_bg="#0F766E", row_bgs=[colors.HexColor("#F0FDFA")]))
+        story.append(Spacer(1, 0.18*cm))
+
+        has_tactical_signal = _fpi_has_tactical_signal_v95(tactical_context)
+        tactical_plan = tactical_context.get("plan_a", "KIE – kiegyensúlyozott") if has_tactical_signal else "GPS-only – erőnléti fókuszú mikrociklus"
+        fitness_msgs = _fpi_top_fitness_messages_v82(ctx, priorities, readiness, 5 if not has_tactical_signal else 3)
+        tactical_msgs = _fpi_top_tactical_messages_v82(tactical_context, 5 if not has_tactical_signal else 3, gps_context=ctx, readiness=readiness, priorities=priorities, week=week)
+        md_rows_simple = _fpi_md_plan_rows_v82(tactical_context, gps_context=ctx, readiness=readiness, priorities=priorities, week=week)
         risk_rows_simple = _fpi_compact_player_risk_rows_v82(risk_df, 4)
 
         # 1) felső, nagyon gyors döntési sáv
         fast_rows = [[P("Állapot", head), P("Meccsterv", head), P("Fő döntés", head)]]
         fast_rows.append([
             P(f"Readiness: {readiness}/100 – {_fpi_readiness_short_v82(readiness)}. Risk: {high_risk} magas / {med_risk} közepes.", body),
-            P(f"{tactical_plan}\nMiért: {_fpi_plan_why_v82(tactical_context, readiness)}", body),
-            P("A hét célja: frissesség megtartása + meccstervhez illesztett taktikai intenzitás. Nem több adat, hanem jobb heti döntés.", body),
+            P(f"{tactical_plan}\nMiért: {_fpi_plan_why_v82(tactical_context, readiness, gps_context=ctx, priorities=priorities, week=week)}", body),
+            P("A hét célja: a rendelkezésre álló input alapján használható mikrociklus. GPS-only esetben az erőnléti fókusz, readiness, HSR/sprint/High Effort és játékoskockázat vezeti a tervet.", body),
         ])
         story.append(table(fast_rows, [8.8*cm, 10.0*cm, 8.9*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF")]))
         story.append(Spacer(1, 0.18*cm))
@@ -6159,6 +6618,39 @@ def build_fpi_product_pdf_bytes(
             rows.append([P("Nincs adat", small)] + [P("—", small)]*9)
         story.append(table(rows, [2.8*cm, 3.0*cm, 2.5*cm, 2.5*cm, 3.0*cm, 3.0*cm, 2.4*cm, 2.5*cm, 2.5*cm, 3.0*cm], header_bg="#0369A1"))
         story.append(Spacer(1, 0.25*cm))
+
+        ratio_df = _fpi_match_ratio_reference_df_v93(df, week)
+        story.append(section("Edzés–meccs arányok – százalékos referencia NB2 felnőtt szinthez", "#FEF3C7"))
+        if ratio_df.empty:
+            story.append(Paragraph(pdf_safe_text("Nincs elég adat az edzés/meccs százalékos referencia kiszámításához. Legalább egy edzés és egy meccs típusú esemény szükséges."), body))
+        else:
+            rr = [[
+                P("Mutató", head),
+                P("Edzés heti összes / meccs", head),
+                P("Edzésátlag / meccs", head),
+                P("NB2 felnőtt referencia", head),
+                P("Értékelés", head),
+            ]]
+            for _, r in ratio_df.iterrows():
+                rr.append([
+                    P(str(r.get("Mutató", "")), small),
+                    P(_fpi_fmt_pct_v93(r.get("Edzés/heti meccs %")), small),
+                    P(_fpi_fmt_pct_v93(r.get("Edzésátlag/meccs %")), small),
+                    P(f"Heti: {r.get('NB2 felnőtt heti ref.', '')}<br/>Edzésátlag: {r.get('NB2 felnőtt edzésátlag ref.', '')}", small),
+                    P(str(r.get("Értékelés", "")), small),
+                ])
+            story.append(table(rr, [4.0*cm, 4.2*cm, 4.2*cm, 6.0*cm, 9.3*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"), colors.white]))
+            story.append(Paragraph(pdf_safe_text("Értelmezés: a heti összes megmutatja, hogy a teljes edzésheted hány meccsnyi ingert adott. Az edzésátlag azt mutatja, hogy egy átlagos edzés hány %-a egy meccsnek. A kettőt együtt kell nézni."), small))
+        story.append(Spacer(1, 0.25*cm))
+
+        story.append(section("Fogalmak röviden – HSR, sprint és sprint expozíció", "#DBEAFE"))
+        expl = [[P("Fogalom", head), P("Egyszerű jelentés", head)]]
+        expl.append([P("HSR", small), P("High Speed Running: nagy sebességű futás, általában kb. 19,8–20 km/h felett. Ez még nem feltétlen maximális sprint.", small)])
+        expl.append([P("Sprint", small), P("Sprintzóna vagy sprintakció. A sprint táv a sprintzónában megtett méter, a sprint count pedig a sprintakciók darabszáma.", small)])
+        expl.append([P("Sprint expozíció", small), P("Nem csak mennyiség: azt jelenti, hogy a játékos elér-e nagy sebességű / maximális sebességhez közeli ingert a héten. Sérülésmegelőzés miatt fontos.", small)])
+        story.append(table(expl, [4.0*cm, 23.7*cm], header_bg="#1D4ED8", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
+        story.append(Spacer(1, 0.25*cm))
+
         story.append(section("Top játékosok – heti terhelési profil", "#F0FDFA"))
         pw = player_week.copy()
         if not pw.empty and "week" in pw.columns:
@@ -6682,8 +7174,25 @@ with st.sidebar:
             st.json(st.session_state.get("week_rescue_applied"))
 
 with st.sidebar:
+    st.header("Meccskontextus")
+    today_v94 = pd.Timestamp.today().date()
+    opponent_v94 = st.text_input("Ellenfél neve", value=st.session_state.get("fpi_match_opponent_v94", ""))
+    match_date_v94 = st.date_input("Meccsnap", value=st.session_state.get("fpi_match_date_v94", today_v94))
+    match_week_v94 = _fpi_iso_week_from_date_v94(match_date_v94)
+    st.session_state["fpi_match_opponent_v94"] = opponent_v94
+    st.session_state["fpi_match_date_v94"] = match_date_v94
+    st.session_state["fpi_match_context_v94"] = {
+        "opponent": opponent_v94.strip() if isinstance(opponent_v94, str) else "",
+        "match_date": match_date_v94,
+        "match_week": match_week_v94,
+        "today": today_v94,
+        "today_week": _fpi_iso_week_from_date_v94(today_v94),
+    }
+    st.caption(f"Mai hét: {_fpi_iso_week_from_date_v94(today_v94)} | Meccshét: {match_week_v94}")
+
     st.header("Szűrők")
-    selected_week = st.selectbox("Hét", weeks, index=len(weeks) - 1 if weeks else 0, format_func=week_label_short)
+    default_week_idx_v94 = weeks.index(match_week_v94) if match_week_v94 in weeks else (len(weeks) - 1 if weeks else 0)
+    selected_week = st.selectbox("Hét", weeks, index=default_week_idx_v94, format_func=week_label_short)
     selected_playstyle = st.selectbox("Játékmodell", list(PLAYSTYLE_OPTIONS.keys()), index=0)
     st.caption(PLAYSTYLE_OPTIONS[selected_playstyle])
     selected_types = st.multiselect("Típus", session_types, default=session_types)
@@ -6703,6 +7212,25 @@ filtered = df[
     & (df["session_type"].isin(selected_types))
     & (df["player_name"].isin(selected_players))
 ]
+
+# V9.4 - Hét és meccsnap kontextus ellenőrzése
+match_ctx_v94 = _fpi_selected_match_context_v94()
+week_context_df_v94 = _fpi_week_context_df_v94(df, match_ctx_v94.get("match_date"))
+week_warnings_v94 = _fpi_match_week_warning_v94(df, selected_week, match_ctx_v94.get("match_date"))
+
+with st.expander("📅 Hét / meccsnap / feltöltött fájlok ellenőrzése", expanded=True):
+    st.markdown(
+        f"**Mai nap:** {match_ctx_v94.get('today')} | **Mai hét:** {match_ctx_v94.get('today_week')} | "
+        f"**Ellenfél:** {match_ctx_v94.get('opponent') or 'n.a.'} | **Meccsnap:** {match_ctx_v94.get('match_date')} | "
+        f"**Meccshét:** {match_ctx_v94.get('match_week')} | **Kiválasztott hét:** {selected_week}"
+    )
+    if week_context_df_v94 is not None and not week_context_df_v94.empty:
+        st.dataframe(week_context_df_v94, use_container_width=True, hide_index=True)
+    if week_warnings_v94:
+        for w in week_warnings_v94:
+            st.warning(w)
+    else:
+        st.success("A kiválasztott hét, a mai nap és a meccsnap alapján nincs nyilvánvaló hétkeveredés.")
 
 if save_current_to_memory:
     ok, msg = save_to_memory(df)
@@ -6834,6 +7362,10 @@ def render_methodology_tab() -> None:
         "A rendszer a dátumoszlopot robusztusan értelmezi. Támogatott példák: "
         "`2025-07-16`, `2025-07-16 09:38:13`, `16.07.2025`, `Training - 2025-07-16 17:00`. "
         "A csoportosítás ISO hét alapján történik, például `2025-W29`."
+    )
+    st.info(
+        "V9.4: az app bekéri a meccsnapot és az ellenfelet, majd összeveti a mai héttel, "
+        "a meccshéttel és a feltöltött fájlok heteivel. Így látható, ha előző heti, aktuális heti vagy másik heti adatok keverednek."
     )
     st.warning(
         "Ha rövid, néhány napos dátumtartományból irreálisan sok hét keletkezne, a Week Rescue Engine "
@@ -8043,12 +8575,12 @@ def _fpi_extract_match_teams_v85(text: str) -> Dict[str, str]:
     # SportsBase első oldalak: "Ajka 1:2 Csakvari TK"
     m = re.search(r"\n([A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű .'-]+)\s+\d+\s*:\s*\d+\s+([A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű .'-]+)\n", "\n" + str(text or "") + "\n")
     if m:
-        return {"team_a": m.group(1).strip(), "team_b": m.group(2).strip()}
+        return _fpi_mark_own_opponent_teams_v95({"team_a": m.group(1).strip(), "team_b": m.group(2).strip()})
     # fallback: Match report line
     m = re.search(r"MATCH REPORT\s+(.+?)\s+(.+?)\s+Hungary", str(text or ""), flags=re.I | re.S)
     if m:
-        return {"team_a": re.sub(r"\s+", " ", m.group(1)).strip(), "team_b": re.sub(r"\s+", " ", m.group(2)).strip()}
-    return {"team_a": "Csapat A", "team_b": "Csapat B"}
+        return _fpi_mark_own_opponent_teams_v95({"team_a": re.sub(r"\s+", " ", m.group(1)).strip(), "team_b": re.sub(r"\s+", " ", m.group(2)).strip()})
+    return _fpi_mark_own_opponent_teams_v95({"team_a": "KTE / Kecskemét", "team_b": "Ellenfél"})
 
 def _fpi_extract_formations_v85(text: str) -> Dict[str, str]:
     forms = re.findall(r"Match start\s+([3-5][–\-\u2013][1-5][–\-\u2013][1-5](?:[–\-\u2013][1-3])?)", str(text or ""), flags=re.I)
@@ -8745,6 +9277,16 @@ def _fpi_build_adaptive_match_training_plan(gps_context: Dict[str, object], tact
         pdf_topics,
     )
 
+    gps_only_mode = not tactical_findings and not blocks and not own_team_metrics and not opp_team_metrics and not pdf_topics
+    if gps_only_mode:
+        for msg in _fpi_gps_only_conclusions_v95(gps_context, priorities, readiness, str(gps_context.get("selected_week", "")), limit=6):
+            tactical_findings.append({
+                "Téma": "GPS-only konklúzió",
+                "Bizonyíték": "GPS / readiness / edzés-meccs arányok",
+                "Edzői következtetés": msg,
+                "Prioritás": "Közepes",
+            })
+
     risks = []
     for f in tactical_findings:
         if f.get("Prioritás") in ["Magas", "Közepes"]:
@@ -8791,14 +9333,17 @@ def _fpi_build_adaptive_match_training_plan(gps_context: Dict[str, object], tact
         ("MD-2", "Ellenfél-specifikus taktikai nap", "; ".join(risks[:2]) if risks else "Meccsterv."),
         ("MD-1", "Aktiváció + pontrúgások", "Frissítés, gyors döntések, fix helyzetek."),
     ]
-    if readiness < 55:
+    if gps_only_mode:
+        md_plan = [("MD+1/MD-5", "Regeneráció / monitoring", "Előző terhelés visszarendezése.")] + _fpi_gps_only_md_plan_v95(gps_context, readiness, priorities, str(gps_context.get("selected_week", "")))
+        plan_a = "GPS-only – erőnléti fókuszú mikrociklus"
+    if (not gps_only_mode) and readiness < 55:
         md_plan[2] = ("MD-3", "Rövid specifikus exponálás", "Csak célzott HSR/sprint inger, alacsony volumen.")
-    if any("presszing" in r.lower() or "ppda" in r.lower() for r in risks):
+    if (not gps_only_mode) and any("presszing" in r.lower() or "ppda" in r.lower() for r in risks):
         md_plan[1] = ("MD-4", "Presszingkijátszás + labdakihozatal", "Ellenfél presszingprofil / PPDA alapján első passzsor és harmadik ember.")
-    if any("kontra" in r.lower() or "átmenet" in r.lower() for r in risks):
+    if (not gps_only_mode) and any("kontra" in r.lower() or "átmenet" in r.lower() for r in risks):
         md_plan[2] = ("MD-3", "Átmeneti játék + HSR/sprint", "Kontrák és gyors átmenetek miatt futóintenzitás + döntésgyorsaság.")
         md_plan[3] = ("MD-2", "Rest defense + kontrák elleni biztosítás", "Ellenfél átmeneti veszélyei miatt.")
-    if opp_corners > 0 or blocks.get("set_pieces"):
+    if (not gps_only_mode) and (opp_corners > 0 or blocks.get("set_pieces")):
         md_plan[-1] = ("MD-1", "Aktiváció + pontrúgás fókusz", "Szöglet/pontrúgás profil alapján.")
 
     player_focus = []
