@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V089_DIRECT_UPLOAD_PDF_TEXT_STORE_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V090_PDF_DEBUG_SCOPE_FIX_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5625,38 +5625,74 @@ def _fpi_restore_uploaded_file_wrappers_v88(items: List[dict]) -> List[object]:
     return [_FPIBytesPDF(x.get("name", "uploaded.pdf"), x.get("bytes", b"")) for x in (items or []) if x.get("bytes")]
 
 def _fpi_tactical_app_extract_pdf_pages_v88(file_bytes: bytes, max_pages: int = 80) -> List[dict]:
-    """A régi Tactical app PDF-reader logikájának 1:1 magja:
-    pdfplumber.open(io.BytesIO(bytes)) + page.extract_text(x_tolerance=1, y_tolerance=3).
-    Ez az Ajka-Csakvar SportsBase PDF-nél működő út.
+    """Régi Tactical app út + PyMuPDF fallback.
+    Elsődleges: pdfplumber.open(io.BytesIO(bytes)).
+    Fallback: PyMuPDF, ha pdfplumber nincs vagy hibázik.
     """
     out = []
     if not file_bytes:
         return out
+
+    # 1) pdfplumber / pdfminer út
     try:
-        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            total_pages = min(len(pdf.pages), max_pages)
-            for p in range(total_pages):
-                txt = pdf.pages[p].extract_text(x_tolerance=1, y_tolerance=3) or ""
-                if txt.strip():
-                    out.append({
-                        "page_index": p,
-                        "page_number": p + 1,
-                        "reader": "legacy_tactical_pdfplumber_v88",
-                        "chars": len(txt),
-                        "has_text": True,
-                        "text": txt,
-                    })
+        if pdfplumber is not None:
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                total_pages = min(len(pdf.pages), max_pages)
+                for p in range(total_pages):
+                    txt = pdf.pages[p].extract_text(x_tolerance=1, y_tolerance=3) or ""
+                    if txt.strip():
+                        out.append({
+                            "page_index": p,
+                            "page_number": p + 1,
+                            "reader": "legacy_tactical_pdfplumber_v90",
+                            "chars": len(txt),
+                            "has_text": True,
+                            "text": txt,
+                        })
+        if out:
+            return out
     except Exception as e:
         out.append({
             "page_index": None,
             "page_number": None,
-            "reader": "legacy_tactical_pdfplumber_v88",
+            "reader": "legacy_tactical_pdfplumber_v90",
             "chars": 0,
             "has_text": False,
             "error": str(e),
             "text": "",
         })
+
+    # 2) PyMuPDF fallback
+    try:
+        if PYMUPDF_AVAILABLE and fitz is not None:
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            for p in range(min(len(doc), max_pages)):
+                txt = doc[p].get_text("text") or ""
+                if txt.strip():
+                    out.append({
+                        "page_index": p,
+                        "page_number": p + 1,
+                        "reader": "pymupdf_fallback_v90",
+                        "chars": len(txt),
+                        "has_text": True,
+                        "text": txt,
+                    })
+            doc.close()
+            if out:
+                return out
+    except Exception as e:
+        out.append({
+            "page_index": None,
+            "page_number": None,
+            "reader": "pymupdf_fallback_v90",
+            "chars": 0,
+            "has_text": False,
+            "error": str(e),
+            "text": "",
+        })
+
     return out
+
 
 def _fpi_tactical_app_combine_pdf_texts_v88(items: List[dict]) -> Tuple[str, List[dict]]:
     page_blocks = []
@@ -8834,26 +8870,42 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     # Nem session_state fájlobjektumból próbáljuk újranyitni exportkor.
     own_pdf_text, own_pdf_pages, own_items_v89 = _fpi_tactical_app_combine_uploadfiles_v89(own_pdfs or [])
     opp_pdf_text, opp_pdf_pages, opp_items_v89 = _fpi_tactical_app_combine_uploadfiles_v89(opp_pdfs or [])
-with st.expander("PDF RAW DEBUG", expanded=True):
-    st.write("own_pdfs type:", type(own_pdfs))
-    st.write("own_pdfs len:", len(own_pdfs or []))
-    for i, f in enumerate(own_pdfs or []):
-        st.write("OWN PDF", i, getattr(f, "name", None), type(f))
-        try:
-            b = f.getvalue()
-            st.write("getvalue bytes:", len(b), b[:20])
-        except Exception as e:
-            st.error(f"getvalue error: {e}")
 
-        try:
-            import pdfplumber
-            with pdfplumber.open(io.BytesIO(b)) as pdf:
-                st.write("pdfplumber pages:", len(pdf.pages))
-                txt = pdf.pages[0].extract_text(x_tolerance=1, y_tolerance=3) or ""
-                st.write("first page chars:", len(txt))
-                st.text(txt[:1000])
-        except Exception as e:
-            st.error(f"pdfplumber error: {e}")
+    with st.expander("PDF RAW DEBUG – feltöltés és olvasás ellenőrzése", expanded=False):
+        st.write("own_pdfs type:", type(own_pdfs).__name__)
+        st.write("own_pdfs len:", len(own_pdfs or []))
+        st.write("opp_pdfs type:", type(opp_pdfs).__name__)
+        st.write("opp_pdfs len:", len(opp_pdfs or []))
+
+        def _debug_one_pdf_list(label, files):
+            for i, f in enumerate(files or []):
+                st.write(f"{label} PDF {i}", getattr(f, "name", None), type(f).__name__)
+                b = b""
+                try:
+                    b = f.getvalue()
+                    st.write("getvalue bytes:", len(b), b[:20])
+                except Exception as e:
+                    st.error(f"getvalue error: {e}")
+                if b:
+                    try:
+                        if pdfplumber is None:
+                            st.error("pdfplumber nincs importálva / nem elérhető ebben a környezetben.")
+                        else:
+                            with pdfplumber.open(io.BytesIO(b)) as pdf:
+                                st.write("pdfplumber pages:", len(pdf.pages))
+                                txt = pdf.pages[0].extract_text(x_tolerance=1, y_tolerance=3) or "" if len(pdf.pages) else ""
+                                st.write("first page chars:", len(txt))
+                                st.text(txt[:1200])
+                    except Exception as e:
+                        st.error(f"pdfplumber error: {e}")
+
+        _debug_one_pdf_list("SAJÁT", own_pdfs)
+        _debug_one_pdf_list("ELLENFÉL", opp_pdfs)
+
+        st.write("App reader saját karakter:", len(own_pdf_text or ""), "oldal:", len([p for p in own_pdf_pages if p.get("has_text") or p.get("text")]))
+        st.write("App reader ellenfél karakter:", len(opp_pdf_text or ""), "oldal:", len([p for p in opp_pdf_pages if p.get("has_text") or p.get("text")]))
+
+
 
 
     # Multi-reader csak fallback.
