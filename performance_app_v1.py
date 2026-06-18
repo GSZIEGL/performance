@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V097_COACH_CONTEXT_REFERENCES_TRAINING_DAYS_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V098_REFERENCE_RECURSION_FIX_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7108,7 +7108,8 @@ def _fpi_ratio_status_v97(value: Optional[float], low: float, high: float) -> st
     return _fpi_ratio_status_v93(value, low, high)
 
 def _fpi_match_ratio_reference_df_v97(df: pd.DataFrame, week: str) -> pd.DataFrame:
-    base = _fpi_match_ratio_reference_df_v97(df, week)
+    # V9.8 fix: base calculation must call the original V9.3 engine, not itself.
+    base = _fpi_match_ratio_reference_df_v93(df, week)
     if base is None or base.empty:
         return base
     # profile-specific overrides
