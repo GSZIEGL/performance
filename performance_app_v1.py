@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V080_EXECUTIVE_TACTICAL_FIRST_PAGE_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V081_COMPACT_EXECUTIVE_PDF_SCOPE_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5445,6 +5445,26 @@ def _fpi_pdf_next_integrated_decision_v80(tactical_context: Optional[Dict[str, o
     return fallback
 
 
+
+def _fpi_compact_text_v81(x: object, max_len: int = 260) -> str:
+    s = re.sub(r"\s+", " ", str(x or "")).strip()
+    return s if len(s) <= max_len else s[:max_len-1].rstrip() + "…"
+
+def _fpi_pdf_scope_line_v81(tactical_context: Optional[Dict[str, object]]) -> str:
+    if not tactical_context:
+        return "PDF: nincs feltöltött taktikai PDF."
+    own_chars = int(tactical_context.get("own_pdf_chars", 0) or 0)
+    opp_chars = int(tactical_context.get("opp_pdf_chars", 0) or 0)
+    own_pages = int(tactical_context.get("own_pdf_pages", 0) or 0)
+    opp_pages = int(tactical_context.get("opp_pdf_pages", 0) or 0)
+    topics = len(tactical_context.get("own_topics", []) or []) + len(tactical_context.get("opp_topics", []) or [])
+    if own_chars + opp_chars > 0:
+        return f"PDF: {own_pages}+{opp_pages} oldalból {own_chars + opp_chars} karakter feldolgozva; felismert témák: {topics}. A riport a legerősebb PDF-témákat használja, a többi következtetés Excelből jön."
+    if tactical_context.get("has_own_pdf") or tactical_context.get("has_opp_pdf"):
+        return f"PDF: feltöltve ({own_pages}+{opp_pages} oldal), de nincs kinyert szöveg vagy erős tématalálat; taktikai döntés főleg Excelből."
+    return "PDF: nincs használható PDF-jelzés; taktikai döntés Excelből."
+
+
 def build_fpi_product_pdf_bytes(
     data: pd.DataFrame,
     selected_week: Optional[str] = None,
@@ -5561,48 +5581,46 @@ def build_fpi_product_pdf_bytes(
         story.append(Spacer(1, 0.25*cm))
 
     def add_executive_page():
-        story.append(section("1. Vezetői oldal – 30 másodperces döntési kép", "#DBEAFE"))
-        summary_lines = [x.strip() for x in str(ctx.get("summary", "")).splitlines() if x.strip()]
-        summary_text = "\n".join(summary_lines[:9]) if summary_lines else "Nincs automatikus összefoglaló."
-        rows = [[P("Fő üzenet", head), P("Mit jelent ez a stábnak?", head), P("Következő döntés", head)]]
+        story.append(section("1. Vezetői oldal – kompakt döntési kép", "#DBEAFE"))
+
         first_priority = priorities[0] if priorities else {}
-        tactical_status = _fpi_pdf_tactical_source_status_v80(tactical_context)
+        readiness_line = f"{readiness}/100 ({score_to_label(readiness)}), high risk: {high_risk} fő, medium risk: {med_risk} fő."
+        load_line = _fpi_compact_text_v81(str(ctx.get("summary", "")).replace("\n", " "), 320)
+
         tactical_primary = _fpi_pdf_primary_tactical_finding_v80(tactical_context)
         tactical_plan = tactical_context.get("plan_a", "n.a.") if tactical_context else "n.a."
+        tactical_source = _fpi_pdf_tactical_source_status_v80(tactical_context)
+        pdf_scope = _fpi_pdf_scope_line_v81(tactical_context)
         next_decision = _fpi_pdf_next_integrated_decision_v80(
             tactical_context,
             first_priority.get("Teendő", "Heti terhelés és egyéni risk áttekintése a következő edzés előtt.")
         )
+
+        rows = [[P("Terület", head), P("Lényeg", head), P("Következő döntés", head)]]
         rows.append([
-            P(summary_text + "\n\nTaktikai üzenet: " + tactical_primary, body),
-            P(f"Meccskészültség: {readiness}/100 ({score_to_label(readiness)}). Magas risk: {high_risk} fő, közepes risk: {med_risk} fő. Periodizáció: {ctx.get('periodization_type', '—')}.\nTaktikai forrás: {tactical_status}\nPlan A: {tactical_plan}", body),
-            P(next_decision, body),
+            P("Erőnlét / readiness", head),
+            P(_fpi_compact_text_v81(readiness_line + " " + load_line, 430), body),
+            P(_fpi_compact_text_v81(first_priority.get("Teendő", "Frissesség és egyéni risk kontroll."), 260), body),
         ])
-        story.append(table(rows, [9.2*cm, 9.2*cm, 9.3*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF")]))
+        rows.append([
+            P("Taktikai kép", head),
+            P(_fpi_compact_text_v81(tactical_primary, 430), body),
+            P(_fpi_compact_text_v81(f"Plan A: {tactical_plan}", 260), body),
+        ])
+        rows.append([
+            P("Forrásminőség", head),
+            P(_fpi_compact_text_v81(tactical_source + " " + pdf_scope, 430), body),
+            P("Ha a PDF nem ad témát, az Excel-következtetés dominál; PDF diagnosztika alapján bővíthető.", body),
+        ])
+        rows.append([
+            P("Mikrociklus", head),
+            P(_fpi_compact_text_v81(next_decision, 430), body),
+            P("Egy nap = erőnléti cél + taktikai cél, külön riportok helyett közös terv.", body),
+        ])
+        story.append(table(rows, [4.3*cm, 14.6*cm, 8.8*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
         story.append(Spacer(1, 0.22*cm))
 
-        if tactical_context:
-            story.append(section("30 mp integrált GPS + Tactical döntéskép", "#E0F2FE"))
-            trows = [[P("Elem", head), P("Mit látunk?", head), P("Edzői döntés", head)]]
-            trows.append([
-                P("Taktikai forrás", small),
-                P(_fpi_pdf_tactical_source_status_v80(tactical_context), small),
-                P("A következtetéseket a forrásminőség szerint kell súlyozni: ha a PDF nem adott témát, akkor az Excel dominál.", small),
-            ])
-            trows.append([
-                P("Meccsterv", small),
-                P(str(tactical_context.get("plan_a", "n.a.")), small),
-                P(_fpi_pdf_primary_tactical_finding_v80(tactical_context), small),
-            ])
-            trows.append([
-                P("PDF témák", small),
-                P(_fpi_pdf_short_tactical_topics_v80(tactical_context), small),
-                P("Ha nincs erős PDF-téma, a PDF diagnosztikában kell ellenőrizni a kinyert szöveget és a gyakori szavakat.", small),
-            ])
-            story.append(table(trows, [4.5*cm, 11.6*cm, 11.6*cm], header_bg="#0369A1", row_bgs=[colors.HexColor("#E0F2FE"), colors.white]))
-            story.append(Spacer(1, 0.22*cm))
-
-        story.append(section("Top edzői teendők", "#DCFCE7"))
+        story.append(section("Top edzői teendők – max. 4 pont", "#DCFCE7"))
         pr = [[P("#", head), P("Teendő", head), P("Miért fontos?", head), P("Mikor?", head)]]
         pr_items = []
         if tactical_context and tactical_context.get("tactical_findings"):
@@ -5613,22 +5631,30 @@ def build_fpi_product_pdf_bytes(
                     "Mikor": "Következő taktikai blokk",
                 })
         pr_items.extend(priorities)
-        for i, item in enumerate(pr_items[:5], 1):
-            pr.append([P(i, small), P(item.get("Teendő", item.get("Cím", "")), small), P(item.get("Miért", ""), small), P(item.get("Mikor", "Következő edzés"), small)])
+        for i, item in enumerate(pr_items[:4], 1):
+            pr.append([
+                P(str(i), small),
+                P(_fpi_compact_text_v81(item.get("Teendő", item.get("Cím", "")), 180), small),
+                P(_fpi_compact_text_v81(item.get("Miért", ""), 260), small),
+                P(_fpi_compact_text_v81(item.get("Mikor", "Következő edzés"), 80), small),
+            ])
         if len(pr) == 1:
             pr.append([P("1", small), P("Normál monitoring", small), P("Nincs kritikus jelzés.", small), P("Heti review", small)])
-        story.append(table(pr, [1.0*cm, 11.4*cm, 10.5*cm, 4.8*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
+        story.append(table(pr, [1.0*cm, 9.8*cm, 12.1*cm, 4.8*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
         story.append(Spacer(1, 0.22*cm))
-        story.append(section("Játékos risk gyorsnézet", "#FEE2E2"))
+
+        # Rövid risk nézet, hogy az első pont ne nyúljon szét több oldalra.
+        story.append(section("Játékos risk röviden", "#FEE2E2"))
         risk_cols = [c for c in ["Játékos", "Kockázati szint", "Risk score", "Kockázati pontszám", "Fő ok", "Fő okok"] if c in risk_df.columns]
         if not risk_cols:
             risk_cols = ["Játékos", "Kockázati szint", "Fő ok"]
             rrows = [[P(c, head) for c in risk_cols], [P("Nincs kiemelt risk", small), P("Alacsony", small), P("A hét alapján nincs azonnali beavatkozási jelzés.", small)]]
         else:
             rrows = [[P(c, head) for c in risk_cols]]
-            for _, r in risk_df.head(8).iterrows():
-                rrows.append([P(r.get(c, ""), small) for c in risk_cols])
+            for _, r in risk_df.head(5).iterrows():
+                rrows.append([P(_fpi_compact_text_v81(r.get(c, ""), 120), small) for c in risk_cols])
         story.append(table(rrows, [27.7*cm/len(rrows[0])]*len(rrows[0]), header_bg="#7F1D1D", row_bgs=[colors.white, colors.HexColor("#FEF2F2")]))
+
 
     def add_fitness_page():
         story.append(section("2. Erőnléti szakmai oldal – GPS terhelés, trend és játékosszint", "#E0F2FE"))
@@ -5860,11 +5886,7 @@ def build_fpi_product_pdf_bytes(
         story.append(table(expl_rows, [27.7*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
         story.append(Spacer(1, 0.20*cm))
 
-        story.append(section("Taktikai stratégiai paletta", "#F0FDFA"))
-        pal = [[P("Kód", head), P("Stratégia", head), P("Egyszerű jelentés", head)]]
-        for code, name, desc in _strategy_palette_pdf_rows():
-            pal.append([P(code, small), P(name, small), P(desc, small)])
-        story.append(table(pal, [2.0*cm, 7.2*cm, 18.5*cm], header_bg="#0F766E", row_bgs=[colors.HexColor("#F0FDFA"), colors.white]))
+        story.append(Paragraph(pdf_safe_text("Taktikai kódok röviden: KIE = kiegyensúlyozott, POZ = pozíciós támadás, BAT = középső blokk + átmenet, PRS = presszing + átmenet. A teljes paletta az app Metodika/Tactical felületén látható."), small))
         story.append(Spacer(1, 0.20*cm))
 
         story.append(section("Fő taktikai kockázatok / fókuszok", "#FEE2E2"))
@@ -7579,6 +7601,10 @@ def _build_tactical_executive_context(gps_context: Dict[str, object], tactical_c
         "has_opp_player_excel": bool(opp.get("player_tables")),
         "own_topics": ((own.get("pdf_insights") or {}).get("topics") or [])[:8],
         "opp_topics": ((opp.get("pdf_insights") or {}).get("topics") or [])[:8],
+        "own_pdf_chars": int((own.get("pdf_insights") or {}).get("raw_text_len", 0) or 0),
+        "opp_pdf_chars": int((opp.get("pdf_insights") or {}).get("raw_text_len", 0) or 0),
+        "own_pdf_reader": str((own.get("pdf_insights") or {}).get("reader_version", "")),
+        "opp_pdf_reader": str((opp.get("pdf_insights") or {}).get("reader_version", "")),
         "own_team_metrics": own.get("team_metrics", {}),
         "opp_team_metrics": opp.get("team_metrics", {}),
         "plan_a": plan.get("plan_a", "KIE – Kiegyensúlyozott"),
