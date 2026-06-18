@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V100_LANDING_PAGE_IMPORT_EXPORT_FLOW_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V101_CLEAN_WORKSPACE_PAGE_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7781,7 +7781,192 @@ def render_fpi_landing_page_v100() -> None:
     cta1, cta2, cta3 = st.columns([1, 1.2, 1])
     with cta2:
         if st.button("🚀 Tovább az import / export oldalra", use_container_width=True, key="landing_go_to_app_v100"):
+            _fpi_set_page_v100("clean")
+
+
+
+
+def render_fpi_clean_workspace_v101() -> None:
+    """Tiszta import / szűrő / export oldal.
+    A régi teljes app továbbra is elérhető külön gombbal, de ez az oldal a klubdemóhoz és gyors használathoz letisztított flow.
+    """
+    _fpi_landing_css_v100()
+
+    top1, top2 = st.columns([5, 1.2])
+    with top1:
+        st.markdown(
+            """
+            <div class="fpi-landing-hero" style="padding:26px 30px;">
+                <div class="fpi-landing-kicker">IMPORT / SZŰRŐK / EXPORT</div>
+                <div class="fpi-landing-title" style="font-size:2.25rem;">Tiszta munkafelület: GPS feltöltésből azonnal riport.</div>
+                <div class="fpi-landing-sub">
+                    Itt csak a lényeg van: adatfeltöltés, meccskontextus, korosztály/szint referencia, hétválasztás és PDF export.
+                    A teljes, részletes dashboard külön oldalon marad.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with top2:
+        if st.button("← Nyitóoldal", use_container_width=True, key="clean_back_landing_v101"):
+            _fpi_set_page_v100("landing")
+        if st.button("⚙️ Teljes app", use_container_width=True, key="clean_go_full_app_v101"):
             _fpi_set_page_v100("app")
+
+    st.markdown("### 1. Adatfeltöltés")
+    up1, up2 = st.columns([2, 1])
+    with up1:
+        uploaded_clean = st.file_uploader("GPS / terhelési Excel feltöltése", type=["xlsx", "xls"], key="clean_gps_upload_v101")
+    with up2:
+        use_demo_clean = st.toggle("Mintaadat használata", value=uploaded_clean is None, key="clean_use_demo_v101")
+        template_bytes_clean = create_sample_input_template_bytes()
+        if template_bytes_clean is not None:
+            st.download_button(
+                "⬇️ Excel sablon",
+                data=template_bytes_clean,
+                file_name="performance_input_sablon.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="clean_template_download_v101",
+            )
+
+    raw_df_clean = None
+    selected_sheet_clean = "Mintaadat"
+    if uploaded_clean is None and not use_demo_clean:
+        st.info("Tölts fel Excel fájlt, vagy kapcsold be a mintaadatot.")
+        st.stop()
+
+    if use_demo_clean and uploaded_clean is None:
+        raw_df_clean = build_demo_performance_data()
+    else:
+        try:
+            sheets_clean = prepare_uploaded_sheets(read_excel_all(uploaded_clean))
+            sheet_names_clean = list(sheets_clean.keys())
+            selected_sheet_clean = st.selectbox("Munkalap", sheet_names_clean, index=0, key="clean_sheet_select_v101")
+            raw_df_clean = sheets_clean[selected_sheet_clean]
+        except Exception as e:
+            st.error(f"Nem sikerült beolvasni az Excelt: {e}")
+            st.stop()
+
+    st.markdown("### 2. Kontextus és szűrők")
+    df_clean, mapping_clean, missing_clean = standardize_dataframe(raw_df_clean)
+    if missing_clean:
+        st.warning("A gyors munkafelület nem tudta automatikusan felismerni az összes kötelező oszlopot. Nyisd meg a teljes appot a Smart Mapperhez.")
+        st.write("Hiányzó mezők:", ", ".join(missing_clean))
+        if st.button("Smart Mapper megnyitása a teljes appban", key="clean_open_full_mapper_v101"):
+            _fpi_set_page_v100("app")
+        st.stop()
+
+    df_clean = add_position_group(df_clean)
+    if df_clean.empty or "week" not in df_clean.columns:
+        st.warning("Nincs elemzésre alkalmas hétadat.")
+        st.stop()
+
+    weeks_clean = sorted(df_clean["week"].dropna().astype(str).unique().tolist(), key=_fpi_week_sort_key_v99)
+    players_clean = sorted(df_clean["player_name"].dropna().astype(str).unique().tolist()) if "player_name" in df_clean.columns else []
+    session_types_clean = sorted(df_clean["session_type"].dropna().astype(str).unique().tolist()) if "session_type" in df_clean.columns else []
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        opponent_clean = st.text_input("Ellenfél", value=st.session_state.get("fpi_match_opponent_v94", ""), key="clean_opponent_v101")
+    with c2:
+        match_date_clean = st.date_input("Meccsnap", value=st.session_state.get("fpi_match_date_v94", pd.Timestamp.today().date()), key="clean_match_date_v101")
+    with c3:
+        ref_profile_clean = st.selectbox("Korosztály / szint", list(FPI_REFERENCE_PROFILES_V97.keys()), index=0, key="clean_ref_profile_v101")
+    with c4:
+        week_type_clean = st.selectbox(
+            "Heti típus",
+            ["Edző által nem megadva", "Tanuló hét", "Terhelő hét", "Meccsre frissítő hét", "Regeneráló hét", "Vegyes hét"],
+            index=0,
+            key="clean_week_type_v101",
+        )
+
+    match_week_clean = _fpi_iso_week_from_date_v94(match_date_clean)
+    default_idx_clean = weeks_clean.index(match_week_clean) if match_week_clean in weeks_clean else (len(weeks_clean)-1 if weeks_clean else 0)
+    f1, f2, f3 = st.columns([1.1, 1.2, 2])
+    with f1:
+        selected_week_clean = st.selectbox("Elemzett hét", weeks_clean, index=default_idx_clean, format_func=week_label_short, key="clean_week_v101")
+    with f2:
+        selected_playstyle_clean = st.selectbox("Játékmodell", list(PLAYSTYLE_OPTIONS.keys()), index=0, key="clean_playstyle_v101")
+    with f3:
+        selected_players_clean = st.multiselect("Játékosok", players_clean, default=players_clean, key="clean_players_v101")
+
+    st.session_state["fpi_match_opponent_v94"] = opponent_clean
+    st.session_state["fpi_match_date_v94"] = match_date_clean
+    st.session_state["fpi_match_context_v94"] = {
+        "opponent": opponent_clean.strip() if isinstance(opponent_clean, str) else "",
+        "match_date": match_date_clean,
+        "match_week": match_week_clean,
+        "today": pd.Timestamp.today().date(),
+        "today_week": _fpi_iso_week_from_date_v94(pd.Timestamp.today().date()),
+    }
+
+    # Coach context for references and microcycle
+    n_train_clean = st.number_input("Tervezett edzések száma a meccsig", min_value=0, max_value=8, value=4, step=1, key="clean_n_train_v101")
+    session_plan_clean = []
+    if n_train_clean:
+        with st.expander("Mikrociklus napok beállítása", expanded=False):
+            for i in range(int(n_train_clean)):
+                d1, d2, d3 = st.columns([1, 1.2, 3])
+                with d1:
+                    md_v = st.selectbox(f"Nap {i+1}", ["MD-6", "MD-5", "MD-4", "MD-3", "MD-2", "MD-1"], index=min(i,5), key=f"clean_md_day_v101_{i}")
+                with d2:
+                    typ_v = st.selectbox(f"Típus {i+1}", ["Edzés", "Pihenő", "Regeneráció", "Aktiváció", "Meccs"], index=0, key=f"clean_md_type_v101_{i}")
+                with d3:
+                    note_v = st.text_input(f"Edzői megjegyzés {i+1}", value="", key=f"clean_md_note_v101_{i}")
+                session_plan_clean.append({"md": md_v, "type": typ_v, "note": note_v})
+
+    st.session_state["fpi_coach_context_v97"] = {
+        "reference_profile": ref_profile_clean,
+        "coach_week_type": week_type_clean,
+        "session_plan": session_plan_clean,
+    }
+
+    week_context_clean = _fpi_week_context_df_v94(df_clean, match_date_clean)
+    warnings_clean = _fpi_match_week_warning_v94(df_clean, selected_week_clean, match_date_clean)
+    with st.expander("📅 Hét / meccsnap ellenőrzés", expanded=False):
+        st.markdown(f"**Mai hét:** {_fpi_iso_week_from_date_v94(pd.Timestamp.today().date())} | **Meccshét:** {match_week_clean} | **Kiválasztott hét:** {selected_week_clean}")
+        if not week_context_clean.empty:
+            st.dataframe(week_context_clean, use_container_width=True, hide_index=True)
+        for w in warnings_clean:
+            st.warning(w)
+
+    analysis_clean = df_clean[df_clean["player_name"].astype(str).isin(selected_players_clean)].copy() if selected_players_clean else df_clean.copy()
+
+    st.markdown("### 3. Gyors döntési kép")
+    try:
+        ctx_clean = _fpi_report_context(analysis_clean, selected_week_clean, selected_playstyle_clean)
+        readiness_clean = int(ctx_clean.get("readiness_score", 70) or 70)
+        risk_clean = ctx_clean.get("risk_df") if isinstance(ctx_clean.get("risk_df"), pd.DataFrame) else pd.DataFrame()
+        high_clean = int((risk_clean.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Magas").sum()) if not risk_clean.empty else 0
+        med_clean = int((risk_clean.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Közepes").sum()) if not risk_clean.empty else 0
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Readiness", f"{readiness_clean}/100", score_to_label(readiness_clean))
+        m2.metric("High risk", f"{high_clean} fő")
+        m3.metric("Medium risk", f"{med_clean} fő")
+        m4.metric("Referencia", ref_profile_clean)
+        conclusions_clean = _fpi_gps_only_conclusions_v99(ctx_clean, ctx_clean.get("priorities", []), readiness_clean, str(selected_week_clean), limit=5)
+        st.markdown("**GPS-only konklúziók**")
+        for i, c in enumerate(conclusions_clean, 1):
+            st.write(f"{i}. {c}")
+    except Exception as e:
+        st.warning(f"Gyors döntési kép nem készíthető: {e}")
+
+    st.markdown("### 4. Export")
+    e1, e2, e3 = st.columns(3)
+    safe_week_clean = _safe_filename_week(selected_week_clean)
+    with e1:
+        gps_pdf_clean = build_fpi_gps_only_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean)
+        if gps_pdf_clean is not None:
+            st.download_button("⬇️ GPS-only PDF", data=gps_pdf_clean, file_name=f"fpi_gps_only_report_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_gps_v101")
+    with e2:
+        exec_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="executive", tactical_context=None)
+        if exec_pdf_clean is not None:
+            st.download_button("⬇️ Executive Summary PDF", data=exec_pdf_clean, file_name=f"fpi_executive_summary_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_exec_v101")
+    with e3:
+        full_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="full", tactical_context=None)
+        if full_pdf_clean is not None:
+            st.download_button("⬇️ Full Report PDF", data=full_pdf_clean, file_name=f"fpi_full_report_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_full_v101")
 
 
 
@@ -7792,18 +7977,25 @@ def render_fpi_landing_page_v100() -> None:
 if "fpi_active_page_v100" not in st.session_state:
     st.session_state["fpi_active_page_v100"] = "landing"
 
-if st.session_state.get("fpi_active_page_v100") != "app":
+active_page_v101 = st.session_state.get("fpi_active_page_v100", "landing")
+if active_page_v101 == "landing":
     render_fpi_landing_page_v100()
+    st.stop()
+if active_page_v101 == "clean":
+    render_fpi_clean_workspace_v101()
     st.stop()
 
 render_fpi_hero()
 
-top_back_col, top_title_col = st.columns([1, 5])
+top_back_col, top_clean_col, top_title_col = st.columns([1, 1.2, 4.8])
 with top_back_col:
-    if st.button("← Vissza a nyitóoldalra", use_container_width=True, key="back_to_landing_v100"):
+    if st.button("← Nyitóoldal", use_container_width=True, key="back_to_landing_v100"):
         _fpi_set_page_v100("landing")
+with top_clean_col:
+    if st.button("↗ Tiszta oldal", use_container_width=True, key="full_to_clean_v101"):
+        _fpi_set_page_v100("clean")
 with top_title_col:
-    st.caption("Import / szűrők / korosztály-szint / Tactical Pro+ / export oldal")
+    st.caption("Teljes, részletes dashboard / Smart Mapper / Tactical Pro+ / haladó elemzések")
 
 with st.sidebar:
     render_license_panel()
