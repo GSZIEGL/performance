@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V091_UPLOAD_STATE_TRUTH_FIX_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V092_STABLE_PDF_UPLOAD_MANAGER_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5744,6 +5744,86 @@ def _fpi_clear_pdf_side_state_v91(side: str) -> None:
 def _fpi_has_current_pdf_upload_v91(files: List[object]) -> bool:
     return bool(files) and len(files or []) > 0
 
+def _fpi_pdf_upload_state_key_v92(side: str) -> str:
+    return f"tactical_pro_{side}_pdf_upload_manager_v92"
+
+def _fpi_set_pdf_upload_state_v92(side: str, files: List[object]) -> Dict[str, object]:
+    """Stabil PDF upload manager.
+    A file_uploader visszatérési értékét AZONNAL bytes + text formában tárolja.
+    Innentől a Tactical Pro+ és az export ugyanebből dolgozik.
+    """
+    state = {
+        "has_files": False,
+        "files": [],
+        "items": [],
+        "text": "",
+        "pages": [],
+        "chars": 0,
+        "page_count": 0,
+        "reader": "not_run",
+        "error": "",
+    }
+    if not files:
+        st.session_state[_fpi_pdf_upload_state_key_v92(side)] = state
+        _fpi_clear_pdf_side_state_v91(side)
+        return state
+
+    items = _fpi_uploaded_files_to_bytes_v88(files or [])
+    state["has_files"] = bool(items)
+    state["items"] = items
+    state["files"] = [x.get("name", "") for x in items]
+
+    if items:
+        try:
+            txt, pages = _fpi_tactical_app_combine_pdf_texts_v88(items)
+            state["text"] = txt or ""
+            state["pages"] = pages or []
+            state["chars"] = len(txt or "")
+            state["page_count"] = len([p for p in (pages or []) if p.get("has_text") or p.get("text")])
+            state["reader"] = "legacy_tactical_reader_v92"
+        except Exception as e:
+            state["error"] = f"legacy reader error: {e}"
+
+        if not state["text"]:
+            try:
+                wrappers = _fpi_restore_uploaded_file_wrappers_v88(items)
+                txt2, pages2 = _fpi_tactical_extract_pdf_text(wrappers)
+                state["text"] = txt2 or ""
+                state["pages"] = pages2 or []
+                state["chars"] = len(txt2 or "")
+                state["page_count"] = len([p for p in (pages2 or []) if p.get("has_text") or p.get("text")])
+                state["reader"] = "multi_reader_fallback_v92"
+            except Exception as e:
+                state["error"] = (state.get("error", "") + f" | fallback error: {e}").strip(" |")
+
+    st.session_state[_fpi_pdf_upload_state_key_v92(side)] = state
+
+    # Kompatibilitás a korábbi v88/v89 kulcsokkal
+    st.session_state[f"tactical_pro_{side}_pdf_bytes_v88"] = items
+    _fpi_store_current_pdf_text_v89(side, state["text"], state["pages"], items)
+    return state
+
+def _fpi_get_pdf_upload_state_v92(side: str) -> Dict[str, object]:
+    return st.session_state.get(_fpi_pdf_upload_state_key_v92(side)) or {
+        "has_files": False, "files": [], "items": [], "text": "", "pages": [],
+        "chars": 0, "page_count": 0, "reader": "missing", "error": ""
+    }
+
+def _fpi_pdf_uploader_v92(label: str, side: str, key: str):
+    """Izolált uploader: a widget key és a feldolgozó state külön van."""
+    files = st.file_uploader(label, type=["pdf"], accept_multiple_files=True, key=key)
+    state = _fpi_set_pdf_upload_state_v92(side, files or [])
+    if state.get("has_files"):
+        if state.get("chars", 0) > 0:
+            st.success(f"PDF OK: {len(state.get('files', []))} fájl, {state.get('page_count', 0)} oldal, {state.get('chars', 0)} karakter.")
+        else:
+            st.error(f"PDF feltöltve, de nincs kinyert szöveg. Reader: {state.get('reader')}. Hiba: {state.get('error') or 'n.a.'}")
+    else:
+        st.info("Nincs PDF feltöltve ebben a mezőben.")
+    return files, state
+
+
+
 
 
 
@@ -5762,15 +5842,17 @@ def _fpi_build_pdf_only_context_from_session_v87(gps_context: Dict[str, object])
     Először text-store, utána byte-store, utána UploadFile fallback.
     """
     try:
+        own_state_v92 = _fpi_get_pdf_upload_state_v92("own")
+        opp_state_v92 = _fpi_get_pdf_upload_state_v92("opp")
         own_store = _fpi_get_pdf_text_store_v89("own")
         opp_store = _fpi_get_pdf_text_store_v89("opp")
 
-        own_pdf_text = own_store.get("text", "") or ""
-        opp_pdf_text = opp_store.get("text", "") or ""
-        own_pdf_pages = own_store.get("pages", []) or []
-        opp_pdf_pages = opp_store.get("pages", []) or []
-        own_items = own_store.get("items", []) or []
-        opp_items = opp_store.get("items", []) or []
+        own_pdf_text = own_state_v92.get("text", "") or own_store.get("text", "") or ""
+        opp_pdf_text = opp_state_v92.get("text", "") or opp_store.get("text", "") or ""
+        own_pdf_pages = own_state_v92.get("pages", []) or own_store.get("pages", []) or []
+        opp_pdf_pages = opp_state_v92.get("pages", []) or opp_store.get("pages", []) or []
+        own_items = own_state_v92.get("items", []) or own_store.get("items", []) or []
+        opp_items = opp_state_v92.get("items", []) or opp_store.get("items", []) or []
 
         if not own_pdf_text:
             own_items = st.session_state.get("tactical_pro_own_pdf_bytes_v88") or _fpi_uploaded_files_to_bytes_v88(st.session_state.get("tactical_pro_own_pdfs") or [])
@@ -8867,31 +8949,24 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         own_col, opp_col = st.columns(2)
         with own_col:
             st.markdown("### Saját csapat")
-            own_pdfs = st.file_uploader("Saját taktikai PDF-ek", type=["pdf"], accept_multiple_files=True, key="tactical_pro_own_pdfs")
+            own_pdfs, own_pdf_state_v92 = _fpi_pdf_uploader_v92("Saját taktikai PDF-ek", "own", "tactical_pro_own_pdfs_v92")
             own_team_xlsx = st.file_uploader("Saját csapatstatisztika Excel", type=["xlsx", "xls"], key="tactical_pro_own_team_xlsx")
             own_player_xlsx = st.file_uploader("Saját játékosstatisztika Excel", type=["xlsx", "xls"], key="tactical_pro_own_player_xlsx")
         with opp_col:
             st.markdown("### Ellenfél")
-            opp_pdfs = st.file_uploader("Ellenfél taktikai PDF-ek", type=["pdf"], accept_multiple_files=True, key="tactical_pro_opp_pdfs")
+            opp_pdfs, opp_pdf_state_v92 = _fpi_pdf_uploader_v92("Ellenfél taktikai PDF-ek", "opp", "tactical_pro_opp_pdfs_v92")
             opp_team_xlsx = st.file_uploader("Ellenfél csapatstatisztika Excel", type=["xlsx", "xls"], key="tactical_pro_opp_team_xlsx")
             opp_player_xlsx = st.file_uploader("Ellenfél játékosstatisztika Excel", type=["xlsx", "xls"], key="tactical_pro_opp_player_xlsx")
 
         # V8.8: a PDF-eket azonnal byte-ként is eltároljuk, hogy exportkor ne vesszen el
         # a feltöltött fájlobjektum tartalma / ne legyen 0 oldalas PDF context.
-        if _fpi_has_current_pdf_upload_v91(own_pdfs):
-            st.session_state["tactical_pro_own_pdf_bytes_v88"] = _fpi_uploaded_files_to_bytes_v88(own_pdfs)
-        else:
-            _fpi_clear_pdf_side_state_v91("own")
-
-        if _fpi_has_current_pdf_upload_v91(opp_pdfs):
-            st.session_state["tactical_pro_opp_pdf_bytes_v88"] = _fpi_uploaded_files_to_bytes_v88(opp_pdfs)
-        else:
-            _fpi_clear_pdf_side_state_v91("opp")
+        # V9.2: PDF state-et már a _fpi_pdf_uploader_v92 kezeli.
+        # Nem írjuk felül / nem töröljük itt, mert ez okozhatta a 0 fájlos állapotot.
 
         st.caption("Tipp: a feltöltött fájl törléséhez használd a fájlnév melletti kis X-et. Ha nem látszik, ez a verzió javítja a kontrasztot. Teljes resethez frissítsd az oldalt vagy használd az alábbi gombot.")
         if st.button("🧹 Tactical feltöltések / mapping reset", key="tactical_pro_reset_upload_mapping"):
             for k in list(st.session_state.keys()):
-                if str(k).startswith(("own_team_tactical", "opp_team_tactical", "own_player_tactical", "opp_player_tactical", "tactical_pro_context", "tactical_pro_own_pdf_bytes_v88", "tactical_pro_opp_pdf_bytes_v88", "tactical_pro_own_pdf_text_store_v89", "tactical_pro_opp_pdf_text_store_v89")):
+                if str(k).startswith(("own_team_tactical", "opp_team_tactical", "own_player_tactical", "opp_player_tactical", "tactical_pro_context", "tactical_pro_own_pdf_bytes_v88", "tactical_pro_opp_pdf_bytes_v88", "tactical_pro_own_pdf_text_store_v89", "tactical_pro_opp_pdf_text_store_v89", "tactical_pro_own_pdf_upload_manager_v92", "tactical_pro_opp_pdf_upload_manager_v92")):
                     st.session_state.pop(k, None)
             st.success("A taktikai mapping/session állapot törölve. A fájlok törléséhez szükség esetén frissítsd az oldalt.")
 
@@ -8910,66 +8985,18 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         unsafe_allow_html=True,
     )
 
-    # V8.9: az aktuális UploadFile objektumokat közvetlenül, azonnal olvassuk ki.
-    # Nem session_state fájlobjektumból próbáljuk újranyitni exportkor.
-    own_pdf_text, own_pdf_pages, own_items_v89 = _fpi_tactical_app_combine_uploadfiles_v89(own_pdfs or [])
-    opp_pdf_text, opp_pdf_pages, opp_items_v89 = _fpi_tactical_app_combine_uploadfiles_v89(opp_pdfs or [])
+        # V9.2: minden PDF feldolgozás a stabil upload manager state-ből jön.
+    own_pdf_state_v92 = _fpi_get_pdf_upload_state_v92("own")
+    opp_pdf_state_v92 = _fpi_get_pdf_upload_state_v92("opp")
 
-    with st.expander("PDF RAW DEBUG – feltöltés és olvasás ellenőrzése", expanded=False):
-        st.write("own_pdfs type:", type(own_pdfs).__name__)
-        st.write("own_pdfs len:", len(own_pdfs or []))
-        st.write("opp_pdfs type:", type(opp_pdfs).__name__)
-        st.write("opp_pdfs len:", len(opp_pdfs or []))
+    own_pdf_text = own_pdf_state_v92.get("text", "")
+    opp_pdf_text = opp_pdf_state_v92.get("text", "")
+    own_pdf_pages = own_pdf_state_v92.get("pages", [])
+    opp_pdf_pages = opp_pdf_state_v92.get("pages", [])
 
-        def _debug_one_pdf_list(label, files):
-            for i, f in enumerate(files or []):
-                st.write(f"{label} PDF {i}", getattr(f, "name", None), type(f).__name__)
-                b = b""
-                try:
-                    b = f.getvalue()
-                    st.write("getvalue bytes:", len(b), b[:20])
-                except Exception as e:
-                    st.error(f"getvalue error: {e}")
-                if b:
-                    try:
-                        if pdfplumber is None:
-                            st.error("pdfplumber nincs importálva / nem elérhető ebben a környezetben.")
-                        else:
-                            with pdfplumber.open(io.BytesIO(b)) as pdf:
-                                st.write("pdfplumber pages:", len(pdf.pages))
-                                txt = pdf.pages[0].extract_text(x_tolerance=1, y_tolerance=3) or "" if len(pdf.pages) else ""
-                                st.write("first page chars:", len(txt))
-                                st.text(txt[:1200])
-                    except Exception as e:
-                        st.error(f"pdfplumber error: {e}")
+    own_pdf_uploaded = bool(own_pdf_state_v92.get("has_files"))
+    opp_pdf_uploaded = bool(opp_pdf_state_v92.get("has_files"))
 
-        _debug_one_pdf_list("SAJÁT", own_pdfs)
-        _debug_one_pdf_list("ELLENFÉL", opp_pdfs)
-
-        st.write("App reader saját karakter:", len(own_pdf_text or ""), "oldal:", len([p for p in own_pdf_pages if p.get("has_text") or p.get("text")]))
-        st.write("App reader ellenfél karakter:", len(opp_pdf_text or ""), "oldal:", len([p for p in opp_pdf_pages if p.get("has_text") or p.get("text")]))
-
-
-
-
-    # Multi-reader csak fallback.
-    if not own_pdf_text:
-        own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(own_pdfs or [])
-    if not opp_pdf_text:
-        opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
-
-    if _fpi_has_current_pdf_upload_v91(own_pdfs):
-        _fpi_store_current_pdf_text_v89("own", own_pdf_text, own_pdf_pages, own_items_v89)
-    else:
-        _fpi_clear_pdf_side_state_v91("own")
-
-    if _fpi_has_current_pdf_upload_v91(opp_pdfs):
-        _fpi_store_current_pdf_text_v89("opp", opp_pdf_text, opp_pdf_pages, opp_items_v89)
-    else:
-        _fpi_clear_pdf_side_state_v91("opp")
-
-    own_pdf_uploaded = _fpi_has_current_pdf_upload_v91(own_pdfs)
-    opp_pdf_uploaded = _fpi_has_current_pdf_upload_v91(opp_pdfs)
     own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": own_pdf_uploaded, "pdf_pages": len(own_pdf_pages)}
     opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": opp_pdf_uploaded, "pdf_pages": len(opp_pdf_pages)}
     own_pdf_insights["pdf_uploaded"] = own_pdf_uploaded
@@ -9021,7 +9048,7 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         f"ellenfél {len(opp_pdf_text or '')} karakter / {len([p for p in opp_pdf_pages if p.get('has_text') or p.get('text')])} oldal."
     )
     if not own_pdf_uploaded and not opp_pdf_uploaded:
-        st.warning("Jelenleg a Tactical Pro+ PDF file_uploader üres (0 fájl). Ezért a PDF-parser nem tud futni. Töltsd fel újra a saját/ellenfél PDF-et ebben a modulban, majd az exportot ezután generáld.")
+        st.warning("Jelenleg a Tactical Pro+ PDF feltöltő üres (0 fájl). A V9.2-ben a PDF feltöltés külön stabil managerrel fut; töltsd fel újra a PDF-et itt, és azonnal látnod kell a PDF OK sort.")
 
     if own_pdf_uploaded and not own_pdf_text:
         st.warning("Saját PDF feltöltve, de nem sikerült szöveget kinyerni belőle. Valószínűleg képalapú/scannelt PDF, ezért a taktikai témák nem jelennek meg.")
