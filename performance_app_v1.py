@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V098_REFERENCE_RECURSION_FIX_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V100_LANDING_PAGE_IMPORT_EXPORT_FLOW_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7160,6 +7160,186 @@ def _fpi_gps_only_md_plan_v97(ctx: Dict[str, object], readiness: int, priorities
     return _fpi_gps_only_md_plan_v95(ctx, readiness, priorities, week)
 
 
+
+# =========================================================
+# V9.9 - GPS-only Mikrociklus AI Planner v2 + KPI doboz szövegfix
+# =========================================================
+
+def _fpi_short_week_type_v99(label: object) -> str:
+    s = str(label or "").strip()
+    mapping = {
+        "Edző által nem megadva": "Nincs megadva",
+        "Tanuló hét": "Tanuló",
+        "Terhelő hét": "Terhelő",
+        "Meccsre frissítő hét": "Frissítő",
+        "Regeneráló hét": "Regeneráló",
+        "Vegyes hét": "Vegyes",
+    }
+    return mapping.get(s, s[:16] if len(s) > 16 else s)
+
+def _fpi_week_sort_key_v99(w: object) -> Tuple[int, int, str]:
+    s = str(w)
+    m = re.search(r"(\d{4})-W(\d{1,2})", s)
+    if m:
+        return (int(m.group(1)), int(m.group(2)), s)
+    return (0, 0, s)
+
+def _fpi_previous_weeks_v99(df: pd.DataFrame, week: str, n: int = 4) -> List[str]:
+    if df is None or df.empty or "week" not in df.columns:
+        return []
+    weeks = sorted([str(x) for x in df["week"].dropna().unique()], key=_fpi_week_sort_key_v99)
+    if str(week) not in weeks:
+        return weeks[-n:]
+    idx = weeks.index(str(week))
+    return weeks[max(0, idx-n):idx]
+
+def _fpi_week_team_totals_v99(df: pd.DataFrame, weeks: List[str]) -> pd.DataFrame:
+    if df is None or df.empty or "week" not in df.columns:
+        return pd.DataFrame()
+    d = df[df["week"].astype(str).isin([str(w) for w in weeks])].copy()
+    if d.empty:
+        return pd.DataFrame()
+    metrics = [c for c in ["total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts", "training_load"] if c in d.columns]
+    if not metrics:
+        return pd.DataFrame()
+    for c in metrics:
+        d[c] = pd.to_numeric(d[c], errors="coerce").fillna(0)
+    out = d.groupby("week", as_index=False)[metrics].sum()
+    out["_sort"] = out["week"].apply(_fpi_week_sort_key_v99)
+    out = out.sort_values("_sort").drop(columns=["_sort"])
+    return out
+
+def _fpi_trend_label_v99(values: List[float]) -> str:
+    vals = [float(v or 0) for v in values if v is not None]
+    if len(vals) < 2:
+        return "nincs trend"
+    first = vals[0]
+    last = vals[-1]
+    if first <= 0 and last <= 0:
+        return "nincs adat"
+    pct = (last - first) / max(abs(first), 1) * 100
+    if pct > 20:
+        return "emelkedő"
+    if pct < -20:
+        return "csökkenő"
+    return "stabil"
+
+def _fpi_gps_trend_summary_v99(ctx: Dict[str, object], week: str) -> Dict[str, object]:
+    df = ctx.get("df")
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return {"weeks": [], "signals": [], "totals": pd.DataFrame()}
+    prev = _fpi_previous_weeks_v99(df, week, n=4)
+    all_weeks = prev + [str(week)]
+    totals = _fpi_week_team_totals_v99(df, all_weeks)
+    signals = []
+    if not totals.empty:
+        for metric, label in [
+            ("total_distance", "volumen"),
+            ("hsr_distance", "HSR"),
+            ("sprint_distance", "sprint táv"),
+            ("sprints", "sprint count"),
+            ("high_efforts", "High Efforts"),
+            ("training_load", "Load"),
+        ]:
+            if metric in totals.columns:
+                tr = _fpi_trend_label_v99(totals[metric].tolist())
+                if tr in ["emelkedő", "csökkenő"]:
+                    signals.append(f"{label}: {tr} trend az utolsó {len(totals)} hétben")
+    return {"weeks": all_weeks, "signals": signals[:6], "totals": totals}
+
+def _fpi_gps_only_md_plan_v99(ctx: Dict[str, object], readiness: int, priorities: List[dict], week: str) -> List[Tuple[str, str, str]]:
+    """GPS-only Mikrociklus AI Planner v2.
+    Figyelembe veszi:
+    - edzői hét típust
+    - edző által megadott edzésszámot / MD napokat
+    - aktuális heti referenciaarányokat
+    - előző 4 hét trendjét
+    - readiness és játékosrisk jelzéseket
+    """
+    coach_week = str(_fpi_get_coach_context_v97().get("coach_week_type") or "Edző által nem megadva")
+    coach_plan = _fpi_session_plan_v97()
+    trend = _fpi_gps_trend_summary_v99(ctx, week)
+    trend_txt = "; ".join(trend.get("signals", [])[:2]) if trend.get("signals") else "nincs erős 4 hetes trend"
+    base = _fpi_gps_only_md_plan_v95(ctx, readiness, priorities, week)
+
+    # hét típus szerinti globális irány
+    week_low = coach_week.lower()
+    if "regener" in week_low:
+        default_focus = ("Regeneráló fókusz", f"Edzői hét típus: regeneráló hét. Trend: {trend_txt}.")
+    elif "friss" in week_low:
+        default_focus = ("Frissítő fókusz", f"Meccsre frissítés, readiness megtartás. Trend: {trend_txt}.")
+    elif "terhel" in week_low:
+        default_focus = ("Terhelő fókusz", f"Edzői hét típus: terhelő hét. A terhelést a GPS referenciazónákhoz igazítsd. Trend: {trend_txt}.")
+    elif "tanul" in week_low:
+        default_focus = ("Tanuló hét", f"Edzői hét típus: tanuló hét. Alacsonyabb fizikai kockázat mellett technikai/tanulási fókusz. Trend: {trend_txt}.")
+    else:
+        default_focus = ("GPS-alapú fókusz", f"Readiness, referenciaarányok és trend alapján. Trend: {trend_txt}.")
+
+    if coach_plan:
+        # Adott MD-struktúrát megtartjuk, csak a tartalmat szabjuk GPS-adatokra.
+        base_focus = _fpi_gps_only_conclusions_v95(ctx, priorities, readiness, week, limit=6)
+        rows = []
+        train_i = 0
+        for item in coach_plan:
+            md = item.get("md", "MD?")
+            kind = item.get("type", "Edzés")
+            note = item.get("note", "")
+            k = str(kind).lower()
+            if k.startswith("pihen"):
+                rows.append((md, "Pihenő / regeneráció", note or f"Tervezett pihenőnap. {trend_txt}."))
+            elif "regener" in k:
+                rows.append((md, "Regeneráció", note or f"Visszarendezés, alacsony neuromuszkuláris terhelés. {trend_txt}."))
+            elif "aktiv" in k:
+                rows.append((md, "Aktiváció", note or "Rövid gyorsasági/reakció inger, fárasztás nélkül."))
+            elif "meccs" in k:
+                rows.append((md, "Meccsnap", note or "A hét célja erre a napra friss állapotot biztosítani."))
+            else:
+                # edzésnap: base plan + trend + week type
+                if base_focus:
+                    focus = base_focus[min(train_i, len(base_focus)-1)]
+                elif train_i < len(base):
+                    focus = base[train_i][2]
+                else:
+                    focus = default_focus[1]
+                if note:
+                    focus = note
+                rows.append((md, default_focus[0] if train_i == 0 else str(kind), focus))
+                train_i += 1
+        return rows[:8]
+
+    # Ha nincs megadott edzésstruktúra, akkor v95 terv, de hét típus / trend szerint átfogalmazva
+    if "regener" in week_low and readiness < 70:
+        return [
+            ("MD-4", "Regeneráció + alacsony volumen", f"Edzői regeneráló hét. {trend_txt}."),
+            ("MD-3", "Rövid minőségi sebességinger", "Csak expozíció, nem mennyiségi sprintmunka."),
+            ("MD-2", "Frissítés + egyéni risk kontroll", "Játékosmonitoring, HSR/sprint halmozás nélkül."),
+            ("MD-1", "Aktiváció", "Rövid döntési és mozgásgyorsasági inger."),
+        ]
+    if "tanul" in week_low:
+        return [
+            ("MD-4", "Közepes volumen + tanulási blokk", f"Technikai/taktikai tanulás fizikai túlterhelés nélkül. {trend_txt}."),
+            ("MD-3", "Kontrollált HSR/sprint expozíció", "A sebességinger megmarad, de nem ez a fő terhelési cél."),
+            ("MD-2", "Alacsony-közepes intenzitás", "Tanulási ismétlések, frissesség megtartása."),
+            ("MD-1", "Aktiváció", "Rövid, tiszta, frissítő inger."),
+        ]
+    return base
+
+def _fpi_gps_only_conclusions_v99(ctx: Dict[str, object], priorities: List[dict], readiness: int, week: str, limit: int = 6) -> List[str]:
+    out = _fpi_gps_only_conclusions_v95(ctx, priorities, readiness, week, limit=limit)
+    trend = _fpi_gps_trend_summary_v99(ctx, week)
+    if trend.get("signals"):
+        out.append("4 hetes trend: " + "; ".join(trend.get("signals", [])[:3]) + ".")
+    coach_week = _fpi_get_coach_context_v97().get("coach_week_type")
+    if coach_week and coach_week != "Edző által nem megadva":
+        out.append(f"Edzői hét típus: {coach_week}. A mikrociklus ezt a keretet veszi alapul, nem automatikusan nevezi el a hetet.")
+    uniq, seen = [], set()
+    for x in out:
+        y = _fpi_clean_sentence_v82(x, 190)
+        if y and y not in seen:
+            uniq.append(y); seen.add(y)
+    return uniq[:limit]
+
+
 def build_fpi_gps_only_pdf_bytes(
     data: pd.DataFrame,
     selected_week: Optional[str] = None,
@@ -7186,8 +7366,8 @@ def build_fpi_gps_only_pdf_bytes(
     weekly = ctx.get("weekly") if isinstance(ctx.get("weekly"), pd.DataFrame) else pd.DataFrame()
     player_week = ctx.get("player_week") if isinstance(ctx.get("player_week"), pd.DataFrame) else pd.DataFrame()
     periodization_type = _fpi_periodization_label_v97(ctx)
-    conclusions = _fpi_gps_only_conclusions_v95(ctx, priorities, readiness, str(week), limit=6)
-    md_plan = _fpi_gps_only_md_plan_v97(ctx, readiness, priorities, str(week))
+    conclusions = _fpi_gps_only_conclusions_v99(ctx, priorities, readiness, str(week), limit=6)
+    md_plan = _fpi_gps_only_md_plan_v99(ctx, readiness, priorities, str(week))
     ratio_df = _fpi_match_ratio_reference_df_v97(df, str(week))
 
     font_name, font_bold = _register_pdf_font()
@@ -7237,9 +7417,9 @@ def build_fpi_gps_only_pdf_bytes(
 
     def kpi(label, value, note, color="#1E3A8A"):
         ps1 = ParagraphStyle("KPI1"+label, parent=body, fontName=font_bold, fontSize=8, leading=9, textColor=colors.white)
-        ps2 = ParagraphStyle("KPI2"+label, parent=body, fontName=font_bold, fontSize=16, leading=18, textColor=colors.white)
-        ps3 = ParagraphStyle("KPI3"+label, parent=body, fontName=font_name, fontSize=6.6, leading=7.8, textColor=colors.white)
-        t = Table([[Paragraph(pdf_safe_text(label), ps1)], [Paragraph(pdf_safe_text(value), ps2)], [Paragraph(pdf_safe_text(note), ps3)]], colWidths=[5.45*cm])
+        ps2 = ParagraphStyle("KPI2"+label, parent=body, fontName=font_bold, fontSize=12.5, leading=14.5, textColor=colors.white)
+        ps3 = ParagraphStyle("KPI3"+label, parent=body, fontName=font_name, fontSize=6.4, leading=7.6, textColor=colors.white)
+        t = Table([[Paragraph(pdf_safe_text(label), ps1)], [Paragraph(pdf_safe_text(value), ps2)], [Paragraph(pdf_safe_text(note), ps3)]], colWidths=[5.45*cm], rowHeights=[0.50*cm, 0.72*cm, 0.48*cm])
         t.setStyle(TableStyle([
             ("BACKGROUND", (0,0), (-1,-1), colors.HexColor(color)),
             ("BOX", (0,0), (-1,-1), 0.4, colors.white),
@@ -7262,7 +7442,7 @@ def build_fpi_gps_only_pdf_bytes(
     med_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Közepes").sum()) if not risk_df.empty else 0
     story.append(Table([[
         kpi("READINESS", f"{readiness}/100", score_to_label(readiness), "#166534" if readiness >= 75 else "#1E3A8A" if readiness >= 60 else "#991B1B"),
-        kpi("PERIODIZÁCIÓ", str(periodization_type)[:18], "heti terhelési karakter", "#0F172A"),
+        kpi("PERIODIZÁCIÓ", _fpi_short_week_type_v99(periodization_type), "edzői hét típus", "#0F172A"),
         kpi("HIGH RISK", f"{high_risk} fő", "egyéni kontroll", "#7F1D1D" if high_risk else "#166534"),
         kpi("MEDIUM RISK", f"{med_risk} fő", "figyelendő", "#92400E" if med_risk else "#166534"),
         kpi("FORRÁS", "GPS only", "nincs taktikai input", "#0369A1"),
@@ -7299,7 +7479,26 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(tbl(md_rows, [3.2*cm, 9.2*cm, 15.3*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
     story.append(Spacer(1, 0.22*cm))
 
-    story.append(section("4. Heti csapat GPS profil", "#E0F2FE"))
+    trend_v99 = _fpi_gps_trend_summary_v99(ctx, str(week))
+    if isinstance(trend_v99.get("totals"), pd.DataFrame) and not trend_v99.get("totals").empty:
+        story.append(section("4. Előző hetek trendje – mikrociklus alapja", "#ECFDF5"))
+        tr = [[P("Hét", head), P("Volumen", head), P("HSR", head), P("Sprint táv", head), P("Sprint db", head), P("High Eff.", head), P("Load", head)]]
+        for _, r in trend_v99.get("totals").tail(5).iterrows():
+            tr.append([
+                P(str(r.get("week","")), small),
+                P(_fpi_fmt_thousands_v97(r.get("total_distance",0)), small),
+                P(_fpi_fmt_thousands_v97(r.get("hsr_distance",0)), small),
+                P(_fpi_fmt_thousands_v97(r.get("sprint_distance",0)), small),
+                P(_fpi_fmt_thousands_v97(r.get("sprints",0)), small),
+                P(_fpi_fmt_thousands_v97(r.get("high_efforts",0)), small),
+                P(_fpi_fmt_thousands_v97(r.get("training_load",0)), small),
+            ])
+        story.append(tbl(tr, [3.2*cm, 4.0*cm, 3.7*cm, 4.0*cm, 3.3*cm, 4.0*cm, 3.5*cm], header_bg="#047857", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
+        if trend_v99.get("signals"):
+            story.append(P("Trendjelzések: " + "; ".join(trend_v99.get("signals", [])[:4]) + ".", small))
+        story.append(Spacer(1, 0.22*cm))
+
+    story.append(section("5. Heti csapat GPS profil", "#E0F2FE"))
     wk = weekly.copy()
     if not wk.empty and "week" in wk.columns:
         wk = wk[wk["week"].astype(str) == str(week)].copy()
@@ -7322,7 +7521,7 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(tbl(gps_rows, [3.0*cm, 3.2*cm, 2.5*cm, 2.6*cm, 3.0*cm, 3.0*cm, 2.5*cm, 2.8*cm, 2.8*cm], header_bg="#0369A1"))
 
     story.append(Spacer(1, 0.22*cm))
-    story.append(section("5. Játékosszintű monitoring", "#FEE2E2"))
+    story.append(section("6. Játékosszintű monitoring", "#FEE2E2"))
     risk_rows = [[P("Játékos", head), P("Szint", head), P("Miért fontos?", head)]]
     if risk_df is not None and not risk_df.empty:
         player_col = "Játékos" if "Játékos" in risk_df.columns else "player_name" if "player_name" in risk_df.columns else risk_df.columns[0]
@@ -7339,7 +7538,7 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(tbl(risk_rows, [6.5*cm, 4.0*cm, 17.2*cm], header_bg="#7F1D1D", row_bgs=[colors.white, colors.HexColor("#FEF2F2")]))
 
     story.append(PageBreak())
-    story.append(section("6. Fogalmak röviden", "#DCFCE7"))
+    story.append(section("7. Fogalmak röviden", "#DCFCE7"))
     expl = [[P("Fogalom", head), P("Jelentés", head)]]
     expl.append([P("Volumen", small), P("Összmunka: például teljes táv, edzésidő, load vagy heti összterhelés.", small)])
     expl.append([P("HSR", small), P("High Speed Running: nagy sebességű futás, általában kb. 19,8–20 km/h felett. Nem feltétlen maximális sprint.", small)])
@@ -7374,50 +7573,169 @@ def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool
     label = "MINTA RIPORT / Demo FC U19 – GPS + Tactical" if include_tactical else "MINTA RIPORT / Demo FC U19 – GPS only"
     return build_fpi_product_pdf_bytes(demo_df, latest, "Pressing", report_type=report_type, demo_label=label, tactical_context=tactical_ctx)
 
-# -----------------------------------------------------------------------------
-# UI
-# -----------------------------------------------------------------------------
-render_fpi_hero()
 
+# =========================================================
+# V10.0 - Landing page + import/export workflow
+# =========================================================
 
-sample_full_pdf_bytes = build_fpi_sample_pdf_bytes("full", include_tactical=True)
-sample_exec_pdf_bytes = build_fpi_sample_pdf_bytes("executive", include_tactical=True)
-sample_gps_only_pdf_bytes = build_fpi_gps_only_sample_pdf_bytes()
-with st.container():
+def _fpi_set_page_v100(page: str) -> None:
+    st.session_state["fpi_active_page_v100"] = page
+    try:
+        st.rerun()
+    except Exception:
+        pass
+
+def _fpi_landing_css_v100() -> None:
     st.markdown(
         """
-        <div class="export-panel">
-            <h3 style="margin-top:0;">📄 Minta riportok klubdemóhoz</h3>
-            <p style="color:#e0f2fe;">
-                Két riport marad: Executive Summary és Full Report. A minta ugyanazt a struktúrát használja,
-                mint az éles export, csak demo adatokkal.
-            </p>
+        <style>
+        .fpi-landing-hero {
+            border-radius: 30px;
+            padding: 34px 38px;
+            background: linear-gradient(135deg, #07111f 0%, #0f2a44 46%, #123d66 100%);
+            border: 1px solid rgba(255,255,255,.16);
+            box-shadow: 0 24px 70px rgba(2, 6, 23, .25);
+            color: white;
+            margin-bottom: 22px;
+        }
+        .fpi-landing-kicker {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(14,165,233,.18);
+            border: 1px solid rgba(125,211,252,.35);
+            color: #bae6fd;
+            font-weight: 800;
+            letter-spacing: .03em;
+            font-size: .86rem;
+            margin-bottom: 14px;
+        }
+        .fpi-landing-title {
+            font-size: 3.0rem;
+            line-height: 1.04;
+            font-weight: 900;
+            margin: 0 0 14px 0;
+        }
+        .fpi-landing-sub {
+            font-size: 1.08rem;
+            line-height: 1.55;
+            color: #dbeafe;
+            max-width: 980px;
+        }
+        .fpi-decision-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 14px;
+            margin-top: 24px;
+        }
+        .fpi-decision-card {
+            background: rgba(255,255,255,.08);
+            border: 1px solid rgba(255,255,255,.15);
+            border-radius: 18px;
+            padding: 16px;
+            min-height: 132px;
+        }
+        .fpi-decision-card b {
+            display:block;
+            color:#fff;
+            font-size:1.0rem;
+            margin-bottom:8px;
+        }
+        .fpi-decision-card span {
+            color:#cbd5e1;
+            font-size:.92rem;
+            line-height:1.42;
+        }
+        .fpi-mode-card {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 22px;
+            padding: 22px;
+            box-shadow: 0 12px 30px rgba(15,23,42,.08);
+            min-height: 230px;
+        }
+        .fpi-mode-card h3 {margin:0 0 8px 0; color:#0f172a;}
+        .fpi-mode-card p {color:#475569; line-height:1.45;}
+        .fpi-flow-step {
+            border-radius: 18px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 14px 16px;
+            height: 100%;
+        }
+        .fpi-flow-step b {color:#0f172a;}
+        .fpi-flow-step div {color:#64748b; font-size:.92rem; margin-top:5px;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def render_fpi_landing_page_v100() -> None:
+    _fpi_landing_css_v100()
+    st.markdown(
+        """
+        <div class="fpi-landing-hero">
+            <div class="fpi-landing-kicker">FOOTBALL PERFORMANCE INTELLIGENCE</div>
+            <div class="fpi-landing-title">Egy döntési oldal a stábnak: GPS, readiness, risk és meccshét-tervezés.</div>
+            <div class="fpi-landing-sub">
+                Az FPI a GPS-adatokból nem csak dashboardot készít, hanem edzői döntéselőkészítést:
+                megmutatja, mi történt a héten, hol van kockázat, milyen mikrociklus illik a meccsnaphoz,
+                és mikor kell HSR, sprint, High Effort vagy regenerációs fókusz.
+            </div>
+            <div class="fpi-decision-grid">
+                <div class="fpi-decision-card"><b>1. Heti döntési kép</b><span>Readiness, high/medium risk, periodizáció és azonnali stábüzenetek.</span></div>
+                <div class="fpi-decision-card"><b>2. GPS-only riport</b><span>Ha csak GPS van, akkor is külön, használható erőnléti riport és mikrociklus készül.</span></div>
+                <div class="fpi-decision-card"><b>3. Tactical Pro+</b><span>Ha van taktikai PDF/Excel, a rendszer összeköti a GPS-t a meccstervvel.</span></div>
+                <div class="fpi-decision-card"><b>4. Export csomag</b><span>Minta és éles PDF-ek vezetőedzőnek, erőnléti stábnak és teljes stábnak.</span></div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    c_a, c_b, c_c = st.columns(3)
-    with c_a:
-        if sample_exec_pdf_bytes is not None:
-            st.download_button(
-                "⬇️ Minta Executive Summary",
-                data=sample_exec_pdf_bytes,
-                file_name="fpi_minta_executive_summary.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                key="download_sample_exec_v83",
-            )
-    with c_b:
-        if sample_full_pdf_bytes is not None:
-            st.download_button(
-                "⬇️ Minta Full Report",
-                data=sample_full_pdf_bytes,
-                file_name="fpi_minta_full_report.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                key="download_sample_full_v83",
-            )
-    with c_c:
+
+    st.markdown("### Mit kap a klub?")
+    a, b, c = st.columns(3)
+    with a:
+        st.markdown(
+            """
+            <div class="fpi-mode-card">
+                <h3>GPS-only mód</h3>
+                <p>Csak GPS Excelből is használható riport: terhelési arányok, trendek, játékos risk, HSR/sprint expozíció és edzői mikrociklus.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with b:
+        st.markdown(
+            """
+            <div class="fpi-mode-card">
+                <h3>GPS + Tactical mód</h3>
+                <p>A GPS megmutatja, bírja-e a csapat a meccstervet; a taktikai input megmutatja, mire kell készülni.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c:
+        st.markdown(
+            """
+            <div class="fpi-mode-card">
+                <h3>Stáb-kompatibilis export</h3>
+                <p>Rövid, döntésközpontú PDF-ek, nem nyers dashboardok. A cél: gyorsabban jobb heti döntést hozni.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("### Minta riportok")
+    try:
+        sample_exec_pdf_bytes = build_fpi_sample_pdf_bytes("executive", include_tactical=True)
+        sample_full_pdf_bytes = build_fpi_sample_pdf_bytes("full", include_tactical=True)
+        sample_gps_only_pdf_bytes = build_fpi_gps_only_sample_pdf_bytes()
+    except Exception:
+        sample_exec_pdf_bytes = sample_full_pdf_bytes = sample_gps_only_pdf_bytes = None
+
+    s1, s2, s3 = st.columns(3)
+    with s1:
         if sample_gps_only_pdf_bytes is not None:
             st.download_button(
                 "⬇️ Minta GPS-only Report",
@@ -7425,12 +7743,67 @@ with st.container():
                 file_name="fpi_minta_gps_only_report.pdf",
                 mime="application/pdf",
                 use_container_width=True,
-                key="download_sample_gps_only_v96",
+                key="landing_download_sample_gps_only_v100",
             )
-    if sample_exec_pdf_bytes is None and sample_full_pdf_bytes is None and sample_gps_only_pdf_bytes is None:
-        st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
+    with s2:
+        if sample_exec_pdf_bytes is not None:
+            st.download_button(
+                "⬇️ Minta Executive Summary",
+                data=sample_exec_pdf_bytes,
+                file_name="fpi_minta_executive_summary.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="landing_download_sample_exec_v100",
+            )
+    with s3:
+        if sample_full_pdf_bytes is not None:
+            st.download_button(
+                "⬇️ Minta Full Report",
+                data=sample_full_pdf_bytes,
+                file_name="fpi_minta_full_report.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="landing_download_sample_full_v100",
+            )
+
+    st.markdown("### Hogyan működik?")
+    f1, f2, f3, f4 = st.columns(4)
+    for col, title, desc in [
+        (f1, "1. Import", "GPS Excel, opcionálisan taktikai PDF/Excel."),
+        (f2, "2. Kontextus", "Meccsnap, ellenfél, korosztály/szint, edzésszám."),
+        (f3, "3. Elemzés", "Readiness, risk, trend, referencia és mikrociklus."),
+        (f4, "4. Export", "GPS-only, Executive Summary vagy Full Report PDF."),
+    ]:
+        with col:
+            st.markdown(f'<div class="fpi-flow-step"><b>{title}</b><div>{desc}</div></div>', unsafe_allow_html=True)
+
+    st.markdown("")
+    cta1, cta2, cta3 = st.columns([1, 1.2, 1])
+    with cta2:
+        if st.button("🚀 Tovább az import / export oldalra", use_container_width=True, key="landing_go_to_app_v100"):
+            _fpi_set_page_v100("app")
 
 
+
+# -----------------------------------------------------------------------------
+# UI
+# -----------------------------------------------------------------------------
+# Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
+if "fpi_active_page_v100" not in st.session_state:
+    st.session_state["fpi_active_page_v100"] = "landing"
+
+if st.session_state.get("fpi_active_page_v100") != "app":
+    render_fpi_landing_page_v100()
+    st.stop()
+
+render_fpi_hero()
+
+top_back_col, top_title_col = st.columns([1, 5])
+with top_back_col:
+    if st.button("← Vissza a nyitóoldalra", use_container_width=True, key="back_to_landing_v100"):
+        _fpi_set_page_v100("landing")
+with top_title_col:
+    st.caption("Import / szűrők / korosztály-szint / Tactical Pro+ / export oldal")
 
 with st.sidebar:
     render_license_panel()
