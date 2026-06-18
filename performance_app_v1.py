@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V086_DIRECT_PDF_PIPELINE_FIX_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V087_FORCED_EXPORT_PDF_CONTEXT_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5489,8 +5489,8 @@ def _fpi_top_tactical_messages_v82(tactical_context: Optional[Dict[str, object]]
         return ["Nincs taktikai input, GPS-alapú heti terv."]
     out = []
     findings = tactical_context.get("tactical_findings") or []
-    pdf_first = [f for f in findings if str(f.get("Téma", "")).startswith("PDF:")]
-    other = [f for f in findings if not str(f.get("Téma", "")).startswith("PDF:")]
+    pdf_first = [f for f in findings if str(f.get("Téma", "")).lower().startswith("pdf") or "PDF" in str(f.get("Forrás", ""))]
+    other = [f for f in findings if f not in pdf_first]
     for f in (pdf_first + other)[:limit]:
         theme = str(f.get("Téma", "")).strip()
         decision = str(f.get("Edzői következtetés", "")).strip()
@@ -5586,6 +5586,80 @@ def _fpi_plan_why_v82(tactical_context: Optional[Dict[str, object]], readiness: 
         return f"GPS alapján: readiness {readiness}/100, taktikai input nélkül."
     msgs = _fpi_top_tactical_messages_v82(tactical_context, 2)
     return _fpi_clean_sentence_v82("; ".join(msgs), 260)
+
+
+
+def _fpi_uploaded_file_signature_v87(files: List[object]) -> str:
+    parts = []
+    for f in files or []:
+        try:
+            b = f.getvalue()
+            parts.append(f"{getattr(f, 'name', 'pdf')}:{len(b)}:{hashlib.md5(b[:200000]).hexdigest()}")
+        except Exception:
+            parts.append(str(getattr(f, "name", "unknown")))
+    return "|".join(parts)
+
+def _fpi_build_pdf_only_context_from_session_v87(gps_context: Dict[str, object]) -> Optional[Dict[str, object]]:
+    """Export előtti kényszerített PDF context rebuild.
+    Cél: ne történhessen meg, hogy a feltöltött PDF látszik, de a riport egy régi session_contextből dolgozik.
+    """
+    try:
+        own_pdfs = st.session_state.get("tactical_pro_own_pdfs") or []
+        opp_pdfs = st.session_state.get("tactical_pro_opp_pdfs") or []
+    except Exception:
+        return None
+    if not own_pdfs and not opp_pdfs:
+        return None
+
+    own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(own_pdfs or [])
+    opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
+    own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "sportsbase_findings": [], "sportsbase_lines": []}
+    opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "sportsbase_findings": [], "sportsbase_lines": []}
+
+    own_pdf_insights["pdf_uploaded"] = bool(own_pdfs)
+    own_pdf_insights["pdf_pages"] = len([p for p in own_pdf_pages if isinstance(p.get("page"), int)])
+    own_pdf_insights["upload_signature"] = _fpi_uploaded_file_signature_v87(own_pdfs)
+    opp_pdf_insights["pdf_uploaded"] = bool(opp_pdfs)
+    opp_pdf_insights["pdf_pages"] = len([p for p in opp_pdf_pages if isinstance(p.get("page"), int)])
+    opp_pdf_insights["upload_signature"] = _fpi_uploaded_file_signature_v87(opp_pdfs)
+
+    merged_pdf_insights = _merge_tactical_pdf_insights(own_pdf_insights, opp_pdf_insights)
+
+    # Meglévő Excel-kontekstukat megőrizzük, ha vannak; a PDF-et viszont frissen számoljuk.
+    previous = st.session_state.get("tactical_pro_context") or {}
+    own_team_metrics = previous.get("own_team_metrics", {}) or {}
+    opp_team_metrics = previous.get("opp_team_metrics", {}) or {}
+
+    has_excel = bool(own_team_metrics or opp_team_metrics or previous.get("has_own_player_excel") or previous.get("has_opp_player_excel"))
+    level_label = "Full Intelligence – GPS + frissített taktikai PDF + meglévő Excel context" if has_excel else "GPS + frissített taktikai PDF"
+
+    tactical_ctx_for_plan = {
+        "analysis_level_label": level_label,
+        "pdf_insights": merged_pdf_insights,
+        "team_metrics": opp_team_metrics,
+        "player_tables": {},
+        "own": {"pdf_insights": own_pdf_insights, "team_metrics": own_team_metrics, "player_tables": {}},
+        "opponent": {"pdf_insights": opp_pdf_insights, "team_metrics": opp_team_metrics, "player_tables": {}},
+    }
+    plan = _fpi_build_adaptive_match_training_plan(gps_context or {}, tactical_ctx_for_plan)
+    ctx = _build_tactical_executive_context(gps_context or {}, tactical_ctx_for_plan, plan)
+    ctx["forced_pdf_rebuild"] = True
+    ctx["forced_pdf_signature"] = (own_pdf_insights.get("upload_signature", "") + "||" + opp_pdf_insights.get("upload_signature", ""))
+    return ctx
+
+def _fpi_context_for_export_v87(gps_context: Dict[str, object]) -> Optional[Dict[str, object]]:
+    """Riportexporthoz mindig próbálunk friss PDF-contextet építeni.
+    Ha sikerül és talált PDF-sorokat/következtetéseket, azt használjuk.
+    """
+    fresh = _fpi_build_pdf_only_context_from_session_v87(gps_context or {})
+    old = st.session_state.get("tactical_pro_context") if "st" in globals() else None
+    if fresh:
+        fresh_score = int(fresh.get("pdf_direct_findings_count", 0) or 0) + int(fresh.get("pdf_direct_lines_count", 0) or 0)
+        old_score = int((old or {}).get("pdf_direct_findings_count", 0) or 0) + int((old or {}).get("pdf_direct_lines_count", 0) or 0)
+        if fresh_score > 0 or fresh_score >= old_score:
+            st.session_state["tactical_pro_context"] = fresh
+            return fresh
+    return old
 
 
 def build_fpi_product_pdf_bytes(
@@ -5965,11 +6039,21 @@ def build_fpi_product_pdf_bytes(
         story.append(Spacer(1, 0.20*cm))
 
         if tactical_context.get("tactical_findings"):
-            story.append(section("Taktikai Excel + PDF alapján képzett következtetések", "#FEF3C7"))
+            story.append(section("Taktikai PDF + Excel alapján képzett következtetések", "#FEF3C7"))
             f_rows = [[P("Téma", head), P("Bizonyíték", head), P("Edzői következtetés", head)]]
-            for f in (tactical_context.get("tactical_findings") or [])[:6]:
+            pdf_findings = [f for f in (tactical_context.get("tactical_findings") or []) if str(f.get("Téma", "")).lower().startswith("pdf")]
+            other_findings = [f for f in (tactical_context.get("tactical_findings") or []) if f not in pdf_findings]
+            for f in (pdf_findings + other_findings)[:8]:
                 f_rows.append([P(str(f.get("Téma", "")), small), P(str(f.get("Bizonyíték", "")), small), P(str(f.get("Edzői következtetés", "")), small)])
             story.append(table(f_rows, [6.0*cm, 9.2*cm, 12.5*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"), colors.white]))
+            story.append(Spacer(1, 0.20*cm))
+
+        if tactical_context.get("pdf_provider_lines"):
+            story.append(section("PDF-ből konkrétan kinyert adatok", "#E0F2FE"))
+            p_rows = [[P("#", head), P("Kinyert PDF adat", head)]]
+            for i, line in enumerate((tactical_context.get("pdf_provider_lines") or [])[:10], 1):
+                p_rows.append([P(str(i), small), P(str(line), small)])
+            story.append(table(p_rows, [1.0*cm, 26.7*cm], header_bg="#0369A1", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
             story.append(Spacer(1, 0.20*cm))
 
         story.append(section("Mit jelent ez magyarul?", "#DCFCE7"))
@@ -5999,7 +6083,10 @@ def build_fpi_product_pdf_bytes(
             if out:
                 return ", ".join([x for x in out if x])
             if uploaded:
-                return "PDF feltöltve; ha nincs téma, nézd meg a PDF diagnosztikát és a gyakori szavakat"
+                lines = tactical_context.get("pdf_provider_lines", []) if "tactical_context" in locals() else []
+                if lines:
+                    return "; ".join([str(x) for x in lines[:3]])
+                return "PDF feltöltve, de nincs konkrét kinyert taktikai adat ebben a nézetben."
             return "n.a."
         rows = [
             [P("Oldal", head), P("Felismert PDF témák", head), P("Csapat KPI-k", head)],
@@ -8023,7 +8110,7 @@ def _fpi_tactical_pdf_insights(text: str) -> Dict[str, object]:
     sportsbase_metrics = _fpi_extract_sportsbase_team_stats_v85(raw_text)
     sportsbase_lines = _fpi_sportsbase_metric_lines_v85(sportsbase_metrics)
     sportsbase_findings = _fpi_sportsbase_findings_v85(sportsbase_metrics, pdf_role="PDF")
-    direct_pdf = _fpi_direct_pdf_extract_v86(raw_text, role="PDF direkt")
+    direct_pdf = _fpi_direct_pdf_extract_v86(raw_text, role="PDF")
     # Ha a SportsBase parser nem fogott eleget, a direkt parser sorait és következtetéseit is használjuk.
     sportsbase_lines = list(dict.fromkeys((sportsbase_lines or []) + (direct_pdf.get("lines") or [])))
     sportsbase_findings = (sportsbase_findings or []) + (direct_pdf.get("findings") or [])
@@ -8229,8 +8316,11 @@ def _fpi_build_excel_driven_tactical_findings_v79(
     # V8.5: Provider-aware PDF findings elsőbbség, ha konkrét KPI-t nyertünk ki a PDF-ből.
     pdf_topics = pdf_topics or []
     for row in pdf_topics:
-        if isinstance(row, dict) and row.get("Forrás") in ["Saját PDF", "Ellenfél PDF"] and row.get("Edzői következtetés"):
-            add(str(row.get("Téma", "PDF taktikai adat")), str(row.get("Bizonyíték", "")), str(row.get("Edzői következtetés", "")), str(row.get("Prioritás", "Közepes")))
+        if isinstance(row, dict) and row.get("Edzői következtetés"):
+            tema = str(row.get("Téma", "PDF taktikai adat"))
+            if not tema.startswith("PDF"):
+                tema = "PDF: " + tema
+            add(tema, str(row.get("Bizonyíték", "")), str(row.get("Edzői következtetés", "")), str(row.get("Prioritás", "Közepes")))
 
     # V8.4: PDF insightok elsőként kerülnek be, ha a régi Tactical engine konkrét témát/sort talált.
     for row in pdf_topics[:8]:
@@ -8704,9 +8794,11 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         st.caption("Nincs még értelmezhető taktikai következtetés. Ellenőrizd a Team/Player Excel mappinget.")
 
     if executive_ctx.get("pdf_provider_lines"):
-        with st.expander("✅ PDF-ből konkrétan kinyert SportsBase / provider adatok", expanded=False):
+        with st.expander("✅ PDF-ből konkrétan kinyert SportsBase / provider adatok", expanded=True):
             for line in executive_ctx.get("pdf_provider_lines", [])[:16]:
                 st.markdown(f"- {line}")
+    elif own_pdf_uploaded or opp_pdf_uploaded:
+        st.error("PDF fel van töltve, de ebből a verzióból sem jött ki konkrét provider/KPI adat. Ilyenkor a PDF diagnosztikában az első 2000 karaktert és a reader-részleteket kell nézni.")
 
     st.markdown("### 3. Saját vs ellenfél gyors összevetés")
     comp_rows = [
@@ -8949,7 +9041,7 @@ with tab_exec:
             selected_week,
             selected_playstyle,
             report_type="executive",
-            tactical_context=st.session_state.get("tactical_pro_context"),
+            tactical_context=_fpi_context_for_export_v87(tactical_gps_context if "tactical_gps_context" in globals() else {}),
         )
         if exec_pack_pdf is not None:
             st.download_button(
@@ -8966,7 +9058,7 @@ with tab_exec:
             selected_week,
             selected_playstyle,
             report_type="full",
-            tactical_context=st.session_state.get("tactical_pro_context"),
+            tactical_context=_fpi_context_for_export_v87(tactical_gps_context if "tactical_gps_context" in globals() else {}),
         )
         if full_pack_pdf is not None:
             st.download_button(
@@ -9273,7 +9365,7 @@ with tab_export:
                 selected_week,
                 selected_playstyle,
                 report_type="executive",
-                tactical_context=st.session_state.get("tactical_pro_context"),
+                tactical_context=_fpi_context_for_export_v87(tactical_gps_context if "tactical_gps_context" in globals() else {}),
             )
             if exec_pack_pdf_export is not None:
                 st.download_button("⬇️ Executive Summary PDF", data=exec_pack_pdf_export, file_name=f"fpi_executive_summary_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_exec_v83_export")
@@ -9283,7 +9375,7 @@ with tab_export:
                 selected_week,
                 selected_playstyle,
                 report_type="full",
-                tactical_context=st.session_state.get("tactical_pro_context"),
+                tactical_context=_fpi_context_for_export_v87(tactical_gps_context if "tactical_gps_context" in globals() else {}),
             )
             if full_pack_pdf_export is not None:
                 st.download_button("⬇️ Full Report PDF", data=full_pack_pdf_export, file_name=f"fpi_full_report_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_full_v83_export")
