@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V096_GPS_ONLY_REPORT_PACK_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V097_COACH_CONTEXT_REFERENCES_TRAINING_DAYS_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -6096,7 +6096,7 @@ def _fpi_event_count_v93(df: pd.DataFrame) -> int:
 
 def _fpi_match_ratio_reference_df_v93(df: pd.DataFrame, week: str) -> pd.DataFrame:
     """Edzés összes / meccs összes és edzésátlag / meccs arány.
-    NB2 felnőtt referenciazónával.
+    választott referenciazónával.
     """
     if df is None or df.empty:
         return pd.DataFrame()
@@ -6313,7 +6313,7 @@ def _fpi_gps_week_metrics_v95(ctx: Dict[str, object], week: str) -> Dict[str, ob
         d = d[d["week"].astype(str) == str(week)].copy()
     if d.empty:
         return {}
-    ratio = _fpi_match_ratio_reference_df_v93(d, week)
+    ratio = _fpi_match_ratio_reference_df_v97(d, week)
     ratio_map = {}
     if isinstance(ratio, pd.DataFrame) and not ratio.empty:
         for _, r in ratio.iterrows():
@@ -6366,7 +6366,7 @@ def _fpi_gps_only_md_plan_v95(ctx: Dict[str, object], readiness: int, priorities
     """Taktikai input nélkül is GPS-alapú, változó mikrociklus.
     Nem fix sablon: a readiness, HSR/sprint/High Effort arányok és priority-k alapján állít fókuszt.
     """
-    ratio = _fpi_match_ratio_reference_df_v93(ctx.get("df", pd.DataFrame()), week)
+    ratio = _fpi_match_ratio_reference_df_v97(ctx.get("df", pd.DataFrame()), week)
     low_hsr = low_sprint = high_vol = high_eff = False
     if isinstance(ratio, pd.DataFrame) and not ratio.empty:
         for _, r in ratio.iterrows():
@@ -6604,14 +6604,14 @@ def build_fpi_product_pdf_bytes(
             for _, r in wk.head(8).iterrows():
                 rows.append([
                     P(r.get("session_type", ""), small),
-                    P(f"{r.get('total_distance', 0):.0f}", small),
-                    P(f"{r.get('duration_min', 0):.0f}", small),
+                    P(_fpi_fmt_thousands_v97(r.get("total_distance", 0)), small),
+                    P(_fpi_fmt_thousands_v97(r.get("duration_min", 0)), small),
                     P(f"{r.get('distance_per_min', 0):.1f}", small),
-                    P(f"{r.get('hsr_distance', 0):.0f}", small),
-                    P(f"{r.get('sprint_distance', 0):.0f}", small),
-                    P(f"{r.get('sprints', 0):.0f}", small),
-                    P(f"{r.get('high_efforts', 0):.0f}", small),
-                    P(f"{r.get('training_load', 0):.0f}", small),
+                    P(_fpi_fmt_thousands_v97(r.get("hsr_distance", 0)), small),
+                    P(_fpi_fmt_thousands_v97(r.get("sprint_distance", 0)), small),
+                    P(_fpi_fmt_thousands_v97(r.get("sprints", 0)), small),
+                    P(_fpi_fmt_thousands_v97(r.get("high_efforts", 0)), small),
+                    P(_fpi_fmt_thousands_v97(r.get("training_load", 0)), small),
                     P(f"{r.get('max_speed', 0):.1f}", small),
                 ])
         else:
@@ -6619,7 +6619,7 @@ def build_fpi_product_pdf_bytes(
         story.append(table(rows, [2.8*cm, 3.0*cm, 2.5*cm, 2.5*cm, 3.0*cm, 3.0*cm, 2.4*cm, 2.5*cm, 2.5*cm, 3.0*cm], header_bg="#0369A1"))
         story.append(Spacer(1, 0.25*cm))
 
-        ratio_df = _fpi_match_ratio_reference_df_v93(df, week)
+        ratio_df = _fpi_match_ratio_reference_df_v97(df, week)
         story.append(section("Edzés–meccs arányok – százalékos referencia NB2 felnőtt szinthez", "#FEF3C7"))
         if ratio_df.empty:
             story.append(Paragraph(pdf_safe_text("Nincs elég adat az edzés/meccs százalékos referencia kiszámításához. Legalább egy edzés és egy meccs típusú esemény szükséges."), body))
@@ -6628,7 +6628,7 @@ def build_fpi_product_pdf_bytes(
                 P("Mutató", head),
                 P("Edzés heti összes / meccs", head),
                 P("Edzésátlag / meccs", head),
-                P("NB2 felnőtt referencia", head),
+                P("választott referencia", head),
                 P("Értékelés", head),
             ]]
             for _, r in ratio_df.iterrows():
@@ -6662,7 +6662,7 @@ def build_fpi_product_pdf_bytes(
         if not pw.empty:
             for _, r in pw.head(12).iterrows():
                 interp = "Magas heti load – regeneráció kontroll" if float(r.get("training_load", 0) or 0) >= float(pw.get("training_load", pd.Series([0])).quantile(.75) or 0) else "Normál monitoring"
-                prows.append([P(r.get("player_name", ""), small), P(f"{r.get('total_distance',0):.0f}", small), P(f"{r.get('hsr_distance',0):.0f}", small), P(f"{r.get('sprint_distance',0):.0f}", small), P(f"{r.get('high_efforts',0):.0f}", small), P(f"{r.get('training_load',0):.0f}", small), P(f"{r.get('max_speed',0):.1f}", small), P(interp, small)])
+                prows.append([P(r.get("player_name", ""), small), P(_fpi_fmt_thousands_v97(r.get("total_distance",0)), small), P(_fpi_fmt_thousands_v97(r.get("hsr_distance",0)), small), P(_fpi_fmt_thousands_v97(r.get("sprint_distance",0)), small), P(_fpi_fmt_thousands_v97(r.get("high_efforts",0)), small), P(_fpi_fmt_thousands_v97(r.get("training_load",0)), small), P(f"{r.get('max_speed',0):.1f}", small), P(interp, small)])
         else:
             prows.append([P("Nincs játékosszintű adat", small)] + [P("—", small)]*7)
         story.append(table(prows, [4.5*cm, 3.0*cm, 3.0*cm, 3.0*cm, 3.0*cm, 3.0*cm, 2.8*cm, 5.4*cm], header_bg="#0F766E", row_bgs=[colors.white, colors.HexColor("#F0FDFA")]))
@@ -7022,6 +7022,143 @@ def _build_demo_tactical_context() -> Dict[str, object]:
 
 
 
+
+# =========================================================
+# V9.7 - Edzői kontextus: korosztály/szint referencia + edzésnapok
+# =========================================================
+
+FPI_REFERENCE_PROFILES_V97 = {
+    "Felnőtt NB2": {
+        "label": "Felnőtt NB2",
+        "ranges": {
+            "total_distance": ("280–420%", "60–100%", 280, 420, 60, 100),
+            "hsr_distance": ("150–250%", "35–70%", 150, 250, 35, 70),
+            "sprint_distance": ("100–200%", "25–55%", 100, 200, 25, 55),
+            "sprints": ("100–220%", "25–60%", 100, 220, 25, 60),
+            "high_efforts": ("150–280%", "35–75%", 150, 280, 35, 75),
+        },
+    },
+    "Felnőtt NB3 / megyei felnőtt": {
+        "label": "Felnőtt NB3 / megyei felnőtt",
+        "ranges": {
+            "total_distance": ("240–380%", "55–95%", 240, 380, 55, 95),
+            "hsr_distance": ("120–220%", "30–65%", 120, 220, 30, 65),
+            "sprint_distance": ("80–170%", "20–50%", 80, 170, 20, 50),
+            "sprints": ("80–190%", "20–55%", 80, 190, 20, 55),
+            "high_efforts": ("120–250%", "30–70%", 120, 250, 30, 70),
+        },
+    },
+    "Akadémia U19": {
+        "label": "Akadémia U19",
+        "ranges": {
+            "total_distance": ("260–400%", "55–95%", 260, 400, 55, 95),
+            "hsr_distance": ("140–240%", "30–65%", 140, 240, 30, 65),
+            "sprint_distance": ("90–190%", "20–50%", 90, 190, 20, 50),
+            "sprints": ("90–210%", "20–55%", 90, 210, 20, 55),
+            "high_efforts": ("140–270%", "30–70%", 140, 270, 30, 70),
+        },
+    },
+    "Akadémia U17": {
+        "label": "Akadémia U17",
+        "ranges": {
+            "total_distance": ("230–360%", "50–90%", 230, 360, 50, 90),
+            "hsr_distance": ("110–210%", "25–60%", 110, 210, 25, 60),
+            "sprint_distance": ("70–160%", "18–45%", 70, 160, 18, 45),
+            "sprints": ("80–180%", "20–50%", 80, 180, 20, 50),
+            "high_efforts": ("120–240%", "28–65%", 120, 240, 28, 65),
+        },
+    },
+    "Megyei / grassroots U13-U15": {
+        "label": "Megyei / grassroots U13-U15",
+        "ranges": {
+            "total_distance": ("180–320%", "45–85%", 180, 320, 45, 85),
+            "hsr_distance": ("70–170%", "18–50%", 70, 170, 18, 50),
+            "sprint_distance": ("40–120%", "10–35%", 40, 120, 10, 35),
+            "sprints": ("50–150%", "12–40%", 50, 150, 12, 40),
+            "high_efforts": ("80–200%", "20–55%", 80, 200, 20, 55),
+        },
+    },
+}
+
+def _fpi_fmt_thousands_v97(x: object) -> str:
+    try:
+        return f"{float(x):,.0f}".replace(",", " ")
+    except Exception:
+        return "0"
+
+def _fpi_get_coach_context_v97() -> Dict[str, object]:
+    return st.session_state.get("fpi_coach_context_v97", {}) or {}
+
+def _fpi_reference_profile_v97() -> Dict[str, object]:
+    ctx = _fpi_get_coach_context_v97()
+    key = ctx.get("reference_profile", "Felnőtt NB2")
+    return FPI_REFERENCE_PROFILES_V97.get(key, FPI_REFERENCE_PROFILES_V97["Felnőtt NB2"])
+
+def _fpi_session_plan_v97() -> List[Dict[str, object]]:
+    return _fpi_get_coach_context_v97().get("session_plan", []) or []
+
+def _fpi_periodization_label_v97(ctx: Dict[str, object]) -> str:
+    return _fpi_get_coach_context_v97().get("coach_week_type") or "Edző által nem megadva"
+
+def _fpi_reference_ranges_for_metric_v97(metric: str) -> Tuple[str, str, float, float, float, float]:
+    prof = _fpi_reference_profile_v97()
+    return prof.get("ranges", {}).get(metric, FPI_REFERENCE_PROFILES_V97["Felnőtt NB2"]["ranges"].get(metric, ("n.a.", "n.a.", 0, 9999, 0, 9999)))
+
+def _fpi_ratio_status_v97(value: Optional[float], low: float, high: float) -> str:
+    return _fpi_ratio_status_v93(value, low, high)
+
+def _fpi_match_ratio_reference_df_v97(df: pd.DataFrame, week: str) -> pd.DataFrame:
+    base = _fpi_match_ratio_reference_df_v97(df, week)
+    if base is None or base.empty:
+        return base
+    # profile-specific overrides
+    metric_by_label = {v["label"]: k for k, v in FPI_NB2_ADULT_REFERENCE_RANGES_V93.items()}
+    rows = []
+    for _, r in base.iterrows():
+        rr = r.to_dict()
+        metric = metric_by_label.get(str(r.get("Mutató", "")))
+        if metric:
+            weekly_ref, avg_ref, low, high, avg_low, avg_high = _fpi_reference_ranges_for_metric_v97(metric)
+            weekly_pct = r.get("Edzés/heti meccs %")
+            avg_pct = r.get("Edzésátlag/meccs %")
+            rr["NB2 felnőtt heti ref."] = weekly_ref
+            rr["NB2 felnőtt edzésátlag ref."] = avg_ref
+            rr["Referencia profil"] = _fpi_reference_profile_v97().get("label", "Felnőtt NB2")
+            status_w = _fpi_ratio_status_v97(weekly_pct, low, high)
+            status_a = _fpi_ratio_status_v97(avg_pct, avg_low, avg_high)
+            if weekly_pct is None or pd.isna(weekly_pct):
+                rr["Értékelés"] = "Nincs meccs referencia vagy nincs értelmezhető adat."
+            elif status_w == "alacsony" and metric in ["hsr_distance", "sprint_distance", "sprints"]:
+                rr["Értékelés"] = f"A választott profilhoz képest alacsony lehet a heti sebesség/sprint inger. Profil: {rr['Referencia profil']}."
+            elif status_w == "magas":
+                rr["Értékelés"] = f"A választott profilhoz képest magas heti összterhelés; ellenőrizd a napokra bontást. Profil: {rr['Referencia profil']}."
+            elif status_w == "célzónában" and status_a == "célzónában":
+                rr["Értékelés"] = f"A heti összeg és az edzésátlag is a választott profil referenciazónájában van. Profil: {rr['Referencia profil']}."
+            else:
+                rr["Értékelés"] = f"Heti: {status_w}, edzésátlag: {status_a}. Profil: {rr['Referencia profil']}."
+        rows.append(rr)
+    return pd.DataFrame(rows)
+
+def _fpi_gps_only_md_plan_v97(ctx: Dict[str, object], readiness: int, priorities: List[dict], week: str) -> List[Tuple[str, str, str]]:
+    coach_plan = _fpi_session_plan_v97()
+    if coach_plan:
+        base_focus = _fpi_gps_only_conclusions_v95(ctx, priorities, readiness, week, limit=4)
+        rows = []
+        for item in coach_plan:
+            md = item.get("md", "MD?")
+            kind = item.get("type", "Edzés")
+            note = item.get("note", "")
+            if str(kind).lower().startswith("pihen"):
+                rows.append((md, "Pihenő / regeneráció", note or "Tervezett pihenőnap, readiness és frissesség megtartása."))
+            elif str(kind).lower().startswith("meccs"):
+                rows.append((md, "Meccsnap", note or "Mérkőzés: a heti terhelés célja erre a napra friss állapotot biztosítani."))
+            else:
+                focus = base_focus[min(len(rows), max(len(base_focus)-1, 0))] if base_focus else "GPS-alapú célzott edzés."
+                rows.append((md, str(kind), note or focus))
+        return rows[:7]
+    return _fpi_gps_only_md_plan_v95(ctx, readiness, priorities, week)
+
+
 def build_fpi_gps_only_pdf_bytes(
     data: pd.DataFrame,
     selected_week: Optional[str] = None,
@@ -7047,10 +7184,10 @@ def build_fpi_gps_only_pdf_bytes(
     risk_df = ctx.get("risk_df") if isinstance(ctx.get("risk_df"), pd.DataFrame) else pd.DataFrame()
     weekly = ctx.get("weekly") if isinstance(ctx.get("weekly"), pd.DataFrame) else pd.DataFrame()
     player_week = ctx.get("player_week") if isinstance(ctx.get("player_week"), pd.DataFrame) else pd.DataFrame()
-    periodization_type = ctx.get("periodization_type", "Nincs elég adat")
+    periodization_type = _fpi_periodization_label_v97(ctx)
     conclusions = _fpi_gps_only_conclusions_v95(ctx, priorities, readiness, str(week), limit=6)
-    md_plan = _fpi_gps_only_md_plan_v95(ctx, readiness, priorities, str(week))
-    ratio_df = _fpi_match_ratio_reference_df_v93(df, str(week))
+    md_plan = _fpi_gps_only_md_plan_v97(ctx, readiness, priorities, str(week))
+    ratio_df = _fpi_match_ratio_reference_df_v97(df, str(week))
 
     font_name, font_bold = _register_pdf_font()
     buffer = io.BytesIO()
@@ -7118,6 +7255,7 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(P("Football Performance Intelligence – GPS-only riport", title))
     story.append(P(f"{label_prefix}Hét: {format_week_label(str(week))} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
     story.append(P(_fpi_match_context_label_v94(), sub))
+    story.append(P(f"Referencia profil: {_fpi_reference_profile_v97().get('label', 'Felnőtt NB2')} | Heti típus: {_fpi_periodization_label_v97(ctx)}", sub))
     story.append(Spacer(1, 0.25*cm))
     high_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Magas").sum()) if not risk_df.empty else 0
     med_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Közepes").sum()) if not risk_df.empty else 0
@@ -7137,7 +7275,7 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(tbl(c_rows, [1.0*cm, 26.7*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
     story.append(Spacer(1, 0.22*cm))
 
-    story.append(section("2. Edzés–meccs arányok NB2 felnőtt referenciával", "#FEF3C7"))
+    story.append(section("2. Edzés–meccs arányok választott korosztály/szint referenciával", "#FEF3C7"))
     if ratio_df is None or ratio_df.empty:
         story.append(P("Nincs elég adat az edzés/meccs arányokhoz. Kell legalább egy edzés és egy meccs típusú esemény.", body))
     else:
@@ -7169,14 +7307,14 @@ def build_fpi_gps_only_pdf_bytes(
         for _, r in wk.head(10).iterrows():
             gps_rows.append([
                 P(r.get("session_type",""), small),
-                P(f"{r.get('total_distance',0):.0f}", small),
-                P(f"{r.get('duration_min',0):.0f}", small),
+                P(_fpi_fmt_thousands_v97(r.get("total_distance",0)), small),
+                P(_fpi_fmt_thousands_v97(r.get("duration_min",0)), small),
                 P(f"{r.get('distance_per_min',0):.1f}", small),
-                P(f"{r.get('hsr_distance',0):.0f}", small),
-                P(f"{r.get('sprint_distance',0):.0f}", small),
-                P(f"{r.get('sprints',0):.0f}", small),
-                P(f"{r.get('high_efforts',0):.0f}", small),
-                P(f"{r.get('training_load',0):.0f}", small),
+                P(_fpi_fmt_thousands_v97(r.get("hsr_distance",0)), small),
+                P(_fpi_fmt_thousands_v97(r.get("sprint_distance",0)), small),
+                P(_fpi_fmt_thousands_v97(r.get("sprints",0)), small),
+                P(_fpi_fmt_thousands_v97(r.get("high_efforts",0)), small),
+                P(_fpi_fmt_thousands_v97(r.get("training_load",0)), small),
             ])
     else:
         gps_rows.append([P("Nincs adat", small)] + [P("—", small)]*8)
@@ -7404,6 +7542,30 @@ with st.sidebar:
         "today_week": _fpi_iso_week_from_date_v94(today_v94),
     }
     st.caption(f"Mai hét: {_fpi_iso_week_from_date_v94(today_v94)} | Meccshét: {match_week_v94}")
+
+    st.header("Edzői kontextus / referencia")
+    ref_profile_v97 = st.selectbox("Korosztály / szint referencia", list(FPI_REFERENCE_PROFILES_V97.keys()), index=0)
+    coach_week_type_v97 = st.selectbox(
+        "Heti periodizáció típusa – edzői megadás",
+        ["Edző által nem megadva", "Tanuló hét", "Terhelő hét", "Meccsre frissítő hét", "Regeneráló hét", "Vegyes hét"],
+        index=0,
+    )
+    n_train_v97 = st.number_input("Tervezett edzések száma a meccsig", min_value=0, max_value=8, value=4, step=1)
+    session_plan_v97 = []
+    st.caption("Add meg, melyik napon van edzés/pihenő/meccs. Így a mikrociklus nem fix 4 edzésre épül.")
+    for i in range(int(n_train_v97)):
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            md_v = st.selectbox(f"Nap {i+1}", ["MD-6", "MD-5", "MD-4", "MD-3", "MD-2", "MD-1"], index=min(i,5), key=f"md_day_v97_{i}")
+        with c2:
+            typ_v = st.selectbox(f"Típus {i+1}", ["Edzés", "Pihenő", "Regeneráció", "Aktiváció", "Meccs"], index=0, key=f"md_type_v97_{i}")
+        note_v = st.text_input(f"Edzői megjegyzés {i+1}", value="", key=f"md_note_v97_{i}")
+        session_plan_v97.append({"md": md_v, "type": typ_v, "note": note_v})
+    st.session_state["fpi_coach_context_v97"] = {
+        "reference_profile": ref_profile_v97,
+        "coach_week_type": coach_week_type_v97,
+        "session_plan": session_plan_v97,
+    }
 
     st.header("Szűrők")
     default_week_idx_v94 = weeks.index(match_week_v94) if match_week_v94 in weeks else (len(weeks) - 1 if weeks else 0)
