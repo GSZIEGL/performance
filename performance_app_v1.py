@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V105_CLEAN_PDF_INSIGHTS_AND_MAPPING_FIX_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V106_CLEAN_SCOPE_FINAL_PATCH_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -8031,7 +8031,7 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
             opp_player_df, opp_player_mapping = _fpi_tactical_mapper_ui(opp_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "clean_opp_player_tactical", "Ellenfél játékos Excel")
             opp_player_tables = _fpi_tactical_parse_player_excel(opp_player_df, opp_player_mapping)
 
-        merged_pdf_insights = _merge_tactical_pdf_insights(own_pdf_insights, opp_pdf_insights)
+        merged_pdf_insights = _fpi_safe_merge_tactical_pdf_insights_v104(own_pdf_insights, opp_pdf_insights)
         tactical_ctx_for_plan = {
             "analysis_level_label": "Clean workspace – GPS + opcionális taktikai input",
             "pdf_insights": merged_pdf_insights,
@@ -8040,7 +8040,7 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
             "own": {"pdf_insights": own_pdf_insights, "team_metrics": own_team_metrics, "player_tables": own_player_tables},
             "opponent": {"pdf_insights": opp_pdf_insights, "team_metrics": opp_team_metrics, "player_tables": opp_player_tables},
         }
-        plan = _fpi_build_adaptive_match_training_plan(gps_context or {}, tactical_ctx_for_plan)
+        plan = _fpi_safe_build_adaptive_plan_v104(gps_context or {}, tactical_ctx_for_plan)
         executive_ctx = _fpi_safe_build_tactical_executive_context_v104(gps_context or {}, tactical_ctx_for_plan, plan)
         st.session_state["tactical_pro_context"] = executive_ctx
 
