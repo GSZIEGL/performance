@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V102_CLEAN_IMPORT_TACTICAL_MAPPING_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V103_LOGIN_LANDING_CLEAN_PDF_SCOPE_FIX_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7670,6 +7670,58 @@ def _fpi_landing_css_v100() -> None:
         unsafe_allow_html=True,
     )
 
+
+def render_landing_login_panel_v103() -> None:
+    """Főoldali belépő / Demo-Pro állapot panel."""
+    mode_label = "PRO" if is_pro_mode() else "DEMO"
+    mode_color = "#16A34A" if is_pro_mode() else "#2563EB"
+    lic = st.session_state.get("license_status", {}) or {}
+    club = lic.get("club_name") or lic.get("email") or ""
+
+    st.markdown(
+        f"""
+        <div style="border-radius:22px;padding:18px 20px;background:#ffffff;border:1px solid #e5e7eb;
+                    box-shadow:0 12px 28px rgba(15,23,42,.08);margin-bottom:18px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+                <div>
+                    <div style="font-size:.82rem;font-weight:900;color:#64748b;letter-spacing:.06em;">HOZZÁFÉRÉS</div>
+                    <div style="font-size:1.55rem;font-weight:900;color:#0f172a;margin-top:2px;">
+                        Aktuális mód: <span style="color:{mode_color};">{mode_label}</span>
+                    </div>
+                    <div style="color:#64748b;font-size:.95rem;margin-top:4px;">
+                        {"Pro hozzáférés aktív" if is_pro_mode() else f"Demo limit: max {DEMO_PLAYER_LIMIT} játékos · max {DEMO_WEEK_LIMIT} hét · max {DEMO_ROW_LIMIT} sor"}
+                        {(" · " + html.escape(str(club))) if club else ""}
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if is_pro_mode():
+        c1, c2 = st.columns([1, 4])
+        with c1:
+            if st.button("Kijelentkezés", use_container_width=True, key="landing_logout_license_v103"):
+                st.session_state.pop("license_status", None)
+                st.rerun()
+        return
+
+    with st.expander("🔐 Pro belépés / aktiválás", expanded=False):
+        email = st.text_input("E-mail", value=st.session_state.get("user_email", ""), placeholder="nev@klub.hu", key="landing_license_email_v103")
+        if email:
+            st.session_state["user_email"] = email
+        license_key = st.text_input("Aktiváló kód", type="password", help="A klubhoz kapott aktiváló kód.", key="landing_license_key_v103")
+        if st.button("Pro aktiválása", use_container_width=True, key="landing_activate_license_v103"):
+            result = validate_license_supabase(email, license_key)
+            if result.get("ok"):
+                st.session_state["license_status"] = result
+                st.success("Pro hozzáférés aktiválva.")
+                st.rerun()
+            else:
+                st.warning(result.get("message", "Sikertelen aktiválás."))
+
+
 def render_fpi_landing_page_v100() -> None:
     _fpi_landing_css_v100()
     st.markdown(
@@ -7692,6 +7744,8 @@ def render_fpi_landing_page_v100() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    render_landing_login_panel_v103()
 
     st.markdown("### Mit kap a klub?")
     a, b, c = st.columns(3)
@@ -7810,9 +7864,11 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
         st.markdown("#### Mapping / ellenőrzés")
         own_pdf_text, own_pdf_pages = _fpi_tactical_app_combine_pdf_texts_v88(st.session_state.get("tactical_pro_own_clean_pdf_bytes_v88", []))
         opp_pdf_text, opp_pdf_pages = _fpi_tactical_app_combine_pdf_texts_v88(st.session_state.get("tactical_pro_opp_clean_pdf_bytes_v88", []))
-        if not own_pdf_text:
+        # V10.3: a tiszta oldal a korai UI flow-ban fut, ezért a később definiált multi-reader
+        # nem mindig elérhető. Elsődlegesen a stabil PDF upload manager által eltárolt bytes/text dolgozik.
+        if not own_pdf_text and "_fpi_tactical_extract_pdf_text" in globals():
             own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(own_pdfs or [])
-        if not opp_pdf_text:
+        if not opp_pdf_text and "_fpi_tactical_extract_pdf_text" in globals():
             opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
 
         own_pdf_uploaded = bool(own_pdfs)
