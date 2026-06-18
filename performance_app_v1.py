@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V090_PDF_DEBUG_SCOPE_FIX_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V091_UPLOAD_STATE_TRUTH_FIX_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5731,6 +5731,21 @@ def _fpi_store_current_pdf_text_v89(side: str, text: str, pages: List[dict], ite
 def _fpi_get_pdf_text_store_v89(side: str) -> Dict[str, object]:
     return st.session_state.get(f"tactical_pro_{side}_pdf_text_store_v89") or {}
 
+def _fpi_clear_pdf_side_state_v91(side: str) -> None:
+    """Ha a file_uploader üres, ne maradjon bent régi PDF-context.
+    Ez javítja azt, hogy a riport 'PDF feltöltve'-t írt, miközben a widgetben len=0.
+    """
+    for key in [
+        f"tactical_pro_{side}_pdf_text_store_v89",
+        f"tactical_pro_{side}_pdf_bytes_v88",
+    ]:
+        st.session_state.pop(key, None)
+
+def _fpi_has_current_pdf_upload_v91(files: List[object]) -> bool:
+    return bool(files) and len(files or []) > 0
+
+
+
 
 def _fpi_uploaded_file_signature_v87(files: List[object]) -> str:
     parts = []
@@ -5840,6 +5855,28 @@ def _fpi_context_for_export_v87(gps_context: Dict[str, object]) -> Optional[Dict
     """
     fresh = _fpi_build_pdf_only_context_from_session_v87(gps_context or {})
     old = st.session_state.get("tactical_pro_context") if "st" in globals() else None
+
+    # V9.1: ha nincs aktuális PDF a widgetben és nincs text-store, ne használjunk régi PDF-es contextet.
+    try:
+        no_pdf_now = (
+            not st.session_state.get("tactical_pro_own_pdfs")
+            and not st.session_state.get("tactical_pro_opp_pdfs")
+            and not (_fpi_get_pdf_text_store_v89("own").get("text"))
+            and not (_fpi_get_pdf_text_store_v89("opp").get("text"))
+        )
+        if no_pdf_now and old:
+            old = dict(old)
+            old["has_own_pdf"] = False
+            old["has_opp_pdf"] = False
+            old["own_pdf_pages"] = 0
+            old["opp_pdf_pages"] = 0
+            old["own_pdf_chars"] = 0
+            old["opp_pdf_chars"] = 0
+            old["pdf_provider_lines"] = []
+            old["pdf_provider_findings"] = []
+    except Exception:
+        pass
+
     if fresh:
         fresh_score = int(fresh.get("pdf_direct_findings_count", 0) or 0) + int(fresh.get("pdf_direct_lines_count", 0) or 0)
         old_score = int((old or {}).get("pdf_direct_findings_count", 0) or 0) + int((old or {}).get("pdf_direct_lines_count", 0) or 0)
@@ -6277,7 +6314,7 @@ def build_fpi_product_pdf_bytes(
                 lines = tactical_context.get("pdf_provider_lines", []) if "tactical_context" in locals() else []
                 if lines:
                     return "; ".join([str(x) for x in lines[:3]])
-                return "PDF feltöltve, de nincs konkrét kinyert taktikai adat ebben a nézetben."
+                return "PDF státusz bizonytalan: nincs kinyert oldal/szöveg. Ellenőrizd, hogy a PDF ténylegesen fel van-e töltve a Tactical Pro+ PDF mezőbe."
             return "n.a."
         rows = [
             [P("Oldal", head), P("Felismert PDF témák", head), P("Csapat KPI-k", head)],
@@ -8841,8 +8878,15 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
 
         # V8.8: a PDF-eket azonnal byte-ként is eltároljuk, hogy exportkor ne vesszen el
         # a feltöltött fájlobjektum tartalma / ne legyen 0 oldalas PDF context.
-        st.session_state["tactical_pro_own_pdf_bytes_v88"] = _fpi_uploaded_files_to_bytes_v88(own_pdfs)
-        st.session_state["tactical_pro_opp_pdf_bytes_v88"] = _fpi_uploaded_files_to_bytes_v88(opp_pdfs)
+        if _fpi_has_current_pdf_upload_v91(own_pdfs):
+            st.session_state["tactical_pro_own_pdf_bytes_v88"] = _fpi_uploaded_files_to_bytes_v88(own_pdfs)
+        else:
+            _fpi_clear_pdf_side_state_v91("own")
+
+        if _fpi_has_current_pdf_upload_v91(opp_pdfs):
+            st.session_state["tactical_pro_opp_pdf_bytes_v88"] = _fpi_uploaded_files_to_bytes_v88(opp_pdfs)
+        else:
+            _fpi_clear_pdf_side_state_v91("opp")
 
         st.caption("Tipp: a feltöltött fájl törléséhez használd a fájlnév melletti kis X-et. Ha nem látszik, ez a verzió javítja a kontrasztot. Teljes resethez frissítsd az oldalt vagy használd az alábbi gombot.")
         if st.button("🧹 Tactical feltöltések / mapping reset", key="tactical_pro_reset_upload_mapping"):
@@ -8914,11 +8958,18 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     if not opp_pdf_text:
         opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
 
-    _fpi_store_current_pdf_text_v89("own", own_pdf_text, own_pdf_pages, own_items_v89)
-    _fpi_store_current_pdf_text_v89("opp", opp_pdf_text, opp_pdf_pages, opp_items_v89)
+    if _fpi_has_current_pdf_upload_v91(own_pdfs):
+        _fpi_store_current_pdf_text_v89("own", own_pdf_text, own_pdf_pages, own_items_v89)
+    else:
+        _fpi_clear_pdf_side_state_v91("own")
 
-    own_pdf_uploaded = bool(own_pdfs)
-    opp_pdf_uploaded = bool(opp_pdfs)
+    if _fpi_has_current_pdf_upload_v91(opp_pdfs):
+        _fpi_store_current_pdf_text_v89("opp", opp_pdf_text, opp_pdf_pages, opp_items_v89)
+    else:
+        _fpi_clear_pdf_side_state_v91("opp")
+
+    own_pdf_uploaded = _fpi_has_current_pdf_upload_v91(own_pdfs)
+    opp_pdf_uploaded = _fpi_has_current_pdf_upload_v91(opp_pdfs)
     own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": own_pdf_uploaded, "pdf_pages": len(own_pdf_pages)}
     opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": opp_pdf_uploaded, "pdf_pages": len(opp_pdf_pages)}
     own_pdf_insights["pdf_uploaded"] = own_pdf_uploaded
@@ -8969,6 +9020,8 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         f"PDF reader státusz: saját {len(own_pdf_text or '')} karakter / {len([p for p in own_pdf_pages if p.get('has_text') or p.get('text')])} oldal; "
         f"ellenfél {len(opp_pdf_text or '')} karakter / {len([p for p in opp_pdf_pages if p.get('has_text') or p.get('text')])} oldal."
     )
+    if not own_pdf_uploaded and not opp_pdf_uploaded:
+        st.warning("Jelenleg a Tactical Pro+ PDF file_uploader üres (0 fájl). Ezért a PDF-parser nem tud futni. Töltsd fel újra a saját/ellenfél PDF-et ebben a modulban, majd az exportot ezután generáld.")
 
     if own_pdf_uploaded and not own_pdf_text:
         st.warning("Saját PDF feltöltve, de nem sikerült szöveget kinyerni belőle. Valószínűleg képalapú/scannelt PDF, ezért a taktikai témák nem jelennek meg.")
