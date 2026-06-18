@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V079_EXCEL_DRIVEN_TACTICAL_CONCLUSIONS_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V080_EXECUTIVE_TACTICAL_FIRST_PAGE_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5389,6 +5389,62 @@ def _fpi_report_context(data: pd.DataFrame, selected_week: Optional[str] = None,
         return {"df": df, "selected_week": week, "error": str(exc)}
 
 
+
+def _fpi_pdf_tactical_source_status_v80(tactical_context: Optional[Dict[str, object]]) -> str:
+    if not tactical_context:
+        return "Nincs taktikai input – GPS-only riport."
+    own_pdf = bool(tactical_context.get("has_own_pdf"))
+    opp_pdf = bool(tactical_context.get("has_opp_pdf"))
+    own_topics = tactical_context.get("own_topics", []) or []
+    opp_topics = tactical_context.get("opp_topics", []) or []
+    excel_ok = bool(tactical_context.get("has_own_team_excel") or tactical_context.get("has_opp_team_excel") or tactical_context.get("has_own_player_excel") or tactical_context.get("has_opp_player_excel"))
+    if (own_topics or opp_topics) and excel_ok:
+        return "PDF + Excel együtt – a következtetésekben mindkettő szerepel."
+    if own_topics or opp_topics:
+        return "PDF-alapú taktikai jelzések – Excel nélkül vagy korlátozott Excel-adattal."
+    if (own_pdf or opp_pdf) and excel_ok:
+        return "PDF feltöltve, de nem adott erős tématalálatot; a taktikai következtetések főleg az Excelből készültek."
+    if excel_ok:
+        return "Taktikai Excel-alapú következtetések."
+    if own_pdf or opp_pdf:
+        return "PDF feltöltve, de nincs kinyert / felismert taktikai téma."
+    return "Nincs használható taktikai input."
+
+def _fpi_pdf_short_tactical_topics_v80(tactical_context: Optional[Dict[str, object]], limit: int = 3) -> str:
+    if not tactical_context:
+        return "n.a."
+    rows = []
+    for side, key in [("Saját", "own_topics"), ("Ellenfél", "opp_topics")]:
+        for r in (tactical_context.get(key, []) or [])[:limit]:
+            tema = str(r.get("Téma", "")).strip()
+            if tema:
+                rows.append(f"{side}: {tema}")
+    return "; ".join(rows[:limit]) if rows else "Nincs erős PDF-tématalálat."
+
+def _fpi_pdf_primary_tactical_finding_v80(tactical_context: Optional[Dict[str, object]]) -> str:
+    if not tactical_context:
+        return "Nincs taktikai input."
+    findings = tactical_context.get("tactical_findings", []) or []
+    if findings:
+        f = findings[0]
+        return f"{f.get('Téma', '')}: {f.get('Edzői következtetés', '')}"
+    risks = tactical_context.get("risks", []) or []
+    if risks:
+        return str(risks[0])
+    return _fpi_pdf_tactical_source_status_v80(tactical_context)
+
+def _fpi_pdf_next_integrated_decision_v80(tactical_context: Optional[Dict[str, object]], fallback: str) -> str:
+    if tactical_context and tactical_context.get("md_plan"):
+        try:
+            md = tactical_context.get("md_plan")[0]
+            return f"Következő mikrociklus-lépés: {md[0]} – {md[1]}. Indoklás: {md[2]}"
+        except Exception:
+            pass
+    if tactical_context and tactical_context.get("plan_a"):
+        return f"Meccsterv irány: {tactical_context.get('plan_a')}. Következő edzésen ehhez igazított erőnléti + taktikai cél."
+    return fallback
+
+
 def build_fpi_product_pdf_bytes(
     data: pd.DataFrame,
     selected_week: Optional[str] = None,
@@ -5510,16 +5566,54 @@ def build_fpi_product_pdf_bytes(
         summary_text = "\n".join(summary_lines[:9]) if summary_lines else "Nincs automatikus összefoglaló."
         rows = [[P("Fő üzenet", head), P("Mit jelent ez a stábnak?", head), P("Következő döntés", head)]]
         first_priority = priorities[0] if priorities else {}
+        tactical_status = _fpi_pdf_tactical_source_status_v80(tactical_context)
+        tactical_primary = _fpi_pdf_primary_tactical_finding_v80(tactical_context)
+        tactical_plan = tactical_context.get("plan_a", "n.a.") if tactical_context else "n.a."
+        next_decision = _fpi_pdf_next_integrated_decision_v80(
+            tactical_context,
+            first_priority.get("Teendő", "Heti terhelés és egyéni risk áttekintése a következő edzés előtt.")
+        )
         rows.append([
-            P(summary_text, body),
-            P(f"Meccskészültség: {readiness}/100 ({score_to_label(readiness)}). Magas risk: {high_risk} fő, közepes risk: {med_risk} fő. Periodizáció: {ctx.get('periodization_type', '—')}.", body),
-            P(first_priority.get("Teendő", "Heti terhelés és egyéni risk áttekintése a következő edzés előtt."), body),
+            P(summary_text + "\n\nTaktikai üzenet: " + tactical_primary, body),
+            P(f"Meccskészültség: {readiness}/100 ({score_to_label(readiness)}). Magas risk: {high_risk} fő, közepes risk: {med_risk} fő. Periodizáció: {ctx.get('periodization_type', '—')}.\nTaktikai forrás: {tactical_status}\nPlan A: {tactical_plan}", body),
+            P(next_decision, body),
         ])
         story.append(table(rows, [9.2*cm, 9.2*cm, 9.3*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF")]))
         story.append(Spacer(1, 0.22*cm))
+
+        if tactical_context:
+            story.append(section("30 mp integrált GPS + Tactical döntéskép", "#E0F2FE"))
+            trows = [[P("Elem", head), P("Mit látunk?", head), P("Edzői döntés", head)]]
+            trows.append([
+                P("Taktikai forrás", small),
+                P(_fpi_pdf_tactical_source_status_v80(tactical_context), small),
+                P("A következtetéseket a forrásminőség szerint kell súlyozni: ha a PDF nem adott témát, akkor az Excel dominál.", small),
+            ])
+            trows.append([
+                P("Meccsterv", small),
+                P(str(tactical_context.get("plan_a", "n.a.")), small),
+                P(_fpi_pdf_primary_tactical_finding_v80(tactical_context), small),
+            ])
+            trows.append([
+                P("PDF témák", small),
+                P(_fpi_pdf_short_tactical_topics_v80(tactical_context), small),
+                P("Ha nincs erős PDF-téma, a PDF diagnosztikában kell ellenőrizni a kinyert szöveget és a gyakori szavakat.", small),
+            ])
+            story.append(table(trows, [4.5*cm, 11.6*cm, 11.6*cm], header_bg="#0369A1", row_bgs=[colors.HexColor("#E0F2FE"), colors.white]))
+            story.append(Spacer(1, 0.22*cm))
+
         story.append(section("Top edzői teendők", "#DCFCE7"))
         pr = [[P("#", head), P("Teendő", head), P("Miért fontos?", head), P("Mikor?", head)]]
-        for i, item in enumerate(priorities[:5], 1):
+        pr_items = []
+        if tactical_context and tactical_context.get("tactical_findings"):
+            for f in (tactical_context.get("tactical_findings") or [])[:2]:
+                pr_items.append({
+                    "Teendő": f"Taktikai fókusz: {f.get('Téma', '')}",
+                    "Miért": f"{f.get('Bizonyíték', '')} -> {f.get('Edzői következtetés', '')}",
+                    "Mikor": "Következő taktikai blokk",
+                })
+        pr_items.extend(priorities)
+        for i, item in enumerate(pr_items[:5], 1):
             pr.append([P(i, small), P(item.get("Teendő", item.get("Cím", "")), small), P(item.get("Miért", ""), small), P(item.get("Mikor", "Következő edzés"), small)])
         if len(pr) == 1:
             pr.append([P("1", small), P("Normál monitoring", small), P("Nincs kritikus jelzés.", small), P("Heti review", small)])
@@ -5894,6 +5988,31 @@ def _build_demo_tactical_context() -> Dict[str, object]:
             ("MD-1", "Aktiváció + pontrúgás", "Pontrúgás-veszély és frissesség kezelése."),
         ],
         "player_focus": ["Jobb oldali védő: beadások elleni 1v1 fókusz", "6-os: rest defense pozíció", "9-es: second ball célpont"],
+        "tactical_findings": [
+            {
+                "Téma": "Ellenfél kontraveszély",
+                "Bizonyíték": "PDF: támadó átmenet / kontrák; Excel: ellenfél kontra és beadásprofil.",
+                "Edzői következtetés": "MD-3 átmeneti játék + HSR, MD-2 rest defense biztosítás.",
+                "Prioritás": "Magas",
+            },
+            {
+                "Téma": "Szélső játék és beadások",
+                "Bizonyíték": "PDF: szélső játék / oldali dominancia; Excel: magas beadásszám.",
+                "Edzői következtetés": "Oldali 1v1 védekezés, beadásblokkolás és hosszú oldali zárás.",
+                "Prioritás": "Magas",
+            },
+            {
+                "Téma": "Saját presszing-opció",
+                "Bizonyíték": "Saját csapat PDF: presszing; GPS readiness közepes-jó.",
+                "Edzői következtetés": "Csak kontrollált szakaszokban érdemes magasabb nyomást alkalmazni.",
+                "Prioritás": "Közepes",
+            },
+        ],
+        "team_comparison": [
+            {"Mutató": "Labdabirtoklás", "Saját": 54.0, "Ellenfél": 46.0, "Értelmezés": "Saját kontroll"},
+            {"Mutató": "Kontrák", "Saját": 4.0, "Ellenfél": 8.0, "Értelmezés": "Ellenfél átmeneti veszély"},
+            {"Mutató": "Beadások", "Saját": 14.0, "Ellenfél": 21.0, "Értelmezés": "Ellenfél szélső veszély"},
+        ],
     }
 
 
