@@ -49,7 +49,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V071_OWN_TEAM_TACTICAL_EXEC_PDF_2026_06_17"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V072_TACTICAL_PDF_HELPER_FIX_2026_06_17"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5495,6 +5495,34 @@ def build_fpi_product_pdf_bytes(
 
 
     def add_tactical_executive_page():
+        def _pdf_tactical_key_numbers_summary(metrics: Dict[str, float]) -> str:
+            """PDF-safe local helper. Avoids NameError if the UI helper is defined later or not available."""
+            if not metrics:
+                return "Nincs értelmezhető taktikai csapat KPI."
+            label_map = {
+                "possession_pct": "Labdabirtoklás",
+                "shots": "Lövések",
+                "xg": "xG",
+                "entries_box": "Box entries",
+                "key_passes": "Kulcspasszok",
+                "corners": "Szögletek",
+                "ppda": "PPDA",
+                "pressing_success_pct": "Pressing %",
+                "counterattacks": "Kontrák",
+                "recoveries": "Labdaszerzések",
+                "lost_balls": "Labdavesztések",
+                "crosses": "Beadások",
+            }
+            parts = []
+            for k, lab in label_map.items():
+                v = metrics.get(k)
+                if v not in [None, 0, 0.0, ""]:
+                    try:
+                        parts.append(f"{lab}: {float(v):.1f}")
+                    except Exception:
+                        parts.append(f"{lab}: {v}")
+            return " | ".join(parts[:8]) if parts else "Nincs kiemelkedő taktikai KPI."
+
         story.append(section("Tactical Pro+ – saját csapat + ellenfél döntéselőkészítés", "#E0F2FE"))
         if not tactical_context:
             story.append(Paragraph(pdf_safe_text(
@@ -5530,8 +5558,8 @@ def build_fpi_product_pdf_bytes(
             return ", ".join([x for x in out if x]) or "n.a."
         rows = [
             [P("Oldal", head), P("Felismert PDF témák", head), P("Csapat KPI-k", head)],
-            [P("Saját", small), P(_topic_names(tactical_context.get("own_topics", []) or []), small), P(_tactical_key_numbers_summary(tactical_context.get("own_team_metrics", {}) or {}), small)],
-            [P("Ellenfél", small), P(_topic_names(tactical_context.get("opp_topics", []) or []), small), P(_tactical_key_numbers_summary(tactical_context.get("opp_team_metrics", {}) or {}), small)],
+            [P("Saját", small), P(_topic_names(tactical_context.get("own_topics", []) or []), small), P(_pdf_tactical_key_numbers_summary(tactical_context.get("own_team_metrics", {}) or {}), small)],
+            [P("Ellenfél", small), P(_topic_names(tactical_context.get("opp_topics", []) or []), small), P(_pdf_tactical_key_numbers_summary(tactical_context.get("opp_team_metrics", {}) or {}), small)],
         ]
         story.append(table(rows, [3.0*cm, 12.5*cm, 12.2*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
         story.append(Spacer(1, 0.20*cm))
