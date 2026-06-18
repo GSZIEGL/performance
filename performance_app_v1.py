@@ -49,7 +49,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V072_TACTICAL_PDF_HELPER_FIX_2026_06_17"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V073_TACTICAL_UPLOAD_FIX_SAMPLE_REPORTS_2026_06_17"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -670,6 +670,43 @@ st.markdown(
    color: #000000 !important;
    opacity: 1 !important;
    text-shadow: none !important;
+ }
+
+ 
+ /* ===== V7.3 Tactical upload readability patch ===== */
+ [data-testid="stFileUploader"] {
+     background: #ffffff !important;
+     color: #0f172a !important;
+     border: 1px solid #cbd5e1 !important;
+     border-radius: 16px !important;
+     padding: 10px !important;
+ }
+ [data-testid="stFileUploader"] *,
+ [data-testid="stFileUploader"] label,
+ [data-testid="stFileUploader"] span,
+ [data-testid="stFileUploader"] small,
+ [data-testid="stFileUploader"] p,
+ [data-testid="stFileUploader"] div {
+     color: #0f172a !important;
+     opacity: 1 !important;
+ }
+ [data-testid="stFileUploader"] button,
+ [data-testid="stFileUploader"] button * {
+     color: #ffffff !important;
+     background: linear-gradient(135deg,#2563eb,#1d4ed8) !important;
+     border-radius: 12px !important;
+     font-weight: 900 !important;
+ }
+ [data-testid="stFileUploaderDeleteBtn"],
+ [data-testid="stFileUploaderDeleteBtn"] *,
+ button[title="Delete"],
+ button[title="Remove"],
+ button[aria-label*="Delete"],
+ button[aria-label*="Remove"] {
+     color: #ffffff !important;
+     background: #dc2626 !important;
+     border-radius: 999px !important;
+     opacity: 1 !important;
  }
 
  </style>
@@ -5661,14 +5698,16 @@ def _build_demo_tactical_context() -> Dict[str, object]:
     }
 
 
-def build_fpi_sample_pdf_bytes(report_type: str = "full") -> Optional[bytes]:
+def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool = True) -> Optional[bytes]:
     demo_raw = build_demo_performance_data()
     demo_df, _, missing = standardize_dataframe(demo_raw)
     if missing:
         return None
     demo_df = add_position_group(demo_df)
     latest = _fpi_latest_week(demo_df)
-    return build_fpi_product_pdf_bytes(demo_df, latest, "Pressing", report_type=report_type, demo_label="MINTA RIPORT / Demo FC U19", tactical_context=_build_demo_tactical_context())
+    tactical_ctx = _build_demo_tactical_context() if include_tactical else None
+    label = "MINTA RIPORT / Demo FC U19 – GPS + Tactical" if include_tactical else "MINTA RIPORT / Demo FC U19 – GPS only"
+    return build_fpi_product_pdf_bytes(demo_df, latest, "Pressing", report_type=report_type, demo_label=label, tactical_context=tactical_ctx)
 
 # -----------------------------------------------------------------------------
 # UI
@@ -5676,10 +5715,12 @@ def build_fpi_sample_pdf_bytes(report_type: str = "full") -> Optional[bytes]:
 render_fpi_hero()
 
 
-sample_pdf_bytes = build_fpi_sample_pdf_bytes("full")
-sample_exec_pdf_bytes = build_fpi_sample_pdf_bytes("executive")
-sample_fitness_pdf_bytes = build_fpi_sample_pdf_bytes("fitness")
-sample_micro_pdf_bytes = build_fpi_sample_pdf_bytes("microcycle")
+sample_pdf_bytes = build_fpi_sample_pdf_bytes("full", include_tactical=True)
+sample_gps_only_pdf_bytes = build_fpi_sample_pdf_bytes("full", include_tactical=False)
+sample_exec_pdf_bytes = build_fpi_sample_pdf_bytes("executive", include_tactical=True)
+sample_exec_gps_only_pdf_bytes = build_fpi_sample_pdf_bytes("executive", include_tactical=False)
+sample_fitness_pdf_bytes = build_fpi_sample_pdf_bytes("fitness", include_tactical=False)
+sample_micro_pdf_bytes = build_fpi_sample_pdf_bytes("microcycle", include_tactical=False)
 with st.container():
     st.markdown(
         """
@@ -5733,6 +5774,29 @@ with st.container():
             )
     else:
         st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
+
+    st.markdown("#### Nyomtatható minta PDF-ek – összehasonlításhoz")
+    g1, g2 = st.columns(2)
+    with g1:
+        if sample_gps_only_pdf_bytes is not None:
+            st.download_button(
+                "⬇️ Minta PDF – csak GPS",
+                data=sample_gps_only_pdf_bytes,
+                file_name="fpi_minta_csak_gps.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_sample_gps_only_v73",
+            )
+    with g2:
+        if sample_pdf_bytes is not None:
+            st.download_button(
+                "⬇️ Minta PDF – GPS + Tactical",
+                data=sample_pdf_bytes,
+                file_name="fpi_minta_gps_plus_tactical.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_sample_gps_tactical_v73",
+            )
 
 
 
@@ -6507,6 +6571,13 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
             opp_pdfs = st.file_uploader("Ellenfél taktikai PDF-ek", type=["pdf"], accept_multiple_files=True, key="tactical_pro_opp_pdfs")
             opp_team_xlsx = st.file_uploader("Ellenfél csapatstatisztika Excel", type=["xlsx", "xls"], key="tactical_pro_opp_team_xlsx")
             opp_player_xlsx = st.file_uploader("Ellenfél játékosstatisztika Excel", type=["xlsx", "xls"], key="tactical_pro_opp_player_xlsx")
+
+        st.caption("Tipp: a feltöltött fájl törléséhez használd a fájlnév melletti kis X-et. Ha nem látszik, ez a verzió javítja a kontrasztot. Teljes resethez frissítsd az oldalt vagy használd az alábbi gombot.")
+        if st.button("🧹 Tactical feltöltések / mapping reset", key="tactical_pro_reset_upload_mapping"):
+            for k in list(st.session_state.keys()):
+                if str(k).startswith(("own_team_tactical", "opp_team_tactical", "own_player_tactical", "opp_player_tactical", "tactical_pro_context")):
+                    st.session_state.pop(k, None)
+            st.success("A taktikai mapping/session állapot törölve. A fájlok törléséhez szükség esetén frissítsd az oldalt.")
 
     has_gps = bool(gps_context.get("has_gps", True))
     has_pdf = bool(opp_pdfs or own_pdfs)
