@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V109_MAPPER_SORT_AND_CONTRAST_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V110_SAFE_TOPIC_TAGS_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7919,7 +7919,22 @@ def _fpi_safe_tactical_pdf_insights_v105(pdf_text: str, uploaded: bool = False, 
     low = _fpi_tactical_norm(raw) if "_fpi_tactical_norm" in globals() else raw.lower()
     for key, words in (tags or {}).items():
         hits = []
-        for w in words[:40]:
+
+        # V10.10: topic tag lehet lista, tuple, set VAGY dict.
+        # Dict esetén a benne lévő listákat/stringeket lapítjuk, nem words[:40]-et hívunk.
+        flat_words = []
+        if isinstance(words, dict):
+            for vv in words.values():
+                if isinstance(vv, (list, tuple, set)):
+                    flat_words.extend(list(vv))
+                elif vv is not None:
+                    flat_words.append(vv)
+        elif isinstance(words, (list, tuple, set)):
+            flat_words = list(words)
+        elif words is not None:
+            flat_words = [words]
+
+        for w in flat_words[:40]:
             ww = _fpi_tactical_norm(w) if "_fpi_tactical_norm" in globals() else str(w).lower()
             if ww and ww in low:
                 hits.append(str(w))
