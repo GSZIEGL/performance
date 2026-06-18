@@ -7873,8 +7873,10 @@ def render_fpi_landing_page_v100() -> None:
     st.markdown("### Hogyan működik?")
     f1, f2, f3, f4 = st.columns(4)
     for col, title, desc in [
-        (f1, "1. Import", "GPS Excel, opcionálisan taktikai PDF/Excel."),
-        (f2, "2. Kontextus", "Meccsnap, ellenfél, korosztály/szint, edzésszám."),
+        (f1, "1. Import"
+         , "GPS Excel, opcionálisan taktikai PDF/Excel."),
+        (f2, "2. Kontextus"
+         , "Meccsnap, ellenfél, korosztály/szint, edzésszám."),
         (f3, "3. Elemzés", "Readiness, risk, trend, referencia és mikrociklus."),
         (f4, "4. Export", "GPS-only, Executive Summary vagy Full Report PDF."),
     ]:
