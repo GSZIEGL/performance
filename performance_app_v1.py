@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V108_CLEAN_TACTICAL_ALIASES_SCOPE_FIX_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V109_MAPPER_SORT_AND_CONTRAST_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -1677,7 +1677,7 @@ def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Opt
         st.error("Nincs beolvasható nyers adat.")
         return
 
-    cols = [""] + [str(c) for c in raw_df.columns]
+    cols = [""] + sorted([str(c) for c in raw_df.columns], key=lambda x: x.lower())
     manual = dict(current_mapping or {})
 
     col_a, col_b, col_c = st.columns(3)
@@ -7585,6 +7585,59 @@ def _fpi_set_page_v100(page: str) -> None:
     except Exception:
         pass
 
+
+def _fpi_mapper_contrast_css_v109() -> None:
+    """Mapper / clean workspace kontraszt javítás."""
+    st.markdown(
+        """
+        <style>
+        /* Streamlit success/info/warning szövegek legyenek olvashatók sötét témában is */
+        div[data-testid="stAlert"] p,
+        div[data-testid="stAlert"] div,
+        div[data-testid="stAlert"] span {
+            color: #0f172a !important;
+        }
+
+        /* Expander fejlécek – ne fekete háttéren fekete szöveg legyen */
+        details[data-testid="stExpander"] summary,
+        details[data-testid="stExpander"] summary p,
+        details[data-testid="stExpander"] summary span {
+            color: #0f172a !important;
+            font-weight: 800 !important;
+        }
+        details[data-testid="stExpander"] {
+            background: #ffffff !important;
+            border: 1px solid #d1d5db !important;
+            border-radius: 14px !important;
+        }
+
+        /* Gombok: sötét gombon fehér szöveg */
+        .stButton > button,
+        div[data-testid="stDownloadButton"] > button {
+            color: #ffffff !important;
+            background: #111827 !important;
+            border: 1px solid #334155 !important;
+            font-weight: 800 !important;
+        }
+        .stButton > button:hover,
+        div[data-testid="stDownloadButton"] > button:hover {
+            color: #ffffff !important;
+            background: #1f2937 !important;
+            border-color: #475569 !important;
+        }
+
+        /* Selectbox / input szövegek */
+        div[data-baseweb="select"] span,
+        div[data-baseweb="select"] div,
+        input {
+            color: #111827 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _fpi_landing_css_v100() -> None:
     st.markdown(
         """
@@ -8037,8 +8090,8 @@ def _fpi_safe_tactical_mapper_ui_v107(uploaded_file, aliases: Dict[str, List[str
         return pd.DataFrame(), {}
 
     mapping = {}
-    cols = [""] + [str(c) for c in df2.columns]
-    with st.expander(f"🧭 {title} – egyszerű Smart Mapper", expanded=True):
+    cols = [""] + sorted([str(c) for c in df2.columns], key=lambda x: x.lower())
+    with st.expander(f"🧭 {title} – Smart Mapper", expanded=True):
         st.caption("A teljes tactical mapper később töltődne be, ezért itt egyszerű fallback mapping fut.")
         grid = st.columns(3)
         for i, field in enumerate((aliases or {}).keys()):
@@ -8098,7 +8151,7 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
     st.markdown("### 3. Taktikai import és mapping")
     st.caption("Opcionális. Ha nincs taktikai anyag, a GPS-only riport továbbra is teljesen használható.")
 
-    with st.expander("📥 Taktikai PDF / Excel feltöltés – saját csapat és ellenfél", expanded=False):
+    with st.expander("📥 Taktikai PDF / Excel feltöltés – saját csapat és ellenfél", expanded=True):
         own_col, opp_col = st.columns(2)
         with own_col:
             st.markdown("#### Saját csapat")
@@ -8185,6 +8238,7 @@ def render_fpi_clean_workspace_v101() -> None:
     A régi teljes app továbbra is elérhető külön gombbal, de ez az oldal a klubdemóhoz és gyors használathoz letisztított flow.
     """
     _fpi_landing_css_v100()
+    _fpi_mapper_contrast_css_v109()
 
     top1, top2 = st.columns([5, 1.2])
     with top1:
@@ -8271,7 +8325,7 @@ def render_fpi_clean_workspace_v101() -> None:
 
             st.markdown("#### Gyors kézi mapping a tiszta oldalon")
             st.caption("Ha egy mező rosszul lett felismerve, itt is átállíthatod. A teljes, részletes mapper továbbra is a Teljes appban érhető el.")
-            cols_clean_map = [""] + [str(c) for c in raw_df_clean.columns]
+            cols_clean_map = [""] + sorted([str(c) for c in raw_df_clean.columns], key=lambda x: x.lower())
             editable_fields_clean = [
                 "player_name", "session_type", "start_time", "duration", "match_minutes",
                 "total_distance", "distance_per_min", "max_speed", "sprints",
@@ -9220,8 +9274,8 @@ def _fpi_tactical_mapper_ui(uploaded_file, aliases: Dict[str, List[str]], state_
         st.session_state[sig_key] = signature
         st.session_state[map_key] = _fpi_tactical_suggest_mapping(df2, aliases)
     mapping = dict(st.session_state.get(map_key, _fpi_tactical_suggest_mapping(df2, aliases)))
-    cols = [""] + [str(c) for c in df2.columns]
-    with st.expander(f"🧭 {title} – Smart Tactical Mapper", expanded=False):
+    cols = [""] + sorted([str(c) for c in df2.columns], key=lambda x: x.lower())
+    with st.expander(f"🧭 {title} – Smart Tactical Mapper", expanded=True):
         st.caption(f"Felismert munkalap: {sheet_name or 'n.a.'}")
         grid = st.columns(3)
         for i, field in enumerate(aliases.keys()):
