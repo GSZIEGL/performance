@@ -50,7 +50,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V074_TACTICAL_STABILITY_PDF_READABILITY_2026_06_17"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V075_TACTICAL_PDF_SESSION_EXPORT_PACK_2026_06_17"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5654,7 +5654,12 @@ def build_fpi_product_pdf_bytes(
                 v = metrics.get(k)
                 if v not in [None, 0, 0.0, ""]:
                     try:
-                        parts.append(f"{lab}: {float(v):.1f}")
+                        fv = float(v)
+                        if k in ["possession_pct", "pressing_success_pct", "passes_accurate_pct"] and fv <= 1:
+                            fv = fv * 100
+                            parts.append(f"{lab}: {fv:.1f}%")
+                        else:
+                            parts.append(f"{lab}: {fv:.1f}")
                     except Exception:
                         parts.append(f"{lab}: {v}")
             return " | ".join(parts[:8]) if parts else "Nincs kiemelkedő taktikai KPI."
@@ -5670,8 +5675,8 @@ def build_fpi_product_pdf_bytes(
 
         status_rows = [
             [P("Elemzési szint", head), P(str(tactical_context.get("analysis_level", "n.a.")), small)],
-            [P("Saját anyag", head), P(f"PDF: {'igen' if tactical_context.get('has_own_pdf') else 'nem'} | Team Excel: {'igen' if tactical_context.get('has_own_team_excel') else 'nem'} | Player Excel: {'igen' if tactical_context.get('has_own_player_excel') else 'nem'}", small)],
-            [P("Ellenfél anyag", head), P(f"PDF: {'igen' if tactical_context.get('has_opp_pdf') else 'nem'} | Team Excel: {'igen' if tactical_context.get('has_opp_team_excel') else 'nem'} | Player Excel: {'igen' if tactical_context.get('has_opp_player_excel') else 'nem'}", small)],
+            [P("Saját anyag", head), P(f"PDF: {'igen' if tactical_context.get('has_own_pdf') else 'nem'} ({tactical_context.get('own_pdf_pages', 0)} oldal) | Team Excel: {'igen' if tactical_context.get('has_own_team_excel') else 'nem'} | Player Excel: {'igen' if tactical_context.get('has_own_player_excel') else 'nem'}", small)],
+            [P("Ellenfél anyag", head), P(f"PDF: {'igen' if tactical_context.get('has_opp_pdf') else 'nem'} ({tactical_context.get('opp_pdf_pages', 0)} oldal) | Team Excel: {'igen' if tactical_context.get('has_opp_team_excel') else 'nem'} | Player Excel: {'igen' if tactical_context.get('has_opp_player_excel') else 'nem'}", small)],
             [P("Plan A", head), P(str(tactical_context.get("plan_a", "n.a.")), small)],
         ]
         story.append(table(status_rows, [6.0*cm, 21.7*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
@@ -5701,15 +5706,19 @@ def build_fpi_product_pdf_bytes(
         story.append(Spacer(1, 0.20*cm))
 
         story.append(section("Saját vs ellenfél – PDF témák és KPI-k", "#DCFCE7"))
-        def _topic_names(rows):
+        def _topic_names(rows, uploaded=False):
             out = []
             for r in rows[:5]:
                 out.append(str(r.get("Téma", r.get("label", ""))))
-            return ", ".join([x for x in out if x]) or "n.a."
+            if out:
+                return ", ".join([x for x in out if x])
+            if uploaded:
+                return "PDF feltöltve, de nem volt kinyerhető szöveg / nincs erős kulcsszó-találat"
+            return "n.a."
         rows = [
             [P("Oldal", head), P("Felismert PDF témák", head), P("Csapat KPI-k", head)],
-            [P("Saját", small), P(_topic_names(tactical_context.get("own_topics", []) or []), small), P(_pdf_tactical_key_numbers_summary(tactical_context.get("own_team_metrics", {}) or {}), small)],
-            [P("Ellenfél", small), P(_topic_names(tactical_context.get("opp_topics", []) or []), small), P(_pdf_tactical_key_numbers_summary(tactical_context.get("opp_team_metrics", {}) or {}), small)],
+            [P("Saját", small), P(_topic_names(tactical_context.get("own_topics", []) or [], tactical_context.get("has_own_pdf")), small), P(_pdf_tactical_key_numbers_summary(tactical_context.get("own_team_metrics", {}) or {}), small)],
+            [P("Ellenfél", small), P(_topic_names(tactical_context.get("opp_topics", []) or [], tactical_context.get("has_opp_pdf")), small), P(_pdf_tactical_key_numbers_summary(tactical_context.get("opp_team_metrics", {}) or {}), small)],
         ]
         story.append(table(rows, [3.0*cm, 12.5*cm, 12.2*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
         story.append(Spacer(1, 0.20*cm))
@@ -6648,8 +6657,10 @@ def _build_tactical_executive_context(gps_context: Dict[str, object], tactical_c
     return {
         "version": TACTICAL_PRO_VERSION,
         "analysis_level": analysis_level,
-        "has_own_pdf": bool((own.get("pdf_insights") or {}).get("raw_text_len", 0)),
-        "has_opp_pdf": bool((opp.get("pdf_insights") or {}).get("raw_text_len", 0)),
+        "has_own_pdf": bool((own.get("pdf_insights") or {}).get("pdf_uploaded") or (own.get("pdf_insights") or {}).get("raw_text_len", 0)),
+        "has_opp_pdf": bool((opp.get("pdf_insights") or {}).get("pdf_uploaded") or (opp.get("pdf_insights") or {}).get("raw_text_len", 0)),
+        "own_pdf_pages": int((own.get("pdf_insights") or {}).get("pdf_pages", 0) or 0),
+        "opp_pdf_pages": int((opp.get("pdf_insights") or {}).get("pdf_pages", 0) or 0),
         "has_own_team_excel": bool(own.get("team_metrics")),
         "has_opp_team_excel": bool(opp.get("team_metrics")),
         "has_own_player_excel": bool(own.get("player_tables")),
@@ -6706,8 +6717,14 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
 
     own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(own_pdfs or [])
     opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
-    own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0}
-    opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0}
+    own_pdf_uploaded = bool(own_pdfs)
+    opp_pdf_uploaded = bool(opp_pdfs)
+    own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": own_pdf_uploaded, "pdf_pages": len(own_pdf_pages)}
+    opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": opp_pdf_uploaded, "pdf_pages": len(opp_pdf_pages)}
+    own_pdf_insights["pdf_uploaded"] = own_pdf_uploaded
+    own_pdf_insights["pdf_pages"] = len(own_pdf_pages)
+    opp_pdf_insights["pdf_uploaded"] = opp_pdf_uploaded
+    opp_pdf_insights["pdf_pages"] = len(opp_pdf_pages)
     merged_pdf_insights = _merge_tactical_pdf_insights(own_pdf_insights, opp_pdf_insights)
 
     own_team_metrics, opp_team_metrics = {}, {}
@@ -6747,6 +6764,11 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     k2.metric("Saját PDF oldalak", len(own_pdf_pages))
     k3.metric("Ellenfél PDF oldalak", len(opp_pdf_pages))
     k4.metric("Taktikai KPI-k", len([v for v in {**own_team_metrics, **opp_team_metrics}.values() if v not in [0, 0.0, None]]))
+
+    if own_pdf_uploaded and not own_pdf_text:
+        st.warning("Saját PDF feltöltve, de nem sikerült szöveget kinyerni belőle. Valószínűleg képalapú/scannelt PDF, ezért a taktikai témák nem jelennek meg.")
+    if opp_pdf_uploaded and not opp_pdf_text:
+        st.warning("Ellenfél PDF feltöltve, de nem sikerült szöveget kinyerni belőle. Valószínűleg képalapú/scannelt PDF, ezért a taktikai témák nem jelennek meg.")
 
     st.markdown("### Taktikai stratégiai paletta")
     st.caption("A kódok jelentése, hogy a javasolt Plan A / Plan B ne legyen félreérthető.")
@@ -6990,7 +7012,7 @@ with tab_exec:
 
 
     st.markdown("### Új FPI riportcsomag – éles PDF-ek")
-    st.caption("Ezek ugyanazt a logikát használják, mint a minta PDF: vezetői nézet, erőnléti nézet, mikrociklus nézet és teljes stábcsomag.")
+    st.caption("Éles export ugyanazzal a struktúrával, mint a minta PDF: vezetői, erőnléti, mikrociklus, teljes stáb, illetve ha van feltöltött taktikai anyag, GPS + Tactical tartalommal.")
     rp1, rp2, rp3, rp4 = st.columns(4)
     live_report_base = analysis_base_df.copy()
     with rp1:
@@ -7026,6 +7048,31 @@ with tab_exec:
                 use_container_width=True,
                 key="download_fpi_micro_pack_v58",
             )
+    st.markdown("#### Éles nyomtatható PDF – GPS-only / GPS + Tactical")
+    ex_gps_col, ex_tac_col = st.columns(2)
+    with ex_gps_col:
+        gps_only_live_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="executive", tactical_context=None)
+        if gps_only_live_pdf is not None:
+            st.download_button(
+                "⬇️ Éles vezetői PDF – csak GPS",
+                data=gps_only_live_pdf,
+                file_name=f"fpi_eles_vezetoi_csak_gps_{safe_week_main}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_live_exec_gps_only_v75",
+            )
+    with ex_tac_col:
+        gps_tactical_live_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="executive", tactical_context=st.session_state.get("tactical_pro_context"))
+        if gps_tactical_live_pdf is not None:
+            st.download_button(
+                "⬇️ Éles vezetői PDF – GPS + Tactical",
+                data=gps_tactical_live_pdf,
+                file_name=f"fpi_eles_vezetoi_gps_tactical_{safe_week_main}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_live_exec_gps_tactical_v75",
+            )
+
     with rp4:
         full_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="full", tactical_context=st.session_state.get("tactical_pro_context"))
         if full_pack_pdf is not None:
