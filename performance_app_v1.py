@@ -50,7 +50,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V075_TACTICAL_PDF_SESSION_EXPORT_PACK_2026_06_17"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V076_ROBUST_TACTICAL_PDF_ENGINE_2026_06_17"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -6302,6 +6302,181 @@ TACTICAL_PLAYER_ALIASES_FPI = {
     "crosses": ["crosses", "beadások", "beadás"],
 }
 
+
+# V7.6 – kibővített HU/EN taktikai szótár.
+# Cél: ne csak SportsBase/egyféle riport kulcsszavaira reagáljon, hanem Provision/Wyscout/Hudl jellegű
+# taktikai PDF-ekben előforduló kifejezésekre is.
+TACTICAL_TOPIC_TAGS_FPI.update({
+    "formation": {
+        "label": "Formáció / alapfelállás",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("formation", {}).get("keywords", []) + [
+            "formation", "shape", "system", "structure", "line-up", "lineup", "starting eleven", "starting xi",
+            "base formation", "out of possession shape", "in possession shape",
+            "formáció", "felállás", "alapfelállás", "játékrendszer", "szerkezet", "kezdőcsapat",
+            "labdával", "labda nélkül", "védekezésben", "támadásban",
+            "4-4-2", "4-2-3-1", "4-3-3", "3-5-2", "3-4-3", "5-3-2", "5-4-1", "4-1-4-1", "4-3-1-2",
+        ])),
+    },
+    "build_up": {
+        "label": "Labdakihozatal / támadásépítés",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("build_up", {}).get("keywords", []) + [
+            "build-up", "build up", "buildout", "first phase", "second phase", "goal kick", "goal kicks",
+            "short goal kick", "deep build", "progression", "progressive pass", "progressive passes",
+            "progressive carry", "third man", "centre back", "center back", "fullback", "pivot", "six",
+            "number 6", "half-space", "switch of play", "circulation", "positional attack", "possession phase",
+            "labdakihozatal", "támadásépítés", "építkezés", "első fázis", "második fázis", "kirúgás",
+            "rövid kirúgás", "progresszió", "progresszív passz", "progresszív labdavezetés", "harmadik ember",
+            "belső védő", "szélső védő", "hatossal", "6-os", "félterület", "oldalváltás", "labdajáratás",
+            "pozíciós támadás", "labdabirtoklási fázis",
+        ])),
+    },
+    "direct_play": {
+        "label": "Direkt játék / hosszú labda",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("direct_play", {}).get("keywords", []) + [
+            "direct play", "long ball", "long pass", "second ball", "aerial duel", "target man", "flick-on",
+            "vertical", "early forward", "long distribution", "direct attack", "route one", "directness",
+            "direkt játék", "hosszú labda", "hosszú passz", "második labda", "felívelés", "fejpárbaj",
+            "céljátékos", "lecsorgó", "vertikális", "korai előrejáték", "direkt támadás",
+        ])),
+    },
+    "pressing": {
+        "label": "Letámadás / presszing",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("pressing", {}).get("keywords", []) + [
+            "press", "pressing", "high press", "mid press", "low press", "counterpress", "counter-press",
+            "ppda", "pressure", "pressing trigger", "trap", "press trap", "forced turnover", "high recovery",
+            "challenge intensity", "defensive actions", "intensity", "aggressive press", "recoveries high",
+            "letámadás", "presszing", "magas letámadás", "középső presszing", "visszatámadás", "nyomás",
+            "presszing trigger", "trigger", "csapda", "pressingcsapda", "kikényszerített labdavesztés",
+            "magas labdaszerzés", "védekező akció", "intenzitás", "agresszív letámadás",
+        ])),
+    },
+    "defensive_block": {
+        "label": "Védekezési blokk / blokkmagasság",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("defensive_block", {}).get("keywords", []) + [
+            "low block", "mid block", "middle block", "high block", "defensive block", "compact", "compactness",
+            "defensive line", "back line", "line height", "block height", "deep defending", "drop", "retreat",
+            "defensive shape", "out of possession", "defending third",
+            "mély blokk", "középső blokk", "magas blokk", "védekezési blokk", "kompakt", "kompaktság",
+            "védelmi vonal", "védősor", "blokkmagasság", "mély védekezés", "visszazár", "visszarendeződés",
+            "labda nélkül", "védekező szerkezet",
+        ])),
+    },
+    "transition_attack": {
+        "label": "Támadó átmenet / kontrák",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("transition_attack", {}).get("keywords", []) + [
+            "transition", "attacking transition", "offensive transition", "counterattack", "counter attack", "counter-attacks",
+            "fast attack", "quick attack", "break", "breakaway", "after regain", "after winning", "regain and go",
+            "direct attacks", "fast attacks", "counter attacks", "attacks after regain",
+            "átmenet", "támadó átmenet", "kontra", "kontratámadás", "gyors támadás", "gyors átmenet",
+            "labdaszerzés után", "labdanyerés után", "visszaszerzés után", "indítás", "megindulás",
+        ])),
+    },
+    "transition_defense": {
+        "label": "Védekező átmenet / rest defense",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("transition_defense", {}).get("keywords", []) + [
+            "defensive transition", "after losing", "after loss", "rest defense", "counter attack prevention",
+            "counter prevention", "defend transition", "negative transition", "cover behind", "protection behind",
+            "rest-defence", "loss of possession", "turnover",
+            "védekező átmenet", "labdavesztés után", "rest defense", "kontrák elleni védekezés",
+            "átmeneti védekezés", "negatív átmenet", "biztosítás", "mögöttes biztosítás", "visszarendeződés",
+            "labdavesztés", "elvesztett labda",
+        ])),
+    },
+    "chance_creation": {
+        "label": "Helyzetkialakítás / támadóharmad",
+        "keywords": [
+            "chance creation", "key pass", "key passes", "shot assist", "shot assists", "box entry", "box entries",
+            "penalty area", "final third", "final-third", "final third entries", "entries to final third",
+            "entries into box", "through ball", "cutback", "cross", "low cross", "deep cross", "half-space cross",
+            "xg", "expected goals", "shots", "shots on target", "big chances", "goal attempts",
+            "helyzetkialakítás", "kulcspassz", "lövést előkészítő", "box entry", "tizenhatos", "büntetőterület",
+            "támadóharmad", "mélységi passz", "visszagurítás", "beadás", "lapos beadás", "xg", "várható gól",
+            "lövések", "kaput eltaláló lövés", "nagy helyzet",
+        ],
+    },
+    "wide_play": {
+        "label": "Szélső játék / oldali dominancia",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("wide_play", {}).get("keywords", []) + [
+            "wide play", "wing", "flank", "left side", "right side", "overlap", "underlap", "fullback", "wingback",
+            "crossing", "side dominance", "touchline", "wide overload", "flank overload", "attacks left", "attacks right",
+            "szélső játék", "szél", "oldal", "bal oldal", "jobb oldal", "átfedés", "aláfutás", "szélső védő",
+            "wingback", "beadás", "oldali dominancia", "oldalvonal", "oldali túlterhelés", "bal oldali", "jobb oldali",
+        ])),
+    },
+    "central_play": {
+        "label": "Középső játék / félterületek",
+        "keywords": [
+            "central", "middle", "half-space", "half space", "between the lines", "pocket", "zone 14", "inside channel",
+            "central overload", "interior", "attacking midfielder", "number 10", "third man run",
+            "középen", "középső", "félterület", "félterületek", "vonalak között", "zseb", "14-es zóna",
+            "belső csatorna", "középső túlterhelés", "belső középpályás", "10-es",
+        ],
+    },
+    "set_pieces": {
+        "label": "Pontrúgások",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("set_pieces", {}).get("keywords", []) + [
+            "set piece", "set pieces", "corner", "corners", "corner kick", "free kick", "throw-in", "throw in",
+            "penalty", "attacking corner", "defensive corner", "near post", "far post", "second ball", "aerial", "header",
+            "pontrúgás", "pontrúgások", "szöglet", "szögletek", "szabadrúgás", "bedobás", "büntető",
+            "támadó szöglet", "védekező szöglet", "rövid oldal", "hosszú oldal", "második labda", "fejpárbaj", "fejes",
+        ])),
+    },
+    "key_players": {
+        "label": "Kulcsjátékosok",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("key_players", {}).get("keywords", []) + [
+            "key player", "danger man", "main threat", "top scorer", "creator", "playmaker", "progressor", "target man",
+            "dribbler", "1v1", "one-v-one", "finisher", "captain", "most dangerous", "player to watch",
+            "kulcsjátékos", "veszélyes játékos", "fő veszély", "gólkirály", "kreatív játékos", "irányító",
+            "progresszor", "céljátékos", "cselező", "egy az egy", "befejező", "csapatkapitány", "legveszélyesebb",
+        ])),
+    },
+    "weakness_risk": {
+        "label": "Gyengeségek / kockázatok",
+        "keywords": list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI.get("weakness_risk", {}).get("keywords", []) + [
+            "weakness", "weaknesses", "risk", "risks", "vulnerable", "vulnerability", "exposed", "space behind",
+            "gap", "mistake", "error", "turnover", "lost balls", "losses", "danger", "threat", "problem",
+            "conceded", "conceding", "dangerous area",
+            "gyengeség", "gyengeségek", "kockázat", "sebezhető", "sebezhetőség", "nyitott terület",
+            "mögötti terület", "rés", "hiba", "labdavesztés", "elvesztett labda", "veszély", "fenyegetés", "probléma",
+            "kapott gól", "veszélyes zóna",
+        ])),
+    },
+    "strength": {
+        "label": "Erősségek",
+        "keywords": [
+            "strength", "strengths", "strong", "advantage", "edge", "dominant", "effective", "efficient",
+            "best", "successful", "high value", "threat",
+            "erősség", "erősségek", "erős", "előny", "domináns", "hatékony", "kiemelkedő", "sikeres", "veszélyes",
+        ],
+    },
+    "goalkeeper": {
+        "label": "Kapus szerepe",
+        "keywords": [
+            "goalkeeper", "keeper", "gk", "sweeper keeper", "distribution", "long kick", "short pass from gk",
+            "goalkeeper involvement", "keeper distribution",
+            "kapus", "hálóőr", "kapusjáték", "kapus kirúgás", "kapus passz", "hosszú kirúgás", "rövid kirúgás",
+        ],
+    },
+    "match_dynamics": {
+        "label": "Meccsdinamika / fázisok",
+        "keywords": [
+            "first half", "second half", "opening phase", "late phase", "last 15", "tempo", "rhythm", "momentum",
+            "game state", "when leading", "when trailing", "after goal", "minutes", "phase",
+            "első félidő", "második félidő", "kezdő fázis", "végjáték", "utolsó 15", "tempó", "ritmus",
+            "momentum", "meccsállapot", "vezetésnél", "hátrányban", "gól után", "percek", "fázis",
+        ],
+    },
+    "recommendation": {
+        "label": "Javaslat / meccsterv",
+        "keywords": [
+            "recommendation", "recommend", "should", "we should", "game plan", "match plan", "plan a", "plan b",
+            "solution", "exploit", "avoid", "focus", "priority", "target", "press here", "attack here",
+            "javaslat", "ajánlás", "meccsterv", "mérkőzésterv", "terv a", "terv b", "megoldás",
+            "kihasználni", "elkerülni", "fókusz", "prioritás", "célpont", "itt presszing", "itt támadni",
+        ],
+    },
+})
+
 def _fpi_tactical_norm(x: object) -> str:
     import unicodedata as _unicodedata
     s = _unicodedata.normalize("NFKD", str(x or "").lower().replace("\\u00ad", " "))
@@ -6475,43 +6650,155 @@ def _fpi_tactical_parse_player_excel(df2: pd.DataFrame, mapping: Dict[str, Optio
         "duel_players": out.sort_values("defensive_challenges", ascending=False)[["player", "position", "defensive_challenges"]].head(5).reset_index(drop=True),
     }
 
-def _fpi_tactical_extract_pdf_text(files: List[object], max_pages: int = 80) -> Tuple[str, List[dict]]:
+def _fpi_tactical_page_text_v76(page) -> str:
+    """Robusztusabb PDF oldalszöveg-kinyerés.
+    Több pdfplumber módszert kombinál: sima text, layout text, words, tables.
+    """
+    chunks = []
+    # 1) Sima text – sok PDF-nél ez jó
+    for kwargs in [
+        {"x_tolerance": 1, "y_tolerance": 3},
+        {"x_tolerance": 2, "y_tolerance": 4},
+        {"layout": True, "x_tolerance": 1, "y_tolerance": 3},
+    ]:
+        try:
+            txt = page.extract_text(**kwargs) or ""
+            if txt and txt.strip():
+                chunks.append(txt)
+        except Exception:
+            pass
+
+    # 2) Words fallback – ha extract_text gyenge, de kijelölhető szavak vannak
+    try:
+        words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
+        if words:
+            word_text = " ".join(str(w.get("text", "")).strip() for w in words if str(w.get("text", "")).strip())
+            if word_text:
+                chunks.append(word_text)
+    except Exception:
+        try:
+            words = page.extract_words() or []
+            if words:
+                word_text = " ".join(str(w.get("text", "")).strip() for w in words if str(w.get("text", "")).strip())
+                if word_text:
+                    chunks.append(word_text)
+        except Exception:
+            pass
+
+    # 3) Táblázat fallback – sok taktikai PDF KPI táblázatokban tartja az adatokat
+    try:
+        tables = page.extract_tables() or []
+        for tbl in tables:
+            for row in tbl:
+                vals = [str(c).strip() for c in (row or []) if str(c).strip() and str(c).strip().lower() not in ["none", "nan"]]
+                if vals:
+                    chunks.append(" | ".join(vals))
+    except Exception:
+        pass
+
+    # Duplikátumok csökkentése
+    seen = set()
+    out = []
+    for ch in chunks:
+        ch = re.sub(r"\s+", " ", str(ch)).strip()
+        if len(ch) < 3:
+            continue
+        key = ch[:500]
+        if key not in seen:
+            seen.add(key)
+            out.append(ch)
+    return "\n".join(out)
+
+def _fpi_tactical_extract_pdf_text(files: List[object], max_pages: int = 120) -> Tuple[str, List[dict]]:
+    """V7.6 robust Tactical PDF reader.
+    Nem csak extract_text()-et használ, hanem extract_words() és extract_tables() fallbacket is.
+    Ezért szöveges, de furán tagolt PDF-eknél is nagyobb eséllyel talál tartalmat.
+    """
     pages, texts = [], []
     if pdfplumber is None:
         return "", pages
     for f in files or []:
         if f is None:
             continue
+        fname = getattr(f, "name", "pdf")
         try:
-            with pdfplumber.open(io.BytesIO(f.getvalue())) as pdf:
-                for i, p in enumerate(pdf.pages[:max_pages]):
-                    txt = p.extract_text(x_tolerance=1, y_tolerance=3) or ""
-                    if txt.strip():
-                        pages.append({"file": getattr(f, "name", "pdf"), "page": i + 1, "text": txt})
-                        texts.append(txt)
+            file_bytes = f.getvalue()
         except Exception:
             continue
-    return "\n\n".join(texts), pages
+        try:
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                for i, page in enumerate(pdf.pages[:max_pages]):
+                    txt = _fpi_tactical_page_text_v76(page)
+                    page_info = {
+                        "file": fname,
+                        "page": i + 1,
+                        "text": txt,
+                        "chars": len(txt or ""),
+                        "has_text": bool((txt or "").strip()),
+                    }
+                    pages.append(page_info)
+                    if txt.strip():
+                        texts.append(f"[{fname} / oldal {i+1}]\n{txt}")
+        except Exception as e:
+            pages.append({"file": fname, "page": None, "text": "", "chars": 0, "has_text": False, "error": str(e)})
+            continue
+    full_text = "\n\n".join(texts)
+    # normalizálás: ligatúrák, furcsa kötőjelek, kontroll karakterek
+    full_text = full_text.replace("\ufb01", "fi").replace("\ufb02", "fl")
+    full_text = full_text.replace("‐", "-").replace("‑", "-").replace("–", "-").replace("—", "-")
+    return full_text, pages
 
-def _fpi_tactical_context_lines(text: str, topic: str, limit: int = 7) -> List[str]:
+def _fpi_tactical_split_units_v76(text: str) -> List[str]:
+    raw = str(text or "").replace("\r", "\n")
+    lines = []
+    for block in raw.splitlines():
+        block = re.sub(r"\s+", " ", block).strip()
+        if not block:
+            continue
+        # Ha egy teljes oldal egy sorban jön ki, mondatokra / KPI szeletekre vágjuk.
+        if len(block) > 280:
+            parts = re.split(r"(?<=[.!?])\s+| \| | • |; ", block)
+            lines.extend([p.strip() for p in parts if len(p.strip()) >= 4])
+        else:
+            lines.append(block)
+    return lines
+
+def _fpi_tactical_context_lines(text: str, topic: str, limit: int = 10) -> List[str]:
     cfg = TACTICAL_TOPIC_TAGS_FPI.get(topic, {})
     kws = [_fpi_tactical_norm(k) for k in cfg.get("keywords", [])]
-    lines = [x.strip() for x in str(text or "").splitlines() if len(x.strip()) >= 4]
+    units = _fpi_tactical_split_units_v76(text)
     out = []
-    for i, line in enumerate(lines):
+    for i, line in enumerate(units):
         ln = _fpi_tactical_norm(line)
         if any(k and k in ln for k in kws):
-            for j in range(max(0, i - 1), min(len(lines), i + 2)):
-                out.append(lines[j])
+            for j in range(max(0, i - 1), min(len(units), i + 2)):
+                candidate = units[j].strip()
+                if len(candidate) >= 4:
+                    out.append(candidate[:900])
         if len(dict.fromkeys(out)) >= limit:
             break
     return list(dict.fromkeys(out))[:limit]
+
+def _fpi_tactical_top_terms_v76(text: str, limit: int = 25) -> List[dict]:
+    stop = set("""
+    the and for with from that this into their your are was were have has had not but
+    egy meg hogy van vagy mint ahol után előtt illetve saját ellenfél csapat játékos
+    és az ez ha is de már csak nem
+    """.split())
+    words = re.findall(r"[A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű][A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű\-]{3,}", str(text or ""))
+    counts = {}
+    for w in words:
+        n = _fpi_tactical_norm(w)
+        if n in stop or len(n) < 4:
+            continue
+        counts[n] = counts.get(n, 0) + 1
+    return [{"szó": k, "db": v} for k, v in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:limit]]
 
 def _fpi_tactical_pdf_insights(text: str) -> Dict[str, object]:
     rows = []
     blocks = {}
     for key, cfg in TACTICAL_TOPIC_TAGS_FPI.items():
-        lines = _fpi_tactical_context_lines(text, key, limit=8)
+        lines = _fpi_tactical_context_lines(text, key, limit=10)
         hit = sum(1 for line in lines for kw in cfg["keywords"] if _fpi_tactical_norm(kw) in _fpi_tactical_norm(line))
         conf = min(100, hit * 15 + len(lines) * 5)
         rows.append({"Téma": cfg["label"], "Kulcs": key, "Találat": hit, "Bizonyosság": conf, "Minta": " | ".join(lines[:2])})
@@ -6519,7 +6806,16 @@ def _fpi_tactical_pdf_insights(text: str) -> Dict[str, object]:
     detected = [r for r in rows if r["Találat"] > 0 or r["Minta"]]
     detected = sorted(detected, key=lambda x: x["Bizonyosság"], reverse=True)
     formation_match = re.search(r"\b([3-5]-[1-5]-[1-5](?:-[1-3])?)\b", text or "")
-    return {"formation": formation_match.group(1) if formation_match else "n.a.", "blocks": blocks, "topics": detected[:12], "raw_text_len": len(text or "")}
+    preview = re.sub(r"\s+", " ", str(text or "")).strip()[:1800]
+    return {
+        "formation": formation_match.group(1) if formation_match else "n.a.",
+        "blocks": blocks,
+        "topics": detected[:18],
+        "raw_text_len": len(text or ""),
+        "preview": preview,
+        "top_terms": _fpi_tactical_top_terms_v76(text),
+        "reader_version": "V7.6 robust pdfplumber text+words+tables reader",
+    }
 
 def _fpi_analysis_level(has_gps: bool, has_pdf: bool, has_team_excel: bool, has_player_excel: bool) -> Tuple[int, str]:
     if has_gps and has_pdf and has_team_excel and has_player_excel:
@@ -6769,6 +7065,33 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         st.warning("Saját PDF feltöltve, de nem sikerült szöveget kinyerni belőle. Valószínűleg képalapú/scannelt PDF, ezért a taktikai témák nem jelennek meg.")
     if opp_pdf_uploaded and not opp_pdf_text:
         st.warning("Ellenfél PDF feltöltve, de nem sikerült szöveget kinyerni belőle. Valószínűleg képalapú/scannelt PDF, ezért a taktikai témák nem jelennek meg.")
+
+    with st.expander("🔎 PDF diagnosztika – mit sikerült kiolvasni?", expanded=False):
+        diag_rows = []
+        for side, pages, insights in [
+            ("Saját", own_pdf_pages, own_pdf_insights),
+            ("Ellenfél", opp_pdf_pages, opp_pdf_insights),
+        ]:
+            diag_rows.append({
+                "Oldal": side,
+                "PDF oldalak": len(pages),
+                "Kinyert karakter": int(insights.get("raw_text_len", 0) or 0),
+                "Felismert témák": len(insights.get("topics", []) or []),
+                "Reader": insights.get("reader_version", ""),
+            })
+        st.dataframe(pd.DataFrame(diag_rows), use_container_width=True, hide_index=True)
+
+        d1, d2 = st.columns(2)
+        with d1:
+            st.markdown("**Saját PDF előnézet**")
+            st.text_area("Saját PDF – első kinyert szövegrész", own_pdf_insights.get("preview", ""), height=180, key="own_pdf_preview_v76")
+            if own_pdf_insights.get("top_terms"):
+                st.dataframe(pd.DataFrame(own_pdf_insights.get("top_terms", [])), use_container_width=True, hide_index=True)
+        with d2:
+            st.markdown("**Ellenfél PDF előnézet**")
+            st.text_area("Ellenfél PDF – első kinyert szövegrész", opp_pdf_insights.get("preview", ""), height=180, key="opp_pdf_preview_v76")
+            if opp_pdf_insights.get("top_terms"):
+                st.dataframe(pd.DataFrame(opp_pdf_insights.get("top_terms", [])), use_container_width=True, hide_index=True)
 
     st.markdown("### Taktikai stratégiai paletta")
     st.caption("A kódok jelentése, hogy a javasolt Plan A / Plan B ne legyen félreérthető.")
