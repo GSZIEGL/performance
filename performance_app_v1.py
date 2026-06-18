@@ -8834,6 +8834,27 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     # Nem session_state fájlobjektumból próbáljuk újranyitni exportkor.
     own_pdf_text, own_pdf_pages, own_items_v89 = _fpi_tactical_app_combine_uploadfiles_v89(own_pdfs or [])
     opp_pdf_text, opp_pdf_pages, opp_items_v89 = _fpi_tactical_app_combine_uploadfiles_v89(opp_pdfs or [])
+with st.expander("PDF RAW DEBUG", expanded=True):
+    st.write("own_pdfs type:", type(own_pdfs))
+    st.write("own_pdfs len:", len(own_pdfs or []))
+    for i, f in enumerate(own_pdfs or []):
+        st.write("OWN PDF", i, getattr(f, "name", None), type(f))
+        try:
+            b = f.getvalue()
+            st.write("getvalue bytes:", len(b), b[:20])
+        except Exception as e:
+            st.error(f"getvalue error: {e}")
+
+        try:
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(b)) as pdf:
+                st.write("pdfplumber pages:", len(pdf.pages))
+                txt = pdf.pages[0].extract_text(x_tolerance=1, y_tolerance=3) or ""
+                st.write("first page chars:", len(txt))
+                st.text(txt[:1000])
+        except Exception as e:
+            st.error(f"pdfplumber error: {e}")
+
 
     # Multi-reader csak fallback.
     if not own_pdf_text:
