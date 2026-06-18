@@ -49,7 +49,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V070_ADAPTIVE_INTELLIGENCE_2026_06_17"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V071_OWN_TEAM_TACTICAL_EXEC_PDF_2026_06_17"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5273,6 +5273,7 @@ def build_fpi_product_pdf_bytes(
     playstyle: str = "Kiegyensúlyozott",
     report_type: str = "full",
     demo_label: str = "",
+    tactical_context: Optional[Dict[str, object]] = None,
 ) -> Optional[bytes]:
     """Egységes PDF motor.
 
@@ -5289,6 +5290,7 @@ def build_fpi_product_pdf_bytes(
     ctx = _fpi_report_context(data, selected_week, playstyle)
     if ctx.get("error"):
         return None
+    tactical_context = tactical_context if tactical_context is not None else st.session_state.get("tactical_pro_context", None)
 
     df = ctx["df"]
     week = ctx["selected_week"]
@@ -5491,6 +5493,56 @@ def build_fpi_product_pdf_bytes(
                 ad.append([P(r.get(c, ""), small) for c in cols])
             story.append(table(ad, [27.7*cm/len(cols)]*len(cols), header_bg="#7F1D1D", row_bgs=[colors.HexColor("#FEF2F2"), colors.white]))
 
+
+    def add_tactical_executive_page():
+        story.append(section("Tactical Pro+ – saját csapat + ellenfél döntéselőkészítés", "#E0F2FE"))
+        if not tactical_context:
+            story.append(Paragraph(pdf_safe_text(
+                "Ehhez a riporthoz nem volt taktikai PDF/Excel feltöltve. A vezetői értékelés GPS-only módban készült. "
+                "Taktikai anyag feltöltése esetén ezen az oldalon megjelenik a saját csapat és ellenfél összevetése, "
+                "a felismert taktikai témák, a Match Plan és az MD-terv taktikai indoklása."
+            ), body))
+            return
+
+        status_rows = [
+            [P("Elemzési szint", head), P(str(tactical_context.get("analysis_level", "n.a.")), small)],
+            [P("Saját anyag", head), P(f"PDF: {'igen' if tactical_context.get('has_own_pdf') else 'nem'} | Team Excel: {'igen' if tactical_context.get('has_own_team_excel') else 'nem'} | Player Excel: {'igen' if tactical_context.get('has_own_player_excel') else 'nem'}", small)],
+            [P("Ellenfél anyag", head), P(f"PDF: {'igen' if tactical_context.get('has_opp_pdf') else 'nem'} | Team Excel: {'igen' if tactical_context.get('has_opp_team_excel') else 'nem'} | Player Excel: {'igen' if tactical_context.get('has_opp_player_excel') else 'nem'}", small)],
+            [P("Plan A", head), P(str(tactical_context.get("plan_a", "n.a.")), small)],
+        ]
+        story.append(table(status_rows, [6.0*cm, 21.7*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
+        story.append(Spacer(1, 0.20*cm))
+
+        story.append(section("Fő taktikai kockázatok / fókuszok", "#FEE2E2"))
+        risk_rows = [[P("#", head), P("Kockázat / fókusz", head)]]
+        for i, r in enumerate((tactical_context.get("risks") or [])[:6], 1):
+            risk_rows.append([P(str(i), small), P(str(r), small)])
+        if len(risk_rows) == 1:
+            risk_rows.append([P("1", small), P("Nincs taktikai input; GPS-alapú monitoring.", small)])
+        story.append(table(risk_rows, [1.2*cm, 26.5*cm], header_bg="#7F1D1D", row_bgs=[colors.HexColor("#FEF2F2"), colors.white]))
+        story.append(Spacer(1, 0.20*cm))
+
+        story.append(section("Saját vs ellenfél – PDF témák és KPI-k", "#DCFCE7"))
+        def _topic_names(rows):
+            out = []
+            for r in rows[:5]:
+                out.append(str(r.get("Téma", r.get("label", ""))))
+            return ", ".join([x for x in out if x]) or "n.a."
+        rows = [
+            [P("Oldal", head), P("Felismert PDF témák", head), P("Csapat KPI-k", head)],
+            [P("Saját", small), P(_topic_names(tactical_context.get("own_topics", []) or []), small), P(_tactical_key_numbers_summary(tactical_context.get("own_team_metrics", {}) or {}), small)],
+            [P("Ellenfél", small), P(_topic_names(tactical_context.get("opp_topics", []) or []), small), P(_tactical_key_numbers_summary(tactical_context.get("opp_team_metrics", {}) or {}), small)],
+        ]
+        story.append(table(rows, [3.0*cm, 12.5*cm, 12.2*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
+        story.append(Spacer(1, 0.20*cm))
+
+        if tactical_context.get("md_plan"):
+            story.append(section("Taktikailag támogatott MD-terv", "#EDE9FE"))
+            md_rows = [[P("Nap", head), P("Fókusz", head), P("Indoklás", head)]]
+            for a, b, c in (tactical_context.get("md_plan") or [])[:6]:
+                md_rows.append([P(a, small), P(b, small), P(c, small)])
+            story.append(table(md_rows, [4.0*cm, 9.5*cm, 14.2*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
+
     def add_methodology_page():
         story.append(section("Módszertani összefoglaló – hogyan számol az FPI?", "#DBEAFE"))
         intro = (
@@ -5522,6 +5574,8 @@ def build_fpi_product_pdf_bytes(
     add_cover()
     if report_type in ["executive", "full"]:
         add_executive_page()
+        story.append(PageBreak())
+        add_tactical_executive_page()
     if report_type == "executive":
         pass
     elif report_type == "fitness":
@@ -5542,6 +5596,43 @@ def build_fpi_product_pdf_bytes(
     return buffer.getvalue()
 
 
+def _build_demo_tactical_context() -> Dict[str, object]:
+    return {
+        "version": "DEMO_TACTICAL_CONTEXT_V1",
+        "analysis_level": "Level 4 – Full Intelligence DEMO",
+        "has_own_pdf": True,
+        "has_opp_pdf": True,
+        "has_own_team_excel": True,
+        "has_opp_team_excel": True,
+        "has_own_player_excel": True,
+        "has_opp_player_excel": True,
+        "own_topics": [
+            {"Téma": "Labdakihozatal / támadásépítés", "Bizonyosság": 88},
+            {"Téma": "Presszing / letámadás", "Bizonyosság": 82},
+        ],
+        "opp_topics": [
+            {"Téma": "Támadó átmenet / kontrák", "Bizonyosság": 91},
+            {"Téma": "Szélső játék / oldali dominancia", "Bizonyosság": 78},
+            {"Téma": "Pontrúgások", "Bizonyosság": 72},
+        ],
+        "own_team_metrics": {"possession_pct": 54, "shots": 12, "entries_box": 18, "pressing_success_pct": 62},
+        "opp_team_metrics": {"counterattacks": 8, "crosses": 21, "corners": 6, "shots": 10},
+        "plan_a": "BAT – középső blokk + gyors átmenet, jobb oldali biztosítással",
+        "risks": [
+            "Ellenfél-kontrák / gyors átmenetek kezelése",
+            "Szélső játék és beadások elleni védekezés",
+            "Pontrúgás-védekezés és második labdák",
+        ],
+        "md_plan": [
+            ("MD-4", "Volumen + saját játékmodell", "Saját build-up és presszing trigger ismétlése."),
+            ("MD-3", "HSR / sprint exponálás + átmenetek", "Ellenfél kontraveszély miatt átmeneti futások kontrollált terheléssel."),
+            ("MD-2", "Kontrák elleni biztosítás + rest defense", "Ellenfél gyors átmeneti profilja miatt."),
+            ("MD-1", "Aktiváció + pontrúgás", "Pontrúgás-veszély és frissesség kezelése."),
+        ],
+        "player_focus": ["Jobb oldali védő: beadások elleni 1v1 fókusz", "6-os: rest defense pozíció", "9-es: second ball célpont"],
+    }
+
+
 def build_fpi_sample_pdf_bytes(report_type: str = "full") -> Optional[bytes]:
     demo_raw = build_demo_performance_data()
     demo_df, _, missing = standardize_dataframe(demo_raw)
@@ -5549,7 +5640,7 @@ def build_fpi_sample_pdf_bytes(report_type: str = "full") -> Optional[bytes]:
         return None
     demo_df = add_position_group(demo_df)
     latest = _fpi_latest_week(demo_df)
-    return build_fpi_product_pdf_bytes(demo_df, latest, "Pressing", report_type=report_type, demo_label="MINTA RIPORT / Demo FC U19")
+    return build_fpi_product_pdf_bytes(demo_df, latest, "Pressing", report_type=report_type, demo_label="MINTA RIPORT / Demo FC U19", tactical_context=_build_demo_tactical_context())
 
 # -----------------------------------------------------------------------------
 # UI
@@ -6294,47 +6385,151 @@ def _fpi_build_adaptive_match_training_plan(gps_context: Dict[str, object], tact
 
     return {"analysis_level": tactical.get("analysis_level_label", "GPS Only"), "plan_a": plan_a, "risks": list(dict.fromkeys(risks))[:5], "md_plan": md_plan, "player_focus": player_focus[:5]}
 
+def _merge_tactical_pdf_insights(own_insights: Dict[str, object], opp_insights: Dict[str, object]) -> Dict[str, object]:
+    """Saját + ellenfél taktikai PDF insightok összefűzése úgy, hogy a régi logika se vesszen el."""
+    merged_blocks = {}
+    for key in TACTICAL_TOPIC_TAGS_FPI.keys():
+        own_lines = ((own_insights or {}).get("blocks") or {}).get(key, []) or []
+        opp_lines = ((opp_insights or {}).get("blocks") or {}).get(key, []) or []
+        merged_blocks[key] = [f"Saját: {x}" for x in own_lines[:4]] + [f"Ellenfél: {x}" for x in opp_lines[:4]]
+
+    topics = []
+    for source_label, src in [("Saját", own_insights or {}), ("Ellenfél", opp_insights or {})]:
+        for row in src.get("topics", []) or []:
+            r = dict(row)
+            r["Forrás"] = source_label
+            topics.append(r)
+    topics = sorted(topics, key=lambda x: x.get("Bizonyosság", 0), reverse=True)
+
+    formation = (opp_insights or {}).get("formation") or (own_insights or {}).get("formation") or "n.a."
+    return {
+        "formation": formation,
+        "blocks": merged_blocks,
+        "topics": topics[:18],
+        "raw_text_len": int((own_insights or {}).get("raw_text_len", 0) or 0) + int((opp_insights or {}).get("raw_text_len", 0) or 0),
+        "own": own_insights or {},
+        "opponent": opp_insights or {},
+    }
+
+def _tactical_key_numbers_summary(metrics: Dict[str, float]) -> str:
+    if not metrics:
+        return "Nincs értelmezhető taktikai csapat KPI."
+    label_map = {
+        "possession_pct": "Labdabirtoklás",
+        "shots": "Lövések",
+        "xg": "xG",
+        "entries_box": "Box entries",
+        "key_passes": "Kulcspasszok",
+        "corners": "Szögletek",
+        "ppda": "PPDA",
+        "pressing_success_pct": "Pressing %",
+        "counterattacks": "Kontrák",
+        "recoveries": "Labdaszerzések",
+        "lost_balls": "Labdavesztések",
+    }
+    parts = []
+    for k, lab in label_map.items():
+        v = metrics.get(k)
+        if v not in [None, 0, 0.0, ""]:
+            try:
+                parts.append(f"{lab}: {float(v):.1f}")
+            except Exception:
+                parts.append(f"{lab}: {v}")
+    return " | ".join(parts[:8]) if parts else "Nincs kiemelkedő taktikai KPI."
+
+def _build_tactical_executive_context(gps_context: Dict[str, object], tactical_ctx: Dict[str, object], plan: Dict[str, object]) -> Dict[str, object]:
+    own = tactical_ctx.get("own", {}) if tactical_ctx else {}
+    opp = tactical_ctx.get("opponent", {}) if tactical_ctx else {}
+    analysis_level = tactical_ctx.get("analysis_level_label", "GPS Only")
+    return {
+        "version": TACTICAL_PRO_VERSION,
+        "analysis_level": analysis_level,
+        "has_own_pdf": bool((own.get("pdf_insights") or {}).get("raw_text_len", 0)),
+        "has_opp_pdf": bool((opp.get("pdf_insights") or {}).get("raw_text_len", 0)),
+        "has_own_team_excel": bool(own.get("team_metrics")),
+        "has_opp_team_excel": bool(opp.get("team_metrics")),
+        "has_own_player_excel": bool(own.get("player_tables")),
+        "has_opp_player_excel": bool(opp.get("player_tables")),
+        "own_topics": ((own.get("pdf_insights") or {}).get("topics") or [])[:8],
+        "opp_topics": ((opp.get("pdf_insights") or {}).get("topics") or [])[:8],
+        "own_team_metrics": own.get("team_metrics", {}),
+        "opp_team_metrics": opp.get("team_metrics", {}),
+        "plan_a": plan.get("plan_a", "KIE – Kiegyensúlyozott"),
+        "risks": plan.get("risks", []),
+        "md_plan": plan.get("md_plan", []),
+        "player_focus": plan.get("player_focus", []),
+    }
+
 def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     st.markdown("## 🧠 Tactical Pro+ / Adaptive Intelligence")
-    st.markdown("GPS-alapon önállóan is működik. Ha taktikai PDF-et vagy Exceleket töltesz fel, azokat beépíti a meccstervbe és a heti edzésterv-javaslatba.")
+    st.markdown(
+        "GPS-alapon önállóan is működik. Ha saját csapatról és/vagy ellenfélről taktikai PDF-et, "
+        "csapat Excelt vagy játékos Excelt töltesz fel, azokat beépíti a meccstervbe és a heti edzésterv-javaslatba."
+    )
 
-    with st.expander("📥 Taktikai inputok", expanded=True):
-        c1, c2 = st.columns(2)
-        with c1:
+    with st.expander("📥 Taktikai inputok – saját csapat és ellenfél", expanded=True):
+        own_col, opp_col = st.columns(2)
+        with own_col:
+            st.markdown("### Saját csapat")
+            own_pdfs = st.file_uploader("Saját taktikai PDF-ek", type=["pdf"], accept_multiple_files=True, key="tactical_pro_own_pdfs")
+            own_team_xlsx = st.file_uploader("Saját csapatstatisztika Excel", type=["xlsx", "xls"], key="tactical_pro_own_team_xlsx")
+            own_player_xlsx = st.file_uploader("Saját játékosstatisztika Excel", type=["xlsx", "xls"], key="tactical_pro_own_player_xlsx")
+        with opp_col:
+            st.markdown("### Ellenfél")
             opp_pdfs = st.file_uploader("Ellenfél taktikai PDF-ek", type=["pdf"], accept_multiple_files=True, key="tactical_pro_opp_pdfs")
             opp_team_xlsx = st.file_uploader("Ellenfél csapatstatisztika Excel", type=["xlsx", "xls"], key="tactical_pro_opp_team_xlsx")
-        with c2:
             opp_player_xlsx = st.file_uploader("Ellenfél játékosstatisztika Excel", type=["xlsx", "xls"], key="tactical_pro_opp_player_xlsx")
-            own_tactical_xlsx = st.file_uploader("Saját csapat taktikai Excel (opcionális)", type=["xlsx", "xls"], key="tactical_pro_own_team_xlsx")
 
     has_gps = bool(gps_context.get("has_gps", True))
-    has_pdf = bool(opp_pdfs)
-    has_team_excel = opp_team_xlsx is not None or own_tactical_xlsx is not None
-    has_player_excel = opp_player_xlsx is not None
+    has_pdf = bool(opp_pdfs or own_pdfs)
+    has_team_excel = opp_team_xlsx is not None or own_team_xlsx is not None
+    has_player_excel = opp_player_xlsx is not None or own_player_xlsx is not None
     level, level_label = _fpi_analysis_level(has_gps, has_pdf, has_team_excel, has_player_excel)
     st.info(f"Elemzési szint: Level {level} – {level_label}")
 
-    pdf_text, pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
-    pdf_insights = _fpi_tactical_pdf_insights(pdf_text) if pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0}
+    own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(own_pdfs or [])
+    opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
+    own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0}
+    opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0}
+    merged_pdf_insights = _merge_tactical_pdf_insights(own_pdf_insights, opp_pdf_insights)
 
-    team_metrics = {}
-    player_tables = {}
+    own_team_metrics, opp_team_metrics = {}, {}
+    own_player_tables, opp_player_tables = {}, {}
+
+    if own_team_xlsx is not None:
+        own_team_df, own_team_mapping = _fpi_tactical_mapper_ui(own_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "own_team_tactical", "Saját csapat Excel")
+        own_team_metrics = _fpi_tactical_parse_team_excel(own_team_df, own_team_mapping)
+
     if opp_team_xlsx is not None:
         opp_team_df, opp_team_mapping = _fpi_tactical_mapper_ui(opp_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "opp_team_tactical", "Ellenfél csapat Excel")
-        team_metrics.update(_fpi_tactical_parse_team_excel(opp_team_df, opp_team_mapping))
-    if own_tactical_xlsx is not None:
-        own_team_df, own_team_mapping = _fpi_tactical_mapper_ui(own_tactical_xlsx, TACTICAL_TEAM_ALIASES_FPI, "own_team_tactical", "Saját csapat taktikai Excel")
+        opp_team_metrics = _fpi_tactical_parse_team_excel(opp_team_df, opp_team_mapping)
+
+    if own_player_xlsx is not None:
+        own_player_df, own_player_mapping = _fpi_tactical_mapper_ui(own_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "own_player_tactical", "Saját játékos Excel")
+        own_player_tables = _fpi_tactical_parse_player_excel(own_player_df, own_player_mapping)
+
     if opp_player_xlsx is not None:
         opp_player_df, opp_player_mapping = _fpi_tactical_mapper_ui(opp_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "opp_player_tactical", "Ellenfél játékos Excel")
-        player_tables = _fpi_tactical_parse_player_excel(opp_player_df, opp_player_mapping)
+        opp_player_tables = _fpi_tactical_parse_player_excel(opp_player_df, opp_player_mapping)
 
-    tactical_ctx = {"analysis_level_label": level_label, "pdf_insights": pdf_insights, "team_metrics": team_metrics, "player_tables": player_tables}
-    plan = _fpi_build_adaptive_match_training_plan(gps_context, tactical_ctx)
+    # A régi plan-motor ellenfél fókuszú volt. Megtartjuk, de kibővített, merge-elt PDF insighttal és ellenfél KPI-okkal etetjük.
+    tactical_ctx_for_plan = {
+        "analysis_level_label": level_label,
+        "pdf_insights": merged_pdf_insights,
+        "team_metrics": opp_team_metrics,
+        "player_tables": opp_player_tables,
+        "own": {"pdf_insights": own_pdf_insights, "team_metrics": own_team_metrics, "player_tables": own_player_tables},
+        "opponent": {"pdf_insights": opp_pdf_insights, "team_metrics": opp_team_metrics, "player_tables": opp_player_tables},
+    }
+    plan = _fpi_build_adaptive_match_training_plan(gps_context, tactical_ctx_for_plan)
+    executive_ctx = _build_tactical_executive_context(gps_context, tactical_ctx_for_plan, plan)
+    st.session_state["tactical_pro_context"] = executive_ctx
 
-    k1, k2, k3 = st.columns(3)
+    k1, k2, k3, k4 = st.columns(4)
     k1.metric("Adaptive szint", f"Level {level}")
-    k2.metric("PDF oldalak", len(pdf_pages))
-    k3.metric("Taktikai KPI-k", len([v for v in team_metrics.values() if v not in [0, 0.0, None]]))
+    k2.metric("Saját PDF oldalak", len(own_pdf_pages))
+    k3.metric("Ellenfél PDF oldalak", len(opp_pdf_pages))
+    k4.metric("Taktikai KPI-k", len([v for v in {**own_team_metrics, **opp_team_metrics}.values() if v not in [0, 0.0, None]]))
 
     st.markdown("### 1. Match Plan AI – javasolt meccsterv")
     st.markdown(f"**Plan A:** {plan['plan_a']}")
@@ -6342,28 +6537,45 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     for r in plan["risks"]:
         st.markdown(f"- {r}")
 
-    st.markdown("### 2. Training Planner AI – heti MD-terv")
+    st.markdown("### 2. Saját vs ellenfél gyors összevetés")
+    comp_rows = [
+        {"Oldal": "Saját csapat", "PDF témák": len(own_pdf_insights.get("topics", []) or []), "Csapat KPI": _tactical_key_numbers_summary(own_team_metrics)},
+        {"Oldal": "Ellenfél", "PDF témák": len(opp_pdf_insights.get("topics", []) or []), "Csapat KPI": _tactical_key_numbers_summary(opp_team_metrics)},
+    ]
+    st.dataframe(pd.DataFrame(comp_rows), use_container_width=True, hide_index=True)
+
+    st.markdown("### 3. Training Planner AI – heti MD-terv")
     md_df = pd.DataFrame(plan["md_plan"], columns=["Nap", "Fókusz", "Miért?"])
     st.dataframe(md_df, use_container_width=True)
 
-    st.markdown("### 3. Játékosszintű/taktikai fókusz")
+    st.markdown("### 4. Játékosszintű/taktikai fókusz")
     if plan["player_focus"]:
         for p in plan["player_focus"]:
             st.markdown(f"- {p}")
     else:
         st.caption("Nincs külön játékos Excel vagy kiemelt játékos. GPS-alapú monitoring marad aktív.")
 
-    if pdf_insights.get("topics"):
-        st.markdown("### 4. PDF-ből felismert taktikai témák")
-        st.dataframe(pd.DataFrame(pdf_insights["topics"]), use_container_width=True)
-        with st.expander("PDF szövegkörnyezetek témánként"):
-            for key, lines in (pdf_insights.get("blocks") or {}).items():
-                if lines:
-                    st.markdown(f"**{TACTICAL_TOPIC_TAGS_FPI.get(key, {}).get('label', key)}**")
-                    for line in lines[:5]:
-                        st.caption(line)
-    else:
-        st.caption("Taktikai PDF nélkül a modul GPS-only módban ad meccs- és edzésterv-javaslatot.")
+    st.markdown("### 5. PDF-ből felismert taktikai témák")
+    tcol1, tcol2 = st.columns(2)
+    with tcol1:
+        st.markdown("**Saját csapat PDF témák**")
+        if own_pdf_insights.get("topics"):
+            st.dataframe(pd.DataFrame(own_pdf_insights["topics"]), use_container_width=True)
+        else:
+            st.caption("Nincs saját taktikai PDF vagy nem volt felismerhető szöveg.")
+    with tcol2:
+        st.markdown("**Ellenfél PDF témák**")
+        if opp_pdf_insights.get("topics"):
+            st.dataframe(pd.DataFrame(opp_pdf_insights["topics"]), use_container_width=True)
+        else:
+            st.caption("Nincs ellenfél taktikai PDF vagy nem volt felismerhető szöveg.")
+
+    with st.expander("PDF szövegkörnyezetek témánként – saját + ellenfél"):
+        for key, lines in (merged_pdf_insights.get("blocks") or {}).items():
+            if lines:
+                st.markdown(f"**{TACTICAL_TOPIC_TAGS_FPI.get(key, {}).get('label', key)}**")
+                for line in lines[:8]:
+                    st.caption(line)
 
     export_payload = {
         "version": TACTICAL_PRO_VERSION,
@@ -6372,10 +6584,13 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         "risks": plan["risks"],
         "md_plan": [{"Nap": a, "Fókusz": b, "Miért": c} for a, b, c in plan["md_plan"]],
         "player_focus": plan["player_focus"],
-        "detected_topics": pdf_insights.get("topics", []),
-        "team_metrics": team_metrics,
+        "own_detected_topics": own_pdf_insights.get("topics", []),
+        "opp_detected_topics": opp_pdf_insights.get("topics", []),
+        "own_team_metrics": own_team_metrics,
+        "opp_team_metrics": opp_team_metrics,
     }
     st.download_button("⬇️ Tactical Pro+ JSON export", data=json.dumps(export_payload, ensure_ascii=False, indent=2).encode("utf-8"), file_name="fpi_tactical_pro_plus_export.json", mime="application/json", use_container_width=True)
+
 
 
 # Tabok
@@ -6555,7 +6770,7 @@ with tab_exec:
     rp1, rp2, rp3, rp4 = st.columns(4)
     live_report_base = analysis_base_df.copy()
     with rp1:
-        exec_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="executive")
+        exec_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="executive", tactical_context=st.session_state.get("tactical_pro_context"))
         if exec_pack_pdf is not None:
             st.download_button(
                 "⬇️ Vezetői PDF 1-2 oldal",
@@ -6566,7 +6781,7 @@ with tab_exec:
                 key="download_fpi_exec_pack_v58",
             )
     with rp2:
-        fitness_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="fitness")
+        fitness_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="fitness", tactical_context=st.session_state.get("tactical_pro_context"))
         if fitness_pack_pdf is not None:
             st.download_button(
                 "⬇️ Erőnléti PDF",
@@ -6577,7 +6792,7 @@ with tab_exec:
                 key="download_fpi_fitness_pack_v58",
             )
     with rp3:
-        micro_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="microcycle")
+        micro_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="microcycle", tactical_context=st.session_state.get("tactical_pro_context"))
         if micro_pack_pdf is not None:
             st.download_button(
                 "⬇️ Mikrociklus PDF",
@@ -6588,7 +6803,7 @@ with tab_exec:
                 key="download_fpi_micro_pack_v58",
             )
     with rp4:
-        full_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="full")
+        full_pack_pdf = build_fpi_product_pdf_bytes(live_report_base, selected_week, selected_playstyle, report_type="full", tactical_context=st.session_state.get("tactical_pro_context"))
         if full_pack_pdf is not None:
             st.download_button(
                 "⬇️ Teljes stáb PDF",
