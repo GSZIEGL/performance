@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V104_CLEAN_TACTICAL_SCOPE_FIX_HTML_CLEAN_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V105_CLEAN_PDF_INSIGHTS_AND_MAPPING_FIX_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7839,6 +7839,53 @@ def render_fpi_landing_page_v100() -> None:
 
 
 
+
+def _fpi_safe_tactical_pdf_insights_v105(pdf_text: str, uploaded: bool = False, pages: Optional[List[dict]] = None) -> Dict[str, object]:
+    """Clean oldal korai futási sorrend kompatibilis PDF insight.
+    Ha a teljes _fpi_tactical_pdf_insights még nincs definiálva, akkor minimális,
+    de export-kompatibilis struktúrát ad vissza, hogy ne legyen NameError.
+    """
+    pages = pages or []
+    if pdf_text and "_fpi_tactical_pdf_insights" in globals():
+        try:
+            out = _fpi_tactical_pdf_insights(pdf_text)
+            out["pdf_uploaded"] = uploaded
+            out["pdf_pages"] = len([p for p in pages if p.get("has_text") or p.get("text")]) if pages else out.get("pdf_pages", 0)
+            out["raw_text_len"] = out.get("raw_text_len", len(pdf_text or ""))
+            return out
+        except Exception:
+            pass
+
+    blocks = {}
+    topics = []
+    raw = str(pdf_text or "")
+    try:
+        tags = TACTICAL_TOPIC_TAGS_FPI
+    except Exception:
+        tags = {}
+    low = _fpi_tactical_norm(raw) if "_fpi_tactical_norm" in globals() else raw.lower()
+    for key, words in (tags or {}).items():
+        hits = []
+        for w in words[:40]:
+            ww = _fpi_tactical_norm(w) if "_fpi_tactical_norm" in globals() else str(w).lower()
+            if ww and ww in low:
+                hits.append(str(w))
+        if hits:
+            blocks[key] = hits[:8]
+            topics.append({"Téma": key, "Találat": ", ".join(hits[:5]), "Forrás": "PDF"})
+    return {
+        "blocks": blocks,
+        "topics": topics[:12],
+        "raw_text_len": len(raw),
+        "pdf_uploaded": uploaded,
+        "pdf_pages": len([p for p in pages if p.get("has_text") or p.get("text")]),
+        "sportsbase_findings": [],
+        "sportsbase_lines": [],
+        "reader_version": "safe_clean_fallback_v105",
+    }
+
+
+
 def _fpi_safe_merge_tactical_pdf_insights_v104(own_pdf_insights: Dict[str, object], opp_pdf_insights: Dict[str, object]) -> Dict[str, object]:
     """A tiszta oldal korai futási sorrendben is működjön.
     Ha a később definiált _merge_tactical_pdf_insights még nincs globals-ban,
@@ -7955,8 +8002,8 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
 
         own_pdf_uploaded = bool(own_pdfs)
         opp_pdf_uploaded = bool(opp_pdfs)
-        own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": own_pdf_uploaded, "pdf_pages": len(own_pdf_pages)}
-        opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": opp_pdf_uploaded, "pdf_pages": len(opp_pdf_pages)}
+        own_pdf_insights = _fpi_safe_tactical_pdf_insights_v105(own_pdf_text, uploaded=own_pdf_uploaded, pages=own_pdf_pages)
+        opp_pdf_insights = _fpi_safe_tactical_pdf_insights_v105(opp_pdf_text, uploaded=opp_pdf_uploaded, pages=opp_pdf_pages)
         own_pdf_insights["pdf_uploaded"] = own_pdf_uploaded
         own_pdf_insights["pdf_pages"] = len([p for p in own_pdf_pages if p.get("has_text") or p.get("text")])
         opp_pdf_insights["pdf_uploaded"] = opp_pdf_uploaded
@@ -8066,6 +8113,14 @@ def render_fpi_clean_workspace_v101() -> None:
         raw_df_clean = build_demo_performance_data()
     else:
         try:
+            try:
+                _clean_sig = hashlib.md5(uploaded_clean.getvalue()).hexdigest()
+                if st.session_state.get("clean_active_upload_signature_v105") != _clean_sig:
+                    st.session_state.pop("clean_mapped_df_override_v105", None)
+                    st.session_state.pop("clean_manual_mapping_v105", None)
+                    st.session_state["clean_active_upload_signature_v105"] = _clean_sig
+            except Exception:
+                pass
             sheets_clean = prepare_uploaded_sheets(read_excel_all(uploaded_clean))
             sheet_names_clean = list(sheets_clean.keys())
             selected_sheet_clean = st.selectbox("Munkalap", sheet_names_clean, index=0, key="clean_sheet_select_v101")
@@ -8075,7 +8130,12 @@ def render_fpi_clean_workspace_v101() -> None:
             st.stop()
 
     st.markdown("### 2. Kontextus és szűrők")
-    df_clean, mapping_clean, missing_clean = standardize_dataframe(raw_df_clean)
+    if "clean_mapped_df_override_v105" in st.session_state and isinstance(st.session_state["clean_mapped_df_override_v105"], pd.DataFrame):
+        df_clean = st.session_state["clean_mapped_df_override_v105"].copy()
+        mapping_clean = st.session_state.get("clean_manual_mapping_v105", {})
+        missing_clean = []
+    else:
+        df_clean, mapping_clean, missing_clean = standardize_dataframe(raw_df_clean)
     if missing_clean:
         st.warning("A gyors munkafelület nem tudta automatikusan felismerni az összes kötelező oszlopot. Állítsd be itt a Smart Mapperrel, vagy nyisd meg a teljes appot.")
         st.write("Hiányzó mezők:", ", ".join(missing_clean))
@@ -8084,9 +8144,46 @@ def render_fpi_clean_workspace_v101() -> None:
             _fpi_set_page_v100("app")
         st.stop()
     else:
-        with st.expander("🧭 GPS Smart Mapper ellenőrzés", expanded=False):
+        with st.expander("🧭 GPS Smart Mapper / oszlopfelismerés", expanded=True):
             render_mapping_score(mapping_clean)
             st.dataframe(enhanced_mapping_quality_df(raw_df_clean, mapping_clean), use_container_width=True, hide_index=True)
+
+            st.markdown("#### Gyors kézi mapping a tiszta oldalon")
+            st.caption("Ha egy mező rosszul lett felismerve, itt is átállíthatod. A teljes, részletes mapper továbbra is a Teljes appban érhető el.")
+            cols_clean_map = [""] + [str(c) for c in raw_df_clean.columns]
+            editable_fields_clean = [
+                "player_name", "session_type", "start_time", "duration", "match_minutes",
+                "total_distance", "distance_per_min", "max_speed", "sprints",
+                "speed_zone_4", "speed_zone_5", "training_load", "acc_high", "dec_high", "high_efforts",
+            ]
+            manual_clean = dict(mapping_clean or {})
+            grid_clean = st.columns(3)
+            changed_clean = False
+            for i, field in enumerate(editable_fields_clean):
+                default = manual_clean.get(field) or ""
+                with grid_clean[i % 3]:
+                    val = st.selectbox(
+                        mapper_label(field),
+                        cols_clean_map,
+                        index=cols_clean_map.index(default) if default in cols_clean_map else 0,
+                        key=f"clean_gps_map_{field}_v105",
+                    )
+                if (val or None) != manual_clean.get(field):
+                    changed_clean = True
+                manual_clean[field] = val or None
+
+            if st.button("✅ Gyors mapping alkalmazása", use_container_width=True, key="clean_apply_mapping_v105"):
+                try:
+                    mapped_clean = apply_manual_mapping(raw_df_clean, manual_clean)
+                    mapped_clean = normalize_combined_fields(mapped_clean, manual_clean)
+                    mapped_clean = derive_missing_columns(mapped_clean)
+                    st.session_state["clean_mapped_df_override_v105"] = mapped_clean
+                    st.session_state["clean_manual_mapping_v105"] = manual_clean
+                    st.success("Mapping alkalmazva a tiszta oldalon.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Mapping alkalmazási hiba: {e}")
+
             if st.button("Haladó mapping szerkesztése a teljes appban", key="clean_advanced_mapping_full_v102"):
                 _fpi_set_page_v100("app")
 
@@ -10725,8 +10822,8 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     own_pdf_uploaded = bool(own_pdf_state_v92.get("has_files"))
     opp_pdf_uploaded = bool(opp_pdf_state_v92.get("has_files"))
 
-    own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": own_pdf_uploaded, "pdf_pages": len(own_pdf_pages)}
-    opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": opp_pdf_uploaded, "pdf_pages": len(opp_pdf_pages)}
+    own_pdf_insights = _fpi_safe_tactical_pdf_insights_v105(own_pdf_text, uploaded=own_pdf_uploaded, pages=own_pdf_pages)
+    opp_pdf_insights = _fpi_safe_tactical_pdf_insights_v105(opp_pdf_text, uploaded=opp_pdf_uploaded, pages=opp_pdf_pages)
     own_pdf_insights["pdf_uploaded"] = own_pdf_uploaded
     own_pdf_insights["pdf_pages"] = len([p for p in own_pdf_pages if p.get("has_text") or p.get("text")])
     opp_pdf_insights["pdf_uploaded"] = opp_pdf_uploaded
