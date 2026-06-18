@@ -50,7 +50,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V076_ROBUST_TACTICAL_PDF_ENGINE_2026_06_17"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V077_PDF_FALLBACK_TOPIC_ENGINE_2026_06_17"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5713,7 +5713,7 @@ def build_fpi_product_pdf_bytes(
             if out:
                 return ", ".join([x for x in out if x])
             if uploaded:
-                return "PDF feltöltve, de nem volt kinyerhető szöveg / nincs erős kulcsszó-találat"
+                return "PDF feltöltve; ha nincs téma, nézd meg a PDF diagnosztikát és a gyakori szavakat"
             return "n.a."
         rows = [
             [P("Oldal", head), P("Felismert PDF témák", head), P("Csapat KPI-k", head)],
@@ -6477,6 +6477,51 @@ TACTICAL_TOPIC_TAGS_FPI.update({
     },
 })
 
+
+# V7.7 – provider-specifikus és fallback taktikai kulcsszavak
+# Ezek a SportsBase / Provision / Wyscout / Hudl jellegű PDF-ekben gyakori, de nem mindig
+# klasszikus "coach sentence" formában megjelenő címkéket is témákhoz kötik.
+TACTICAL_TOPIC_TAGS_FPI.setdefault("team_stats", {"label": "Csapatstatisztikák / fő KPI-k", "keywords": []})
+TACTICAL_TOPIC_TAGS_FPI.setdefault("event_actions", {"label": "Események / akciótípusok", "keywords": []})
+TACTICAL_TOPIC_TAGS_FPI.setdefault("player_stats", {"label": "Játékosstatisztikák", "keywords": []})
+
+TACTICAL_TOPIC_TAGS_FPI["team_stats"]["keywords"] = list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI["team_stats"].get("keywords", []) + [
+    "main statistics", "team statistics", "match statistics", "summary statistics", "statistics",
+    "ball possession", "possession", "passes accurate", "pass accuracy", "shots", "shots on target",
+    "xg", "expected goals", "corners", "fouls", "offsides", "duels", "aerial duels", "recoveries",
+    "csapatstatisztika", "fő statisztikák", "statisztika", "labdabirtoklás", "passzpontosság",
+    "lövések", "kaput eltaláló lövések", "várható gól", "szögletek", "párharcok", "labdaszerzések",
+]))
+TACTICAL_TOPIC_TAGS_FPI["event_actions"]["keywords"] = list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI["event_actions"].get("keywords", []) + [
+    "episode search", "episodes", "passes", "ball recoveries", "lost balls", "challenges", "carry",
+    "carry >10m", "counterattacks", "counter attacks", "positional attacks", "ball possession",
+    "set pieces", "sequences", "attacks", "progressions", "final third entries", "box entries",
+    "action zone", "destination zone", "heat map", "pass map", "shot map", "touch map",
+    "epizód", "epizódok", "passzok", "labdaszerzések", "labdavesztések", "párharcok",
+    "labdavezetés", "kontrák", "pozíciós támadások", "pontrúgások", "akciózóna", "célzóna",
+    "hőtérkép", "passztérkép", "lövéstérkép", "érintések térképe",
+]))
+TACTICAL_TOPIC_TAGS_FPI["player_stats"]["keywords"] = list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI["player_stats"].get("keywords", []) + [
+    "player statistics", "player stats", "players", "minutes played", "goals", "assists", "key passes",
+    "progressive passes", "defensive duels", "interceptions", "recoveries", "xg", "xa",
+    "játékosstatisztika", "játékosok", "játékperc", "gólok", "gólpasszok", "kulcspasszok",
+    "progresszív passzok", "védekező párharcok", "közbelépések", "labdaszerzések",
+]))
+
+# Csatoljuk a provider-címkéket konkrét taktikai témákhoz is, hogy a meccsterv motor használja őket.
+for _topic, _extra in {
+    "transition_attack": ["counterattacks", "counter attacks", "fast attacks", "attacks after regain", "kontrák", "kontratámadások", "gyors támadások"],
+    "transition_defense": ["lost balls", "losses", "turnovers", "labdavesztések", "elvesztett labdák"],
+    "build_up": ["passes", "pass map", "progressions", "ball possession", "sequences", "passzok", "passztérkép", "progressziók", "labdabirtoklás"],
+    "pressing": ["ball recoveries", "recoveries", "high recoveries", "challenges", "defensive actions", "labdaszerzések", "visszaszerzések", "párharcok", "védekező akciók"],
+    "chance_creation": ["shots", "shot map", "box entries", "final third entries", "key passes", "xg", "lövéstérkép", "lövések", "box entries", "támadóharmad", "kulcspasszok", "várható gól"],
+    "wide_play": ["crosses", "attacks left", "attacks right", "left side", "right side", "beadások", "bal oldal", "jobb oldal"],
+    "set_pieces": ["set pieces", "corners", "corner kicks", "free kicks", "throw ins", "pontrúgások", "szögletek", "szabadrúgások", "bedobások"],
+    "key_players": ["player statistics", "players", "goals", "assists", "key passes", "játékosok", "gólok", "gólpasszok", "kulcspasszok"],
+}.items():
+    if _topic in TACTICAL_TOPIC_TAGS_FPI:
+        TACTICAL_TOPIC_TAGS_FPI[_topic]["keywords"] = list(dict.fromkeys(TACTICAL_TOPIC_TAGS_FPI[_topic].get("keywords", []) + _extra))
+
 def _fpi_tactical_norm(x: object) -> str:
     import unicodedata as _unicodedata
     s = _unicodedata.normalize("NFKD", str(x or "").lower().replace("\\u00ad", " "))
@@ -6779,13 +6824,13 @@ def _fpi_tactical_context_lines(text: str, topic: str, limit: int = 10) -> List[
             break
     return list(dict.fromkeys(out))[:limit]
 
-def _fpi_tactical_top_terms_v76(text: str, limit: int = 25) -> List[dict]:
+def _fpi_tactical_top_terms_v76(text: str, limit: int = 35) -> List[dict]:
     stop = set("""
     the and for with from that this into their your are was were have has had not but
     egy meg hogy van vagy mint ahol után előtt illetve saját ellenfél csapat játékos
-    és az ez ha is de már csak nem
+    és az ez ha is de már csak nem total average percent percentage page oldal
     """.split())
-    words = re.findall(r"[A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű][A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű\-]{3,}", str(text or ""))
+    words = re.findall(r"[A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű][A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű\\-]{3,}", str(text or ""))
     counts = {}
     for w in words:
         n = _fpi_tactical_norm(w)
@@ -6794,27 +6839,105 @@ def _fpi_tactical_top_terms_v76(text: str, limit: int = 25) -> List[dict]:
         counts[n] = counts.get(n, 0) + 1
     return [{"szó": k, "db": v} for k, v in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:limit]]
 
+def _fpi_full_text_keyword_hits_v77(text: str, keywords: List[str]) -> int:
+    norm = _fpi_tactical_norm(text)
+    hits = 0
+    for kw in keywords:
+        k = _fpi_tactical_norm(kw)
+        if k and k in norm:
+            hits += 1
+    return hits
+
+def _fpi_find_keyword_windows_v77(text: str, keywords: List[str], limit: int = 6) -> List[str]:
+    """Ha a soralapú context nem talál semmit, a teljes szövegből vág ablakot a kulcsszó köré."""
+    raw = re.sub(r"\\s+", " ", str(text or "")).strip()
+    norm_raw = _fpi_tactical_norm(raw)
+    out = []
+    for kw in keywords:
+        k = _fpi_tactical_norm(kw)
+        if not k:
+            continue
+        pos = norm_raw.find(k)
+        if pos >= 0:
+            # norm és raw index nem tökéletesen egyezik, de közelítő ablaknak elég
+            start = max(0, pos - 180)
+            end = min(len(raw), pos + 280)
+            snippet = raw[start:end].strip()
+            if snippet:
+                out.append(snippet)
+        if len(out) >= limit:
+            break
+    return list(dict.fromkeys(out))[:limit]
+
+def _fpi_fallback_topics_from_terms_v77(text: str, top_terms: List[dict]) -> List[dict]:
+    """Ha nincs erős kulcsszó-találat, gyakori szavakból ad óvatos, de használható fallback témákat."""
+    term_text = " ".join(str(x.get("szó", "")) for x in (top_terms or []))
+    combined = f"{text[:5000]} {term_text}"
+    fallback_rules = [
+        ("team_stats", "Csapatstatisztikák / fő KPI-k", ["statistics", "possession", "shots", "passes", "xg", "labdabirtoklás", "lövések", "passz"]),
+        ("event_actions", "Események / akciótípusok", ["episodes", "passes", "recoveries", "lost", "actions", "counter", "passzok", "labdaszerzések", "labdavesztések", "akció"]),
+        ("build_up", "Labdakihozatal / támadásépítés", ["passes", "possession", "progression", "build", "passz", "labdabirtoklás", "progresszió"]),
+        ("chance_creation", "Helyzetkialakítás / támadóharmad", ["shots", "xg", "box", "final", "key", "cross", "lövések", "tizenhatos", "kulcspassz", "beadás"]),
+        ("transition_attack", "Támadó átmenet / kontrák", ["counter", "fast", "transition", "regain", "kontra", "átmenet", "gyors"]),
+        ("set_pieces", "Pontrúgások", ["corner", "corners", "set", "free", "szöglet", "pontrúgás", "szabadrúgás"]),
+        ("key_players", "Kulcsjátékosok", ["player", "players", "goals", "assists", "játékos", "gól", "gólpassz"]),
+    ]
+    rows = []
+    for key, label, kws in fallback_rules:
+        h = _fpi_full_text_keyword_hits_v77(combined, kws)
+        if h > 0:
+            rows.append({
+                "Téma": label,
+                "Kulcs": key,
+                "Találat": h,
+                "Bizonyosság": min(55, 25 + h * 7),
+                "Minta": "Fallback: a PDF szövegében gyakori KPI/akció kifejezések alapján.",
+                "Fallback": True,
+            })
+    return sorted(rows, key=lambda x: x["Bizonyosság"], reverse=True)
+
 def _fpi_tactical_pdf_insights(text: str) -> Dict[str, object]:
     rows = []
     blocks = {}
     for key, cfg in TACTICAL_TOPIC_TAGS_FPI.items():
+        keywords = cfg.get("keywords", [])
         lines = _fpi_tactical_context_lines(text, key, limit=10)
-        hit = sum(1 for line in lines for kw in cfg["keywords"] if _fpi_tactical_norm(kw) in _fpi_tactical_norm(line))
-        conf = min(100, hit * 15 + len(lines) * 5)
+        full_hits = _fpi_full_text_keyword_hits_v77(text, keywords)
+        if not lines and full_hits:
+            lines = _fpi_find_keyword_windows_v77(text, keywords, limit=6)
+        line_hits = sum(1 for line in lines for kw in keywords if _fpi_tactical_norm(kw) in _fpi_tactical_norm(line))
+        hit = max(full_hits, line_hits)
+        conf = min(100, hit * 12 + len(lines) * 5)
         rows.append({"Téma": cfg["label"], "Kulcs": key, "Találat": hit, "Bizonyosság": conf, "Minta": " | ".join(lines[:2])})
         blocks[key] = lines
+
     detected = [r for r in rows if r["Találat"] > 0 or r["Minta"]]
     detected = sorted(detected, key=lambda x: x["Bizonyosság"], reverse=True)
-    formation_match = re.search(r"\b([3-5]-[1-5]-[1-5](?:-[1-3])?)\b", text or "")
-    preview = re.sub(r"\s+", " ", str(text or "")).strip()[:1800]
+    top_terms = _fpi_tactical_top_terms_v76(text)
+    if not detected and len(str(text or "").strip()) > 0:
+        detected = _fpi_fallback_topics_from_terms_v77(text, top_terms)
+
+    # Ha volt szöveg, de csak nagyon gyenge találat van, ne legyen n.a.: legyen óvatos általános témasor.
+    if len(str(text or "").strip()) > 300 and not detected:
+        detected = [{
+            "Téma": "Általános taktikai dokumentum",
+            "Kulcs": "generic_tactical_document",
+            "Találat": 1,
+            "Bizonyosság": 25,
+            "Minta": "A PDF-ből szöveg kinyerhető, de a jelenlegi szótár nem talált erős témát. A PDF diagnosztika gyakori szavai alapján bővíthető.",
+            "Fallback": True,
+        }]
+
+    formation_match = re.search(r"\\b([3-5]-[1-5]-[1-5](?:-[1-3])?)\\b", text or "")
+    preview = re.sub(r"\\s+", " ", str(text or "")).strip()[:2200]
     return {
         "formation": formation_match.group(1) if formation_match else "n.a.",
         "blocks": blocks,
-        "topics": detected[:18],
+        "topics": detected[:20],
         "raw_text_len": len(text or ""),
         "preview": preview,
-        "top_terms": _fpi_tactical_top_terms_v76(text),
-        "reader_version": "V7.6 robust pdfplumber text+words+tables reader",
+        "top_terms": top_terms,
+        "reader_version": "V7.7 robust pdfplumber + full-text scoring + fallback topic engine",
     }
 
 def _fpi_analysis_level(has_gps: bool, has_pdf: bool, has_team_excel: bool, has_player_excel: bool) -> Tuple[int, str]:
