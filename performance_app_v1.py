@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V095_KTE_GPS_ONLY_MICROCYCLE_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V096_GPS_ONLY_REPORT_PACK_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -6648,6 +6648,7 @@ def build_fpi_product_pdf_bytes(
         expl.append([P("HSR", small), P("High Speed Running: nagy sebességű futás, általában kb. 19,8–20 km/h felett. Ez még nem feltétlen maximális sprint.", small)])
         expl.append([P("Sprint", small), P("Sprintzóna vagy sprintakció. A sprint táv a sprintzónában megtett méter, a sprint count pedig a sprintakciók darabszáma.", small)])
         expl.append([P("Sprint expozíció", small), P("Nem csak mennyiség: azt jelenti, hogy a játékos elér-e nagy sebességű / maximális sebességhez közeli ingert a héten. Sérülésmegelőzés miatt fontos.", small)])
+        expl.append([P("Load / terhelési pont", small), P("A GPS-rendszer összesített terhelési mutatója. Nem csak futótáv: rendszerfüggően tartalmazhat mozgásintenzitást, gyorsításokat, lassításokat és mechanikai terhelést is. A heti volumen és a játékoskockázat értelmezéséhez használjuk.", small)])
         story.append(table(expl, [4.0*cm, 23.7*cm], header_bg="#1D4ED8", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
         story.append(Spacer(1, 0.25*cm))
 
@@ -7020,6 +7021,209 @@ def _build_demo_tactical_context() -> Dict[str, object]:
     }
 
 
+
+def build_fpi_gps_only_pdf_bytes(
+    data: pd.DataFrame,
+    selected_week: Optional[str] = None,
+    playstyle: str = "Kiegyensúlyozott",
+    demo_label: str = "",
+) -> Optional[bytes]:
+    """GPS-only PDF riport.
+    Nincs taktikai blokk, nincs Tactical Pro+ kontextus. Csak GPS, readiness, terhelésarány,
+    játékoskockázat, mikrociklus és használható erőnléti következtetések.
+    """
+    if SimpleDocTemplate is None:
+        return None
+    from reportlab.platypus import PageBreak
+
+    ctx = _fpi_report_context(data, selected_week, playstyle)
+    if ctx.get("error"):
+        return None
+
+    df = ctx["df"]
+    week = ctx["selected_week"]
+    readiness = int(ctx.get("readiness_score", 70) or 70)
+    priorities = ctx.get("priorities", []) or []
+    risk_df = ctx.get("risk_df") if isinstance(ctx.get("risk_df"), pd.DataFrame) else pd.DataFrame()
+    weekly = ctx.get("weekly") if isinstance(ctx.get("weekly"), pd.DataFrame) else pd.DataFrame()
+    player_week = ctx.get("player_week") if isinstance(ctx.get("player_week"), pd.DataFrame) else pd.DataFrame()
+    periodization_type = ctx.get("periodization_type", "Nincs elég adat")
+    conclusions = _fpi_gps_only_conclusions_v95(ctx, priorities, readiness, str(week), limit=6)
+    md_plan = _fpi_gps_only_md_plan_v95(ctx, readiness, priorities, str(week))
+    ratio_df = _fpi_match_ratio_reference_df_v93(df, str(week))
+
+    font_name, font_bold = _register_pdf_font()
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=0.9*cm, leftMargin=0.9*cm, topMargin=0.7*cm, bottomMargin=0.7*cm)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("GPSOnlyTitle", parent=styles["Title"], fontName=font_bold, fontSize=20, leading=23, textColor=colors.HexColor("#0F172A"))
+    sub = ParagraphStyle("GPSOnlySub", parent=styles["Normal"], fontName=font_name, fontSize=8.8, leading=11, textColor=colors.HexColor("#334155"))
+    body = ParagraphStyle("GPSOnlyBody", parent=styles["Normal"], fontName=font_name, fontSize=8.0, leading=10.2, textColor=colors.HexColor("#111827"))
+    small = ParagraphStyle("GPSOnlySmall", parent=styles["Normal"], fontName=font_name, fontSize=7.0, leading=8.6, textColor=colors.HexColor("#111827"))
+    head = ParagraphStyle("GPSOnlyHead", parent=styles["Normal"], fontName=font_bold, fontSize=7.4, leading=8.8, textColor=colors.white)
+    story = []
+
+    def P(txt, style=body):
+        return Paragraph(pdf_safe_text(txt), style)
+
+    def section(txt, color="#DBEAFE"):
+        return Table([[P(txt, ParagraphStyle("GPSSection"+str(len(story)), parent=body, fontName=font_bold, fontSize=11, leading=13, textColor=colors.HexColor("#0F172A")))]],
+                     colWidths=[27.7*cm],
+                     style=TableStyle([
+                         ("BACKGROUND", (0,0), (-1,-1), colors.HexColor(color)),
+                         ("BOX", (0,0), (-1,-1), 0.4, colors.HexColor("#CBD5E1")),
+                         ("LEFTPADDING", (0,0), (-1,-1), 6),
+                         ("RIGHTPADDING", (0,0), (-1,-1), 6),
+                         ("TOPPADDING", (0,0), (-1,-1), 5),
+                         ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+                     ]))
+
+    def tbl(rows, widths, header_bg="#1E3A8A", row_bgs=None):
+        t = Table(rows, colWidths=widths, repeatRows=1)
+        style = [
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor(header_bg)),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("FONTNAME", (0,0), (-1,0), font_bold),
+            ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#CBD5E1")),
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("LEFTPADDING", (0,0), (-1,-1), 4),
+            ("RIGHTPADDING", (0,0), (-1,-1), 4),
+            ("TOPPADDING", (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ]
+        if row_bgs:
+            for i in range(1, len(rows)):
+                style.append(("BACKGROUND", (0,i), (-1,i), row_bgs[(i-1) % len(row_bgs)]))
+        t.setStyle(TableStyle(style))
+        return t
+
+    def kpi(label, value, note, color="#1E3A8A"):
+        ps1 = ParagraphStyle("KPI1"+label, parent=body, fontName=font_bold, fontSize=8, leading=9, textColor=colors.white)
+        ps2 = ParagraphStyle("KPI2"+label, parent=body, fontName=font_bold, fontSize=16, leading=18, textColor=colors.white)
+        ps3 = ParagraphStyle("KPI3"+label, parent=body, fontName=font_name, fontSize=6.6, leading=7.8, textColor=colors.white)
+        t = Table([[Paragraph(pdf_safe_text(label), ps1)], [Paragraph(pdf_safe_text(value), ps2)], [Paragraph(pdf_safe_text(note), ps3)]], colWidths=[5.45*cm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor(color)),
+            ("BOX", (0,0), (-1,-1), 0.4, colors.white),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING", (0,0), (-1,-1), 5),
+            ("RIGHTPADDING", (0,0), (-1,-1), 5),
+            ("TOPPADDING", (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ]))
+        return t
+
+    # Cover / executive GPS-only
+    label_prefix = f"{demo_label} | " if demo_label else ""
+    story.append(P("Football Performance Intelligence – GPS-only riport", title))
+    story.append(P(f"{label_prefix}Hét: {format_week_label(str(week))} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
+    story.append(P(_fpi_match_context_label_v94(), sub))
+    story.append(Spacer(1, 0.25*cm))
+    high_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Magas").sum()) if not risk_df.empty else 0
+    med_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Közepes").sum()) if not risk_df.empty else 0
+    story.append(Table([[
+        kpi("READINESS", f"{readiness}/100", score_to_label(readiness), "#166534" if readiness >= 75 else "#1E3A8A" if readiness >= 60 else "#991B1B"),
+        kpi("PERIODIZÁCIÓ", str(periodization_type)[:18], "heti terhelési karakter", "#0F172A"),
+        kpi("HIGH RISK", f"{high_risk} fő", "egyéni kontroll", "#7F1D1D" if high_risk else "#166534"),
+        kpi("MEDIUM RISK", f"{med_risk} fő", "figyelendő", "#92400E" if med_risk else "#166534"),
+        kpi("FORRÁS", "GPS only", "nincs taktikai input", "#0369A1"),
+    ]], colWidths=[5.45*cm]*5))
+    story.append(Spacer(1, 0.25*cm))
+
+    story.append(section("1. GPS-only vezetői konklúziók", "#DBEAFE"))
+    c_rows = [[P("#", head), P("Konklúzió", head)]]
+    for i, c in enumerate(conclusions, 1):
+        c_rows.append([P(str(i), small), P(c, small)])
+    story.append(tbl(c_rows, [1.0*cm, 26.7*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
+    story.append(Spacer(1, 0.22*cm))
+
+    story.append(section("2. Edzés–meccs arányok NB2 felnőtt referenciával", "#FEF3C7"))
+    if ratio_df is None or ratio_df.empty:
+        story.append(P("Nincs elég adat az edzés/meccs arányokhoz. Kell legalább egy edzés és egy meccs típusú esemény.", body))
+    else:
+        rr = [[P("Mutató", head), P("Heti edzés / meccs", head), P("Edzésátlag / meccs", head), P("Referencia", head), P("Értelmezés", head)]]
+        for _, r in ratio_df.iterrows():
+            rr.append([
+                P(str(r.get("Mutató","")), small),
+                P(_fpi_fmt_pct_v93(r.get("Edzés/heti meccs %")), small),
+                P(_fpi_fmt_pct_v93(r.get("Edzésátlag/meccs %")), small),
+                P(f"Heti: {r.get('NB2 felnőtt heti ref.','')}<br/>Edzésátlag: {r.get('NB2 felnőtt edzésátlag ref.','')}", small),
+                P(str(r.get("Értékelés","")), small),
+            ])
+        story.append(tbl(rr, [4.0*cm, 4.0*cm, 4.0*cm, 5.6*cm, 10.1*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"), colors.white]))
+
+    story.append(PageBreak())
+    story.append(section("3. GPS-alapú mikrociklus terv", "#EDE9FE"))
+    md_rows = [[P("Nap", head), P("Erőnléti cél", head), P("Miért pont ez?", head)]]
+    for d, fgoal, why in md_plan:
+        md_rows.append([P(d, small), P(fgoal, small), P(why, small)])
+    story.append(tbl(md_rows, [3.2*cm, 9.2*cm, 15.3*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
+    story.append(Spacer(1, 0.22*cm))
+
+    story.append(section("4. Heti csapat GPS profil", "#E0F2FE"))
+    wk = weekly.copy()
+    if not wk.empty and "week" in wk.columns:
+        wk = wk[wk["week"].astype(str) == str(week)].copy()
+    gps_rows = [[P("Típus", head), P("Össztáv", head), P("Perc", head), P("m/perc", head), P("HSR", head), P("Sprint táv", head), P("Sprint db", head), P("High Eff.", head), P("Load", head)]]
+    if not wk.empty:
+        for _, r in wk.head(10).iterrows():
+            gps_rows.append([
+                P(r.get("session_type",""), small),
+                P(f"{r.get('total_distance',0):.0f}", small),
+                P(f"{r.get('duration_min',0):.0f}", small),
+                P(f"{r.get('distance_per_min',0):.1f}", small),
+                P(f"{r.get('hsr_distance',0):.0f}", small),
+                P(f"{r.get('sprint_distance',0):.0f}", small),
+                P(f"{r.get('sprints',0):.0f}", small),
+                P(f"{r.get('high_efforts',0):.0f}", small),
+                P(f"{r.get('training_load',0):.0f}", small),
+            ])
+    else:
+        gps_rows.append([P("Nincs adat", small)] + [P("—", small)]*8)
+    story.append(tbl(gps_rows, [3.0*cm, 3.2*cm, 2.5*cm, 2.6*cm, 3.0*cm, 3.0*cm, 2.5*cm, 2.8*cm, 2.8*cm], header_bg="#0369A1"))
+
+    story.append(Spacer(1, 0.22*cm))
+    story.append(section("5. Játékosszintű monitoring", "#FEE2E2"))
+    risk_rows = [[P("Játékos", head), P("Szint", head), P("Miért fontos?", head)]]
+    if risk_df is not None and not risk_df.empty:
+        player_col = "Játékos" if "Játékos" in risk_df.columns else "player_name" if "player_name" in risk_df.columns else risk_df.columns[0]
+        level_col = "Kockázati szint" if "Kockázati szint" in risk_df.columns else None
+        reason_col = "Fő okok" if "Fő okok" in risk_df.columns else "Fő ok" if "Fő ok" in risk_df.columns else None
+        for _, r in risk_df.head(8).iterrows():
+            risk_rows.append([
+                P(str(r.get(player_col,"")), small),
+                P(str(r.get(level_col,"Figyelendő")) if level_col else "Figyelendő", small),
+                P(str(r.get(reason_col,"Monitoring")) if reason_col else "Monitoring", small),
+            ])
+    else:
+        risk_rows.append([P("Nincs kiemelt", small), P("Alacsony", small), P("Nincs azonnali beavatkozási jelzés.", small)])
+    story.append(tbl(risk_rows, [6.5*cm, 4.0*cm, 17.2*cm], header_bg="#7F1D1D", row_bgs=[colors.white, colors.HexColor("#FEF2F2")]))
+
+    story.append(PageBreak())
+    story.append(section("6. Fogalmak röviden", "#DCFCE7"))
+    expl = [[P("Fogalom", head), P("Jelentés", head)]]
+    expl.append([P("Volumen", small), P("Összmunka: például teljes táv, edzésidő, load vagy heti összterhelés.", small)])
+    expl.append([P("HSR", small), P("High Speed Running: nagy sebességű futás, általában kb. 19,8–20 km/h felett. Nem feltétlen maximális sprint.", small)])
+    expl.append([P("Sprint", small), P("Sprintzónában megtett méter vagy sprintakciók darabszáma. Általában magasabb küszöb, mint a HSR.", small)])
+    expl.append([P("Sprint expozíció", small), P("A játékos kap-e maximális sebességhez közeli ingert a héten. Nem csak mennyiség, hanem sérülésmegelőzési inger.", small)])
+    expl.append([P("Load / terhelési pont", small), P("A GPS-rendszer összesített terhelési mutatója. Rendszertől függően tartalmazhat futómennyiséget, intenzitást, gyorsítást, lassítást vagy mechanikai terhelést.", small)])
+    expl.append([P("High Efforts", small), P("Nagy intenzitású akciók gyűjtőmutatója. GPS-rendszertől függően sprint, gyorsítás, lassítás vagy robbanékony effort is lehet benne.", small)])
+    story.append(tbl(expl, [5.0*cm, 22.7*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def build_fpi_gps_only_sample_pdf_bytes() -> Optional[bytes]:
+    demo_raw = build_demo_performance_data()
+    demo_df, _, missing = standardize_dataframe(demo_raw)
+    if missing:
+        return None
+    demo_df = add_position_group(demo_df)
+    latest = _fpi_latest_week(demo_df)
+    return build_fpi_gps_only_pdf_bytes(demo_df, latest, "Pressing", demo_label="MINTA RIPORT / Demo FC U19 – GPS only")
+
+
 def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool = True) -> Optional[bytes]:
     demo_raw = build_demo_performance_data()
     demo_df, _, missing = standardize_dataframe(demo_raw)
@@ -7039,6 +7243,7 @@ render_fpi_hero()
 
 sample_full_pdf_bytes = build_fpi_sample_pdf_bytes("full", include_tactical=True)
 sample_exec_pdf_bytes = build_fpi_sample_pdf_bytes("executive", include_tactical=True)
+sample_gps_only_pdf_bytes = build_fpi_gps_only_sample_pdf_bytes()
 with st.container():
     st.markdown(
         """
@@ -7052,7 +7257,7 @@ with st.container():
         """,
         unsafe_allow_html=True,
     )
-    c_a, c_b = st.columns(2)
+    c_a, c_b, c_c = st.columns(3)
     with c_a:
         if sample_exec_pdf_bytes is not None:
             st.download_button(
@@ -7073,7 +7278,17 @@ with st.container():
                 use_container_width=True,
                 key="download_sample_full_v83",
             )
-    if sample_exec_pdf_bytes is None and sample_full_pdf_bytes is None:
+    with c_c:
+        if sample_gps_only_pdf_bytes is not None:
+            st.download_button(
+                "⬇️ Minta GPS-only Report",
+                data=sample_gps_only_pdf_bytes,
+                file_name="fpi_minta_gps_only_report.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_sample_gps_only_v96",
+            )
+    if sample_exec_pdf_bytes is None and sample_full_pdf_bytes is None and sample_gps_only_pdf_bytes is None:
         st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
 
 
@@ -9836,82 +10051,38 @@ with tab_exec:
         else:
             st.info("Nincs player risk adat.")
 
-    st.markdown("### Vezetői export")
-    executive_df_main = build_executive_summary_df(
-        selected_week,
-        selected_playstyle,
-        readiness_score,
-        periodization_type,
-        weekly_summary_text,
-        high_risk_count,
-        medium_risk_count,
-    )
-    insight_export_df_main = build_insight_export_df(all_insights)
-    priorities_df_main = pd.DataFrame(coaching_priorities)
-    risk_export_df_main = player_risk_df if "player_risk_df" in globals() else pd.DataFrame()
+    st.markdown("### Letölthető FPI riportok")
+    st.caption("A régi vezetői PDF/Word/Excel/CSV gombok kikerültek. Itt csak a termékriportok maradnak: GPS-only, Executive Summary és Full Report.")
     safe_week_main = _safe_filename_week(selected_week)
-    e1, e2, e3, e4 = st.columns(4)
 
-    with e1:
-        if is_pro_mode():
-            premium_pdf = build_premium_pdf_bytes(
-                insight_export_df_main,
-                selected_week,
-                readiness_score,
-                periodization_type,
-                weekly_summary_text,
-                coaching_priorities,
-                risk_export_df_main,
-                selected_playstyle,
-            )
-            if premium_pdf is not None:
-                st.download_button("⬇️ Vezetői PDF", data=premium_pdf, file_name=f"executive_performance_riport_{safe_week_main}.pdf", mime="application/pdf", use_container_width=True,
-            key="download_button_unique_2",
-        )
-        else:
-            pro_locked_box("Vezetői PDF export")
-
-    with e2:
-        if is_pro_mode():
-            st.download_button(
-                "⬇️ Vezetői Excel",
-                data=build_executive_excel_bytes(executive_df_main, insight_export_df_main, priorities_df_main, risk_export_df_main, weekly_fingerprints),
-                file_name=f"executive_performance_riport_{safe_week_main}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            
-            key="download_button_unique_3",
-        )
-        else:
-            pro_locked_box("Vezetői Excel export")
-
-    with e3:
-        if is_pro_mode():
-            word_bytes = build_executive_word_bytes(executive_df_main, priorities_df_main, insight_export_df_main, risk_export_df_main, selected_week)
-            if word_bytes is not None:
-                st.download_button("⬇️ Vezetői Word", data=word_bytes, file_name=f"executive_performance_riport_{safe_week_main}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True,
-            key="download_button_unique_4",
-        )
-        else:
-            pro_locked_box("Vezetői Word export")
-
-    with e4:
+    gps_only_live_pdf_main = build_fpi_gps_only_pdf_bytes(analysis_base_df.copy(), selected_week, selected_playstyle)
+    if gps_only_live_pdf_main is not None:
         st.download_button(
-            "⬇️ Demo CSV preview",
-            data=insight_export_df_main.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"demo_insight_preview_{safe_week_main}.csv",
-            mime="text/csv",
+            "⬇️ GPS-only PDF riport",
+            data=gps_only_live_pdf_main,
+            file_name=f"fpi_gps_only_report_{safe_week_main}.pdf",
+            mime="application/pdf",
             use_container_width=True,
-        
-            key="download_button_unique_5",
+            key="download_gps_only_live_v96_main",
         )
 
 
     st.markdown("### FPI riportok – éles export")
-    st.caption("Két kimenet: Executive Summary a vezetőedző/sportigazgató számára, Full Report a teljes stábnak.")
+    st.caption("Három kimenet: GPS-only Report, Executive Summary és Full Report.")
     live_report_base = analysis_base_df.copy()
-    lr1, lr2 = st.columns(2)
+    lr1, lr2, lr3 = st.columns(3)
     with lr1:
+        gps_only_pack_pdf = build_fpi_gps_only_pdf_bytes(live_report_base, selected_week, selected_playstyle)
+        if gps_only_pack_pdf is not None:
+            st.download_button(
+                "⬇️ GPS-only PDF Report",
+                data=gps_only_pack_pdf,
+                file_name=f"fpi_gps_only_report_{safe_week_main}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_fpi_gps_only_v96",
+            )
+    with lr2:
         exec_pack_pdf = build_fpi_product_pdf_bytes(
             live_report_base,
             selected_week,
@@ -9928,7 +10099,7 @@ with tab_exec:
                 use_container_width=True,
                 key="download_fpi_exec_v83",
             )
-    with lr2:
+    with lr3:
         full_pack_pdf = build_fpi_product_pdf_bytes(
             live_report_base,
             selected_week,
@@ -10125,89 +10296,9 @@ with tab_export:
     st.markdown("### Insightok")
     render_wrapped_table(insight_export_df_export)
 
-    st.markdown("### Export gombok")
-    if not is_pro_mode():
-        st.warning("Demo módban a teljes vezetői PDF/Word/Excel export Pro funkció. A főoldalon demo CSV preview elérhető.")
+    st.markdown("### Export")
+    st.caption("A régi vezetői PDF/Word/Excel/CSV export gombok kikerültek. A használható termékriportok lent érhetők el.")
     safe_week = _safe_filename_week(selected_week)
-    e1, e2, e3, e4 = st.columns(4)
-
-    with e1:
-        premium_pdf = None
-        if "build_premium_pdf_bytes" in globals():
-            premium_pdf = build_premium_pdf_bytes(
-                insight_export_df_export,
-                selected_week,
-                readiness_score,
-                periodization_type,
-                weekly_summary_text,
-                coaching_priorities,
-                risk_export_df,
-                selected_playstyle,
-            )
-        else:
-            premium_pdf = insights_to_pdf_bytes(insight_export_df_export, selected_week)
-
-        if premium_pdf is not None:
-            st.download_button(
-                "⬇️ Vezetői PDF",
-                data=premium_pdf,
-                file_name=f"executive_performance_riport_{safe_week}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-            
-            key="download_button_unique_6",
-        )
-
-    with e2:
-        st.download_button(
-            "⬇️ Vezetői Excel",
-            data=build_executive_excel_bytes(
-                executive_df,
-                insight_export_df_export,
-                priorities_df,
-                risk_export_df,
-                weekly_fingerprints if "weekly_fingerprints" in globals() else pd.DataFrame(),
-            ),
-            file_name=f"executive_performance_riport_{safe_week}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        
-            key="download_button_unique_7",
-        )
-
-    with e3:
-        word_bytes = build_executive_word_bytes(
-            executive_df,
-            priorities_df,
-            insight_export_df_export,
-            risk_export_df,
-            selected_week,
-        )
-        if word_bytes is not None:
-            st.download_button(
-                "⬇️ Vezetői Word",
-                data=word_bytes,
-                file_name=f"executive_performance_riport_{safe_week}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-            
-            key="download_button_unique_8",
-        )
-        else:
-            st.info("Word exporthoz szükséges: python-docx")
-
-    with e4:
-        csv_bundle = insight_export_df_export.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            "⬇️ Insight CSV",
-            data=csv_bundle,
-            file_name=f"executive_insightok_{safe_week}.csv",
-            mime="text/csv",
-            use_container_width=True,
-        
-            key="download_button_unique_9",
-        )
-
 
     # -------------------------------------------------------------------------
     # V6.1 - Product Report Pack visszaemelve az Export fülre is
@@ -10218,24 +10309,32 @@ with tab_export:
         try:
             sample_exec_pdf_bytes_export = build_fpi_sample_pdf_bytes("executive")
             sample_full_pdf_bytes_export = build_fpi_sample_pdf_bytes("full")
+            sample_gps_only_pdf_bytes_export = build_fpi_gps_only_sample_pdf_bytes()
         except Exception:
-            sample_exec_pdf_bytes_export = sample_full_pdf_bytes_export = None
-        sm1, sm2 = st.columns(2)
+            sample_exec_pdf_bytes_export = sample_full_pdf_bytes_export = sample_gps_only_pdf_bytes_export = None
+        sm1, sm2, sm3 = st.columns(3)
         with sm1:
             if sample_exec_pdf_bytes_export is not None:
                 st.download_button("⬇️ Minta Executive Summary", data=sample_exec_pdf_bytes_export, file_name="fpi_minta_executive_summary.pdf", mime="application/pdf", use_container_width=True, key="download_sample_exec_v83_export")
         with sm2:
             if sample_full_pdf_bytes_export is not None:
                 st.download_button("⬇️ Minta Full Report", data=sample_full_pdf_bytes_export, file_name="fpi_minta_full_report.pdf", mime="application/pdf", use_container_width=True, key="download_sample_full_v83_export")
-        if sample_exec_pdf_bytes_export is None and sample_full_pdf_bytes_export is None:
+        with sm3:
+            if sample_gps_only_pdf_bytes_export is not None:
+                st.download_button("⬇️ Minta GPS-only Report", data=sample_gps_only_pdf_bytes_export, file_name="fpi_minta_gps_only_report.pdf", mime="application/pdf", use_container_width=True, key="download_sample_gps_only_v96_export")
+        if sample_exec_pdf_bytes_export is None and sample_full_pdf_bytes_export is None and sample_gps_only_pdf_bytes_export is None:
             st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
 
     st.markdown("### FPI riportok – éles PDF-ek")
     st.caption("Az aktuális feltöltött adatokból: Executive Summary + Full Report.")
     if 'build_fpi_product_pdf_bytes' in globals():
         live_report_base_export = analysis_base_df.copy() if 'analysis_base_df' in globals() else df.copy()
-        er1, er2 = st.columns(2)
+        er1, er2, er3 = st.columns(3)
         with er1:
+            gps_only_pack_pdf_export = build_fpi_gps_only_pdf_bytes(live_report_base_export, selected_week, selected_playstyle)
+            if gps_only_pack_pdf_export is not None:
+                st.download_button("⬇️ GPS-only PDF Report", data=gps_only_pack_pdf_export, file_name=f"fpi_gps_only_report_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_gps_only_v96_export")
+        with er2:
             exec_pack_pdf_export = build_fpi_product_pdf_bytes(
                 live_report_base_export,
                 selected_week,
@@ -10245,7 +10344,7 @@ with tab_export:
             )
             if exec_pack_pdf_export is not None:
                 st.download_button("⬇️ Executive Summary PDF", data=exec_pack_pdf_export, file_name=f"fpi_executive_summary_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_exec_v83_export")
-        with er2:
+        with er3:
             full_pack_pdf_export = build_fpi_product_pdf_bytes(
                 live_report_base_export,
                 selected_week,
