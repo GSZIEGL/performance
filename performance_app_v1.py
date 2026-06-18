@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V083_TWO_REPORTS_CLEAN_EXEC_FULL_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V084_LEGACY_TACTICAL_PDF_ENGINE_1TO1_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5488,7 +5488,10 @@ def _fpi_top_tactical_messages_v82(tactical_context: Optional[Dict[str, object]]
     if not tactical_context:
         return ["Nincs taktikai input, GPS-alapú heti terv."]
     out = []
-    for f in (tactical_context.get("tactical_findings") or [])[:limit]:
+    findings = tactical_context.get("tactical_findings") or []
+    pdf_first = [f for f in findings if str(f.get("Téma", "")).startswith("PDF:")]
+    other = [f for f in findings if not str(f.get("Téma", "")).startswith("PDF:")]
+    for f in (pdf_first + other)[:limit]:
         theme = str(f.get("Téma", "")).strip()
         decision = str(f.get("Edzői következtetés", "")).strip()
         if theme and decision:
@@ -7167,6 +7170,371 @@ def _fpi_tactical_context_lines(text: str, topic: str, limit: int = 10) -> List[
             break
     return list(dict.fromkeys(out))[:limit]
 
+
+# =========================================================
+# V8.4 - LEGACY TACTICAL PDF ENGINE 1:1 CORE
+# A korábbi külön Tactical app PDF -> insight motorjának prefixelve visszaemelt változata.
+# Nem UI-t emelünk át, hanem a témadetektáló / briefing blokk logikát.
+# =========================================================
+
+FPI_LEGACY_TACTICAL_TOPIC_TAGS = {
+    "formation": {
+        "label_hu": "Formáció / alapfelállás",
+        "keywords": [
+            "formation", "shape", "system", "line-up", "lineup", "starting eleven", "starting xi", "structure",
+            "formáció", "felállás", "alapfelállás", "játékrendszer", "szerkezet", "kezdőcsapat", "kezdő tizenegy",
+            "4-4-2", "4-2-3-1", "4-3-3", "3-5-2", "3-4-3", "5-3-2", "5-4-1",
+        ],
+    },
+    "build_up": {
+        "label_hu": "Labdakihozatal / támadásépítés",
+        "keywords": [
+            "build-up", "build up", "buildout", "first phase", "second phase", "goal kick", "short goal kick",
+            "deep build", "progression", "progressive pass", "progressive passes", "progressive carry", "third man",
+            "centre back", "center back", "fullback", "pivot", "six", "number 6", "half-space", "switch of play",
+            "labdakihozatal", "támadásépítés", "építkezés", "első fázis", "második fázis", "kirúgás",
+            "rövid kirúgás", "progresszió", "progresszív passz", "progresszív labdavezetés", "harmadik ember",
+            "belső védő", "szélső védő", "hatossal", "6-os", "félterület", "oldalváltás",
+        ],
+    },
+    "direct_play": {
+        "label_hu": "Direkt játék / hosszú labda",
+        "keywords": [
+            "direct play", "long ball", "long pass", "second ball", "aerial duel", "target man", "flick-on",
+            "vertical", "early forward", "long distribution", "direct attack", "route one",
+            "direkt játék", "hosszú labda", "hosszú passz", "második labda", "felívelés", "fejpárbaj",
+            "céljátékos", "lecsorgó", "vertikális", "korai előrejáték", "direkt támadás",
+        ],
+    },
+    "pressing": {
+        "label_hu": "Letámadás / presszing",
+        "keywords": [
+            "press", "pressing", "high press", "mid press", "low press", "counterpress", "counter-press",
+            "ppda", "pressure", "pressing trigger", "trap", "press trap", "forced turnover", "high recovery",
+            "challenge intensity", "defensive actions", "intensity", "aggressive press",
+            "letámadás", "presszing", "magas letámadás", "középső presszing", "visszatámadás", "nyomás",
+            "presszing trigger", "trigger", "csapda", "pressingcsapda", "kikényszerített labdavesztés",
+            "magas labdaszerzés", "védekező akció", "intenzitás", "agresszív letámadás",
+        ],
+    },
+    "defensive_block": {
+        "label_hu": "Védekezési blokk / blokkmagasság",
+        "keywords": [
+            "low block", "mid block", "middle block", "high block", "defensive block", "compact", "compactness",
+            "defensive line", "back line", "line height", "block height", "deep defending", "drop", "retreat",
+            "mély blokk", "középső blokk", "magas blokk", "védekezési blokk", "kompakt", "kompaktság",
+            "védelmi vonal", "védősor", "blokkmagasság", "mély védekezés", "visszazár", "visszarendeződés",
+        ],
+    },
+    "transition_attack": {
+        "label_hu": "Támadó átmenet / kontrák",
+        "keywords": [
+            "transition", "attacking transition", "offensive transition", "counterattack", "counter attack", "counter-attacks",
+            "fast attack", "quick attack", "break", "breakaway", "after regain", "after winning", "regain and go",
+            "átmenet", "támadó átmenet", "kontra", "kontratámadás", "gyors támadás", "gyors átmenet",
+            "labdaszerzés után", "labdanyerés után", "visszaszerzés után", "indítás", "megindulás",
+        ],
+    },
+    "transition_defense": {
+        "label_hu": "Védekező átmenet / rest defense",
+        "keywords": [
+            "defensive transition", "after losing", "after loss", "rest defense", "counter attack prevention",
+            "counter prevention", "defend transition", "negative transition", "cover behind", "protection behind",
+            "védekező átmenet", "labdavesztés után", "rest defense", "kontrák elleni védekezés",
+            "átmeneti védekezés", "negatív átmenet", "biztosítás", "mögöttes biztosítás", "visszarendeződés",
+        ],
+    },
+    "chance_creation": {
+        "label_hu": "Helyzetkialakítás / támadóharmad",
+        "keywords": [
+            "chance creation", "key pass", "shot assist", "box entry", "penalty area", "final third", "final-third",
+            "through ball", "cutback", "cross", "low cross", "deep cross", "half-space cross", "xg", "expected goals",
+            "helyzetkialakítás", "kulcspassz", "lövést előkészítő", "box entry", "tizenhatos", "büntetőterület",
+            "támadóharmad", "mélységi passz", "visszagurítás", "beadás", "lapos beadás", "xg", "várható gól",
+        ],
+    },
+    "wide_play": {
+        "label_hu": "Szélső játék / oldali dominancia",
+        "keywords": [
+            "wide play", "wing", "flank", "left side", "right side", "overlap", "underlap", "fullback", "wingback",
+            "crossing", "side dominance", "touchline", "wide overload", "flank overload",
+            "szélső játék", "szél", "oldal", "bal oldal", "jobb oldal", "átfedés", "aláfutás", "szélső védő",
+            "wingback", "beadás", "oldali dominancia", "oldalvonal", "oldali túlterhelés",
+        ],
+    },
+    "central_play": {
+        "label_hu": "Középső játék / félterületek",
+        "keywords": [
+            "central", "middle", "half-space", "half space", "between the lines", "pocket", "zone 14", "inside channel",
+            "central overload", "interior", "attacking midfielder", "number 10",
+            "középen", "középső", "félterület", "félterületek", "vonalak között", "zseb", "14-es zóna",
+            "belső csatorna", "középső túlterhelés", "belső középpályás", "10-es",
+        ],
+    },
+    "set_pieces": {
+        "label_hu": "Pontrúgások",
+        "keywords": [
+            "set piece", "set pieces", "corner", "corner kick", "free kick", "throw-in", "throw in", "penalty",
+            "attacking corner", "defensive corner", "near post", "far post", "second ball", "aerial", "header",
+            "pontrúgás", "pontrúgások", "szöglet", "szabadrúgás", "bedobás", "büntető", "támadó szöglet",
+            "védekező szöglet", "rövid oldal", "hosszú oldal", "második labda", "fejpárbaj", "fejes",
+        ],
+    },
+    "key_players": {
+        "label_hu": "Kulcsjátékosok",
+        "keywords": [
+            "key player", "danger man", "main threat", "top scorer", "creator", "playmaker", "progressor", "target man",
+            "dribbler", "1v1", "one-v-one", "finisher", "captain", "most dangerous",
+            "kulcsjátékos", "veszélyes játékos", "fő veszély", "gólkirály", "kreatív játékos", "irányító",
+            "progresszor", "céljátékos", "cselező", "egy az egy", "befejező", "csapatkapitány", "legveszélyesebb",
+        ],
+    },
+    "weakness_risk": {
+        "label_hu": "Gyengeségek / kockázatok",
+        "keywords": [
+            "weakness", "weaknesses", "risk", "risks", "vulnerable", "vulnerability", "exposed", "space behind",
+            "gap", "mistake", "error", "turnover", "lost balls", "losses", "danger", "threat", "problem",
+            "gyengeség", "gyengeségek", "kockázat", "sebezhető", "sebezhetőség", "nyitott terület", "mögötti terület",
+            "rés", "hiba", "labdavesztés", "elvesztett labda", "veszély", "fenyegetés", "probléma",
+        ],
+    },
+    "strength": {
+        "label_hu": "Erősségek",
+        "keywords": [
+            "strength", "strengths", "strong", "advantage", "edge", "dominant", "effective", "efficient",
+            "erősség", "erősségek", "erős", "előny", "domináns", "hatékony", "kiemelkedő",
+        ],
+    },
+    "goalkeeper": {
+        "label_hu": "Kapus szerepe",
+        "keywords": [
+            "goalkeeper", "keeper", "gk", "sweeper keeper", "distribution", "long kick", "short pass from gk",
+            "kapus", "hálóőr", "kapusjáték", "kapus kirúgás", "kapus passz", "hosszú kirúgás", "rövid kirúgás",
+        ],
+    },
+    "match_dynamics": {
+        "label_hu": "Meccsdinamika / fázisok",
+        "keywords": [
+            "first half", "second half", "opening phase", "late phase", "last 15", "tempo", "rhythm", "momentum",
+            "game state", "when leading", "when trailing", "after goal", "minutes", "phase",
+            "első félidő", "második félidő", "kezdő fázis", "végjáték", "utolsó 15", "tempó", "ritmus",
+            "momentum", "meccsállapot", "vezetésnél", "hátrányban", "gól után", "percek", "fázis",
+        ],
+    },
+    "recommendation": {
+        "label_hu": "Javaslat / meccsterv",
+        "keywords": [
+            "recommendation", "recommend", "should", "we should", "game plan", "match plan", "plan a", "plan b",
+            "solution", "exploit", "avoid", "focus", "priority", "target", "press here", "attack here",
+            "javaslat", "ajánlás", "meccsterv", "mérkőzésterv", "terv a", "terv b", "megoldás",
+            "kihasználni", "elkerülni", "fókusz", "prioritás", "célpont", "itt presszing", "itt támadni",
+        ],
+    },
+}
+FPI_LEGACY_TACTICAL_TOPIC_ORDER = [
+    "formation", "build_up", "direct_play", "pressing", "defensive_block", "transition_attack",
+    "transition_defense", "chance_creation", "wide_play", "central_play", "set_pieces", "key_players",
+    "weakness_risk", "strength", "goalkeeper", "match_dynamics", "recommendation",
+]
+
+def _fpi_legacy_norm_for_tagging(text: object) -> str:
+    s = unicodedata.normalize("NFKD", str(text or "").lower())
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = s.replace("–", "-").replace("—", "-")
+    return re.sub(r"\s+", " ", s).strip()
+
+def _fpi_legacy_unique_keep_order(items: List[str]) -> List[str]:
+    out = []
+    seen = set()
+    for x in items or []:
+        key = str(x).strip()
+        if key and key not in seen:
+            out.append(key)
+            seen.add(key)
+    return out
+
+def _fpi_legacy_tactical_keyword_hits(text: str, keywords: List[str]) -> int:
+    norm = _fpi_legacy_norm_for_tagging(text)
+    hits = 0
+    for kw in keywords:
+        k = _fpi_legacy_norm_for_tagging(kw)
+        if k and k in norm:
+            hits += 1
+    return hits
+
+def _fpi_legacy_extract_context_lines_by_topic(text: str, topic_key: str, limit: int = 8, context_radius: int = 1) -> List[str]:
+    cfg = FPI_LEGACY_TACTICAL_TOPIC_TAGS.get(topic_key, {})
+    keywords = cfg.get("keywords", [])
+    lines = [x.strip() for x in str(text or "").splitlines() if x.strip()]
+    selected = []
+    for i, line in enumerate(lines):
+        if _fpi_legacy_tactical_keyword_hits(line, keywords) > 0:
+            start = max(0, i - context_radius)
+            end = min(len(lines), i + context_radius + 1)
+            for j in range(start, end):
+                if len(lines[j]) >= 4:
+                    selected.append(lines[j])
+        if len(_fpi_legacy_unique_keep_order(selected)) >= limit:
+            break
+    return _fpi_legacy_unique_keep_order(selected)[:limit]
+
+def _fpi_legacy_detect_tactical_topics(text: str) -> Tuple[Dict[str, dict], List[str]]:
+    rows = {}
+    for key in FPI_LEGACY_TACTICAL_TOPIC_ORDER:
+        cfg = FPI_LEGACY_TACTICAL_TOPIC_TAGS[key]
+        lines = _fpi_legacy_extract_context_lines_by_topic(text, key, limit=10, context_radius=0)
+        hit_count = sum(_fpi_legacy_tactical_keyword_hits(line, cfg["keywords"]) for line in lines)
+        rows[key] = {
+            "label_hu": cfg["label_hu"],
+            "hit_count": hit_count,
+            "lines": lines[:8],
+            "confidence": min(100, hit_count * 18 + len(lines) * 5),
+        }
+    detected = [k for k, v in rows.items() if v["hit_count"] > 0 or v["lines"]]
+    detected = sorted(detected, key=lambda k: (rows[k]["confidence"], rows[k]["hit_count"]), reverse=True)
+    return rows, detected
+
+def _fpi_legacy_build_universal_briefing_blocks(text: str) -> Dict[str, List[str]]:
+    topic_rows, detected = _fpi_legacy_detect_tactical_topics(text)
+    return {
+        "opponent_identity": _fpi_legacy_extract_context_lines_by_topic(text, "formation", limit=4, context_radius=1),
+        "build_up": _fpi_legacy_extract_context_lines_by_topic(text, "build_up", limit=8, context_radius=1),
+        "pressing": _fpi_legacy_extract_context_lines_by_topic(text, "pressing", limit=8, context_radius=1),
+        "defensive_block": _fpi_legacy_extract_context_lines_by_topic(text, "defensive_block", limit=8, context_radius=1),
+        "transition_attack": _fpi_legacy_extract_context_lines_by_topic(text, "transition_attack", limit=8, context_radius=1),
+        "transition_defense": _fpi_legacy_extract_context_lines_by_topic(text, "transition_defense", limit=8, context_radius=1),
+        "set_pieces": _fpi_legacy_extract_context_lines_by_topic(text, "set_pieces", limit=8, context_radius=1),
+        "key_players": _fpi_legacy_extract_context_lines_by_topic(text, "key_players", limit=8, context_radius=1),
+        "risks": _fpi_legacy_extract_context_lines_by_topic(text, "weakness_risk", limit=8, context_radius=1),
+        "recommendations": _fpi_legacy_extract_context_lines_by_topic(text, "recommendation", limit=8, context_radius=1),
+        "detected_topics": [topic_rows[k]["label_hu"] for k in detected[:10]],
+    }
+
+def _fpi_legacy_extract_lines_with_keywords(text: str, keywords: List[str], limit: int = 6) -> List[str]:
+    out = []
+    lines = [x.strip() for x in str(text or "").splitlines() if x.strip()]
+    keyword_norms = [_fpi_legacy_norm_for_tagging(k) for k in keywords]
+    for line in lines:
+        line_norm = _fpi_legacy_norm_for_tagging(line)
+        if any(k and k in line_norm for k in keyword_norms):
+            out.append(line)
+        if len(out) >= limit:
+            break
+    return _fpi_legacy_unique_keep_order(out)
+
+def _fpi_legacy_infer_formation(text: str) -> Optional[str]:
+    m = re.search(r"\b([3-5]-[1-5]-[1-5](?:-[1-3])?)\b", text or "")
+    if m:
+        return m.group(1)
+    return None
+
+def _fpi_legacy_extract_player_names_from_pdf(text: str, limit: int = 6) -> List[str]:
+    names = re.findall(r"\b[A-ZÁÉÍÓÖŐÚÜŰ][a-záéíóöőúüű\-]+(?:\s+[A-ZÁÉÍÓÖŐÚÜŰ][a-záéíóöőúüű\-]+)+\b", text or "")
+    return _fpi_legacy_unique_keep_order(names)[:limit]
+
+def _fpi_legacy_build_pdf_insights(text: str) -> Dict[str, object]:
+    """A külön Tactical app Universal Tactical PDF Reader motorja, prefixelve."""
+    formation = _fpi_legacy_infer_formation(text)
+    topic_rows, detected_topics = _fpi_legacy_detect_tactical_topics(text)
+    universal_blocks = _fpi_legacy_build_universal_briefing_blocks(text)
+
+    dna_lines = _fpi_legacy_unique_keep_order(
+        universal_blocks.get("build_up", [])[:3]
+        + universal_blocks.get("pressing", [])[:3]
+        + universal_blocks.get("defensive_block", [])[:3]
+        + _fpi_legacy_extract_lines_with_keywords(
+            text,
+            FPI_LEGACY_TACTICAL_TOPIC_TAGS["build_up"]["keywords"]
+            + FPI_LEGACY_TACTICAL_TOPIC_TAGS["pressing"]["keywords"]
+            + FPI_LEGACY_TACTICAL_TOPIC_TAGS["transition_attack"]["keywords"]
+            + FPI_LEGACY_TACTICAL_TOPIC_TAGS["direct_play"]["keywords"],
+            limit=10,
+        )
+    )[:10]
+
+    risk_lines = _fpi_legacy_unique_keep_order(
+        universal_blocks.get("risks", [])
+        + _fpi_legacy_extract_lines_with_keywords(
+            text,
+            FPI_LEGACY_TACTICAL_TOPIC_TAGS["weakness_risk"]["keywords"]
+            + FPI_LEGACY_TACTICAL_TOPIC_TAGS["transition_defense"]["keywords"],
+            limit=10,
+        )
+    )[:10]
+
+    set_piece_lines = _fpi_legacy_unique_keep_order(
+        universal_blocks.get("set_pieces", [])
+        + _fpi_legacy_extract_lines_with_keywords(text, FPI_LEGACY_TACTICAL_TOPIC_TAGS["set_pieces"]["keywords"], limit=8)
+    )[:8]
+
+    dynamics_lines = _fpi_legacy_unique_keep_order(
+        universal_blocks.get("transition_attack", [])[:3]
+        + universal_blocks.get("transition_defense", [])[:3]
+        + _fpi_legacy_extract_lines_with_keywords(text, FPI_LEGACY_TACTICAL_TOPIC_TAGS["match_dynamics"]["keywords"], limit=8)
+    )[:8]
+
+    pressing_lines = _fpi_legacy_unique_keep_order(
+        universal_blocks.get("pressing", [])
+        + _fpi_legacy_extract_lines_with_keywords(text, FPI_LEGACY_TACTICAL_TOPIC_TAGS["pressing"]["keywords"], limit=8)
+    )[:8]
+
+    build_up_lines = _fpi_legacy_unique_keep_order(
+        universal_blocks.get("build_up", [])
+        + universal_blocks.get("direct_play", [])
+        + _fpi_legacy_extract_lines_with_keywords(
+            text,
+            FPI_LEGACY_TACTICAL_TOPIC_TAGS["build_up"]["keywords"] + FPI_LEGACY_TACTICAL_TOPIC_TAGS["direct_play"]["keywords"],
+            limit=8,
+        )
+    )[:8]
+
+    player_threat_lines = _fpi_legacy_unique_keep_order(
+        universal_blocks.get("key_players", [])
+        + universal_blocks.get("chance_creation", [])
+        + _fpi_legacy_extract_lines_with_keywords(
+            text,
+            FPI_LEGACY_TACTICAL_TOPIC_TAGS["key_players"]["keywords"]
+            + FPI_LEGACY_TACTICAL_TOPIC_TAGS["chance_creation"]["keywords"],
+            limit=10,
+        )
+    )[:10]
+
+    detected_names = _fpi_legacy_extract_player_names_from_pdf(text, limit=12)
+
+    recommendation_lines = _fpi_legacy_unique_keep_order(
+        universal_blocks.get("recommendations", [])
+        + _fpi_legacy_extract_lines_with_keywords(text, FPI_LEGACY_TACTICAL_TOPIC_TAGS["recommendation"]["keywords"], limit=10)
+    )[:10]
+
+    topic_summary_rows = []
+    for key in detected_topics[:12]:
+        row = topic_rows[key]
+        topic_summary_rows.append({
+            "Téma": row["label_hu"],
+            "Kulcs": key,
+            "Találat": row["hit_count"],
+            "Bizonyosság": row["confidence"],
+            "Minta": " | ".join(row["lines"][:2]),
+        })
+
+    return {
+        "formation": formation or "n.a.",
+        "dna_lines": dna_lines,
+        "risk_lines": risk_lines,
+        "set_piece_lines": set_piece_lines,
+        "dynamics_lines": dynamics_lines,
+        "pressing_lines": pressing_lines,
+        "build_up_lines": build_up_lines,
+        "player_threat_lines": player_threat_lines,
+        "recommendation_lines": recommendation_lines,
+        "detected_names": detected_names,
+        "universal_blocks": universal_blocks,
+        "detected_topics": universal_blocks.get("detected_topics", []),
+        "topic_debug": topic_summary_rows,
+        "reader_version": "Legacy Tactical PDF Reader 1:1 core imported into FPI v8.4",
+    }
+
+
 def _fpi_tactical_top_terms_v76(text: str, limit: int = 35) -> List[dict]:
     stop = set("""
     the and for with from that this into their your are was were have has had not but
@@ -7240,47 +7608,76 @@ def _fpi_fallback_topics_from_terms_v77(text: str, top_terms: List[dict]) -> Lis
     return sorted(rows, key=lambda x: x["Bizonyosság"], reverse=True)
 
 def _fpi_tactical_pdf_insights(text: str) -> Dict[str, object]:
-    rows = []
-    blocks = {}
-    for key, cfg in TACTICAL_TOPIC_TAGS_FPI.items():
-        keywords = cfg.get("keywords", [])
-        lines = _fpi_tactical_context_lines(text, key, limit=10)
-        full_hits = _fpi_full_text_keyword_hits_v77(text, keywords)
-        if not lines and full_hits:
-            lines = _fpi_find_keyword_windows_v77(text, keywords, limit=6)
-        line_hits = sum(1 for line in lines for kw in keywords if _fpi_tactical_norm(kw) in _fpi_tactical_norm(line))
-        hit = max(full_hits, line_hits)
-        conf = min(100, hit * 12 + len(lines) * 5)
-        rows.append({"Téma": cfg["label"], "Kulcs": key, "Találat": hit, "Bizonyosság": conf, "Minta": " | ".join(lines[:2])})
-        blocks[key] = lines
+    """V8.4: a régi Tactical app build_pdf_insights motorja dolgozik.
+    A visszatérő struktúrát FPI-kompatibilissé alakítjuk, hogy a meglévő Match Plan / PDF / Excel logika is használja.
+    """
+    raw_text = str(text or "")
+    legacy = _fpi_legacy_build_pdf_insights(raw_text)
 
-    detected = [r for r in rows if r["Találat"] > 0 or r["Minta"]]
-    detected = sorted(detected, key=lambda x: x["Bizonyosság"], reverse=True)
-    top_terms = _fpi_tactical_top_terms_v76(text)
-    if not detected and len(str(text or "").strip()) > 0:
-        detected = _fpi_fallback_topics_from_terms_v77(text, top_terms)
+    topic_rows = legacy.get("topic_debug", []) or []
+    blocks = {
+        "formation": legacy.get("universal_blocks", {}).get("opponent_identity", []),
+        "build_up": legacy.get("build_up_lines", []) or legacy.get("universal_blocks", {}).get("build_up", []),
+        "direct_play": legacy.get("universal_blocks", {}).get("direct_play", []),
+        "pressing": legacy.get("pressing_lines", []) or legacy.get("universal_blocks", {}).get("pressing", []),
+        "defensive_block": legacy.get("universal_blocks", {}).get("defensive_block", []),
+        "transition_attack": legacy.get("dynamics_lines", []) or legacy.get("universal_blocks", {}).get("transition_attack", []),
+        "transition_defense": legacy.get("risk_lines", []) or legacy.get("universal_blocks", {}).get("transition_defense", []),
+        "chance_creation": legacy.get("player_threat_lines", []) or legacy.get("universal_blocks", {}).get("chance_creation", []),
+        "wide_play": legacy.get("universal_blocks", {}).get("wide_play", []),
+        "central_play": legacy.get("universal_blocks", {}).get("central_play", []),
+        "set_pieces": legacy.get("set_piece_lines", []),
+        "key_players": legacy.get("player_threat_lines", []) or legacy.get("universal_blocks", {}).get("key_players", []),
+        "weakness_risk": legacy.get("risk_lines", []),
+        "strength": legacy.get("universal_blocks", {}).get("strength", []),
+        "goalkeeper": legacy.get("universal_blocks", {}).get("goalkeeper", []),
+        "match_dynamics": legacy.get("dynamics_lines", []),
+        "recommendation": legacy.get("recommendation_lines", []),
+    }
 
-    # Ha volt szöveg, de csak nagyon gyenge találat van, ne legyen n.a.: legyen óvatos általános témasor.
-    if len(str(text or "").strip()) > 300 and not detected:
-        detected = [{
-            "Téma": "Általános taktikai dokumentum",
-            "Kulcs": "generic_tactical_document",
-            "Találat": 1,
-            "Bizonyosság": 25,
-            "Minta": "A PDF-ből szöveg kinyerhető, de a jelenlegi szótár nem talált erős témát. A PDF diagnosztika gyakori szavai alapján bővíthető.",
-            "Fallback": True,
-        }]
+    # Legacy detected topics -> FPI topics. Ha nincs topic_debug, detected_topicsből fallback.
+    topics = []
+    for r in topic_rows:
+        if r.get("Találat", 0) or r.get("Minta"):
+            topics.append({
+                "Téma": r.get("Téma", ""),
+                "Kulcs": r.get("Kulcs", ""),
+                "Találat": r.get("Találat", 0),
+                "Bizonyosság": r.get("Bizonyosság", 0),
+                "Minta": r.get("Minta", ""),
+                "Forrás": "Legacy Tactical PDF Engine",
+            })
+    if not topics:
+        for t in legacy.get("detected_topics", [])[:10]:
+            topics.append({
+                "Téma": t,
+                "Kulcs": "",
+                "Találat": 1,
+                "Bizonyosság": 40,
+                "Minta": "Legacy Tactical PDF Engine által felismert téma.",
+                "Forrás": "Legacy Tactical PDF Engine",
+            })
 
-    formation_match = re.search(r"\\b([3-5]-[1-5]-[1-5](?:-[1-3])?)\\b", text or "")
-    preview = re.sub(r"\\s+", " ", str(text or "")).strip()[:2200]
+    preview = re.sub(r"\s+", " ", raw_text).strip()[:2200]
     return {
-        "formation": formation_match.group(1) if formation_match else "n.a.",
+        "formation": legacy.get("formation", "n.a."),
         "blocks": blocks,
-        "topics": detected[:20],
-        "raw_text_len": len(text or ""),
+        "topics": topics[:20],
+        "raw_text_len": len(raw_text),
         "preview": preview,
-        "top_terms": top_terms,
-        "reader_version": "V7.7 robust pdfplumber + full-text scoring + fallback topic engine",
+        "top_terms": _fpi_tactical_top_terms_v76(raw_text),
+        "reader_version": legacy.get("reader_version", "Legacy Tactical PDF Engine"),
+        "legacy": legacy,
+        "legacy_detected_topics": legacy.get("detected_topics", []),
+        "legacy_dna_lines": legacy.get("dna_lines", []),
+        "legacy_risk_lines": legacy.get("risk_lines", []),
+        "legacy_set_piece_lines": legacy.get("set_piece_lines", []),
+        "legacy_dynamics_lines": legacy.get("dynamics_lines", []),
+        "legacy_pressing_lines": legacy.get("pressing_lines", []),
+        "legacy_build_up_lines": legacy.get("build_up_lines", []),
+        "legacy_player_threat_lines": legacy.get("player_threat_lines", []),
+        "legacy_recommendation_lines": legacy.get("recommendation_lines", []),
+        "legacy_detected_names": legacy.get("detected_names", []),
     }
 
 def _fpi_analysis_level(has_gps: bool, has_pdf: bool, has_team_excel: bool, has_player_excel: bool) -> Tuple[int, str]:
@@ -7398,6 +7795,27 @@ def _fpi_build_excel_driven_tactical_findings_v79(
 
     def add(title, evidence, decision, priority="Közepes"):
         findings.append({"Téma": title, "Bizonyíték": evidence, "Edzői következtetés": decision, "Prioritás": priority})
+
+    # V8.4: PDF insightok elsőként kerülnek be, ha a régi Tactical engine konkrét témát/sort talált.
+    pdf_topics = pdf_topics or []
+    for row in pdf_topics[:5]:
+        tema = str(row.get("Téma", "")).strip()
+        sample = str(row.get("Minta", "")).strip()
+        if not tema:
+            continue
+        tnorm = _fpi_tactical_norm(tema)
+        if "presszing" in tnorm or "letamadas" in tnorm or "press" in tnorm:
+            add("PDF: presszing / letámadás", sample or tema, "Presszingkijátszás, első passzsor és harmadik emberes megoldások külön edzésfókuszt kapjanak.", "Magas")
+        elif "atmenet" in tnorm or "kontra" in tnorm or "transition" in tnorm:
+            add("PDF: átmenetek / kontrák", sample or tema, "MD-3 átmeneti játék + HSR/sprint inger, MD-2 rest defense biztosítás.", "Magas")
+        elif "pontrugas" in tnorm or "szoglet" in tnorm or "set" in tnorm:
+            add("PDF: pontrúgások", sample or tema, "MD-1 pontrúgás-védekezés, első kontakt és második labdák kontrollja.", "Magas")
+        elif "szel" in tnorm or "beadas" in tnorm or "wide" in tnorm:
+            add("PDF: szélső játék", sample or tema, "Oldali 1v1 védekezés, beadásblokkolás és hosszú oldali zárás.", "Közepes")
+        elif "kulcsj" in tnorm or "player" in tnorm:
+            add("PDF: kulcsjátékosok", sample or tema, "A PDF-ben jelzett játékosok passzsávjait és döntési testhelyzetét kontrollálni kell.", "Közepes")
+        else:
+            add(f"PDF: {tema}", sample or "PDF-ből felismert taktikai téma.", "Videóval ellenőrizendő, majd a heti taktikai blokkba beépíthető.", "Közepes")
 
     # Team Excel alapján
     if "shots" in by_key:
