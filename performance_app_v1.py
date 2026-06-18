@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V103_LOGIN_LANDING_CLEAN_PDF_SCOPE_FIX_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V104_CLEAN_TACTICAL_SCOPE_FIX_HTML_CLEAN_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5899,7 +5899,7 @@ def _fpi_build_pdf_only_context_from_session_v87(gps_context: Dict[str, object])
     opp_pdf_insights["reader_version"] = "V8.9 direct UploadFile text-store + legacy Tactical reader"
     opp_pdf_insights["page_debug"] = opp_pdf_pages[:10]
 
-    merged_pdf_insights = _merge_tactical_pdf_insights(own_pdf_insights, opp_pdf_insights)
+    merged_pdf_insights = _fpi_safe_merge_tactical_pdf_insights_v104(own_pdf_insights, opp_pdf_insights)
 
     previous = st.session_state.get("tactical_pro_context") or {}
     own_team_metrics = previous.get("own_team_metrics", {}) or {}
@@ -5918,7 +5918,7 @@ def _fpi_build_pdf_only_context_from_session_v87(gps_context: Dict[str, object])
         "own": {"pdf_insights": own_pdf_insights, "team_metrics": own_team_metrics, "player_tables": own_player_tables},
         "opponent": {"pdf_insights": opp_pdf_insights, "team_metrics": opp_team_metrics, "player_tables": opp_player_tables},
     }
-    plan = _fpi_build_adaptive_match_training_plan(gps_context or {}, tactical_ctx_for_plan)
+    plan = _fpi_safe_build_adaptive_plan_v104(gps_context or {}, tactical_ctx_for_plan)
     ctx = _build_tactical_executive_context(gps_context or {}, tactical_ctx_for_plan, plan)
     ctx["forced_pdf_rebuild"] = True
     ctx["forced_pdf_signature"] = (own_pdf_insights.get("upload_signature", "") + "||" + opp_pdf_insights.get("upload_signature", ""))
@@ -7691,9 +7691,6 @@ def render_landing_login_panel_v103() -> None:
                     <div style="color:#64748b;font-size:.95rem;margin-top:4px;">
                         {"Pro hozzáférés aktív" if is_pro_mode() else f"Demo limit: max {DEMO_PLAYER_LIMIT} játékos · max {DEMO_WEEK_LIMIT} hét · max {DEMO_ROW_LIMIT} sor"}
                         {(" · " + html.escape(str(club))) if club else ""}
-                    </div>
-                </div>
-            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -7841,6 +7838,91 @@ def render_fpi_landing_page_v100() -> None:
 
 
 
+
+def _fpi_safe_merge_tactical_pdf_insights_v104(own_pdf_insights: Dict[str, object], opp_pdf_insights: Dict[str, object]) -> Dict[str, object]:
+    """A tiszta oldal korai futási sorrendben is működjön.
+    Ha a később definiált _merge_tactical_pdf_insights még nincs globals-ban,
+    akkor minimális, kompatibilis merged struktúrát készít.
+    """
+    if "_merge_tactical_pdf_insights" in globals():
+        return _merge_tactical_pdf_insights(own_pdf_insights, opp_pdf_insights)
+
+    own_pdf_insights = own_pdf_insights or {}
+    opp_pdf_insights = opp_pdf_insights or {}
+    merged_blocks = {}
+    try:
+        tag_keys = list(TACTICAL_TOPIC_TAGS_FPI.keys())
+    except Exception:
+        tag_keys = []
+    for key in tag_keys:
+        own_lines = ((own_pdf_insights.get("blocks") or {}).get(key, []) or [])
+        opp_lines = ((opp_pdf_insights.get("blocks") or {}).get(key, []) or [])
+        merged_blocks[key] = [f"Saját: {x}" for x in own_lines[:4]] + [f"Ellenfél: {x}" for x in opp_lines[:4]]
+
+    topics = []
+    for source_label, src in [("Saját", own_pdf_insights), ("Ellenfél", opp_pdf_insights)]:
+        for row in src.get("topics", []) or []:
+            r = dict(row)
+            r["Forrás"] = source_label
+            topics.append(r)
+
+    sportsbase_findings = []
+    sportsbase_lines = []
+    for role, src in [("Saját PDF", own_pdf_insights), ("Ellenfél PDF", opp_pdf_insights)]:
+        for f in src.get("sportsbase_findings", []) or []:
+            ff = dict(f)
+            ff["Forrás"] = role
+            sportsbase_findings.append(ff)
+        for line in src.get("sportsbase_lines", []) or []:
+            sportsbase_lines.append(f"{role}: {line}")
+
+    return {
+        "formation": opp_pdf_insights.get("formation") or own_pdf_insights.get("formation") or "n.a.",
+        "blocks": merged_blocks,
+        "topics": topics[:18],
+        "raw_text_len": int(own_pdf_insights.get("raw_text_len", 0) or 0) + int(opp_pdf_insights.get("raw_text_len", 0) or 0),
+        "sportsbase_findings": sportsbase_findings[:12],
+        "sportsbase_lines": sportsbase_lines[:16],
+    }
+
+def _fpi_safe_build_adaptive_plan_v104(gps_context: Dict[str, object], tactical_ctx_for_plan: Dict[str, object]) -> Dict[str, object]:
+    if "_fpi_build_adaptive_match_training_plan" in globals():
+        return _fpi_build_adaptive_match_training_plan(gps_context or {}, tactical_ctx_for_plan or {})
+    return {
+        "analysis_level": (tactical_ctx_for_plan or {}).get("analysis_level_label", "Clean workspace"),
+        "plan_a": "GPS-only – erőnléti fókuszú mikrociklus",
+        "risks": ["GPS-alapú terhelési és readiness kockázatok"],
+        "md_plan": [],
+        "player_focus": [],
+        "tactical_findings": [],
+        "team_comparison": {},
+    }
+
+def _fpi_safe_build_tactical_executive_context_v104(gps_context: Dict[str, object], tactical_ctx_for_plan: Dict[str, object], plan: Dict[str, object]) -> Dict[str, object]:
+    if "_build_tactical_executive_context" in globals():
+        return _build_tactical_executive_context(gps_context or {}, tactical_ctx_for_plan or {}, plan or {})
+
+    own = (tactical_ctx_for_plan or {}).get("own", {}) or {}
+    opp = (tactical_ctx_for_plan or {}).get("opponent", {}) or {}
+    pdfi = (tactical_ctx_for_plan or {}).get("pdf_insights", {}) or {}
+    return {
+        "analysis_level": (tactical_ctx_for_plan or {}).get("analysis_level_label", "Clean workspace"),
+        "plan_a": (plan or {}).get("plan_a", "GPS-only – erőnléti fókuszú mikrociklus"),
+        "risks": (plan or {}).get("risks", []),
+        "md_plan": (plan or {}).get("md_plan", []),
+        "player_focus": (plan or {}).get("player_focus", []),
+        "tactical_findings": (plan or {}).get("tactical_findings", []),
+        "team_comparison": (plan or {}).get("team_comparison", {}),
+        "has_own_pdf": bool((own.get("pdf_insights") or {}).get("pdf_uploaded")),
+        "has_opp_pdf": bool((opp.get("pdf_insights") or {}).get("pdf_uploaded")),
+        "own_pdf_pages": int((own.get("pdf_insights") or {}).get("pdf_pages", 0) or 0),
+        "opp_pdf_pages": int((opp.get("pdf_insights") or {}).get("pdf_pages", 0) or 0),
+        "pdf_provider_lines": pdfi.get("sportsbase_lines", []) or [],
+        "pdf_provider_findings": pdfi.get("sportsbase_findings", []) or [],
+    }
+
+
+
 def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[Dict[str, object]]:
     """Tiszta oldalra áthozott taktikai import + mapping.
     Nem rajzol teljes Tactical Pro dashboardot, csak az import/mapping és a context építés marad.
@@ -7912,7 +7994,7 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
             "opponent": {"pdf_insights": opp_pdf_insights, "team_metrics": opp_team_metrics, "player_tables": opp_player_tables},
         }
         plan = _fpi_build_adaptive_match_training_plan(gps_context or {}, tactical_ctx_for_plan)
-        executive_ctx = _build_tactical_executive_context(gps_context or {}, tactical_ctx_for_plan, plan)
+        executive_ctx = _fpi_safe_build_tactical_executive_context_v104(gps_context or {}, tactical_ctx_for_plan, plan)
         st.session_state["tactical_pro_context"] = executive_ctx
 
         has_any = any([
