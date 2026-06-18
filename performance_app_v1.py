@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V110_SAFE_TOPIC_TAGS_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V111_LANDING_FLOW_BOX_EQUAL_HEIGHT_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7713,11 +7713,27 @@ def _fpi_landing_css_v100() -> None:
             border-radius: 18px;
             background: #f8fafc;
             border: 1px solid #e2e8f0;
-            padding: 14px 16px;
-            height: 100%;
+            padding: 16px 18px;
+            min-height: 118px;
+            height: 118px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            box-sizing: border-box;
         }
-        .fpi-flow-step b {color:#0f172a;}
-        .fpi-flow-step div {color:#64748b; font-size:.92rem; margin-top:5px;}
+        .fpi-flow-step b {
+            color:#0f172a;
+            display:block;
+            min-height: 26px;
+            line-height: 1.2;
+        }
+        .fpi-flow-step div {
+            color:#64748b;
+            font-size:.92rem;
+            margin-top:7px;
+            line-height: 1.38;
+            min-height: 44px;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -7873,10 +7889,8 @@ def render_fpi_landing_page_v100() -> None:
     st.markdown("### Hogyan működik?")
     f1, f2, f3, f4 = st.columns(4)
     for col, title, desc in [
-        (f1, "1. Import"
-         , "GPS Excel, opcionálisan taktikai PDF/Excel."),
-        (f2, "2. Kontextus"
-         , "Meccsnap, ellenfél, korosztály/szint, edzésszám."),
+        (f1, "1. Import", "GPS Excel, opcionálisan taktikai PDF/Excel."),
+        (f2, "2. Kontextus", "Meccsnap, ellenfél, korosztály/szint, edzésszám."),
         (f3, "3. Elemzés", "Readiness, risk, trend, referencia és mikrociklus."),
         (f4, "4. Export", "GPS-only, Executive Summary vagy Full Report PDF."),
     ]:
