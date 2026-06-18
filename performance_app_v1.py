@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V101_CLEAN_WORKSPACE_PAGE_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V102_CLEAN_IMPORT_TACTICAL_MAPPING_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7786,6 +7786,94 @@ def render_fpi_landing_page_v100() -> None:
 
 
 
+
+def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[Dict[str, object]]:
+    """Tiszta oldalra áthozott taktikai import + mapping.
+    Nem rajzol teljes Tactical Pro dashboardot, csak az import/mapping és a context építés marad.
+    """
+    st.markdown("### 3. Taktikai import és mapping")
+    st.caption("Opcionális. Ha nincs taktikai anyag, a GPS-only riport továbbra is teljesen használható.")
+
+    with st.expander("📥 Taktikai PDF / Excel feltöltés – saját csapat és ellenfél", expanded=False):
+        own_col, opp_col = st.columns(2)
+        with own_col:
+            st.markdown("#### Saját csapat")
+            own_pdfs, _ = _fpi_pdf_uploader_v92("Saját taktikai PDF-ek", "own_clean", "clean_tactical_own_pdfs_v102")
+            own_team_xlsx = st.file_uploader("Saját csapatstatisztika Excel", type=["xlsx", "xls"], key="clean_own_team_tactical_xlsx_v102")
+            own_player_xlsx = st.file_uploader("Saját játékosstatisztika Excel", type=["xlsx", "xls"], key="clean_own_player_tactical_xlsx_v102")
+        with opp_col:
+            st.markdown("#### Ellenfél")
+            opp_pdfs, _ = _fpi_pdf_uploader_v92("Ellenfél taktikai PDF-ek", "opp_clean", "clean_opp_tactical_pdfs_v102")
+            opp_team_xlsx = st.file_uploader("Ellenfél csapatstatisztika Excel", type=["xlsx", "xls"], key="clean_opp_team_tactical_xlsx_v102")
+            opp_player_xlsx = st.file_uploader("Ellenfél játékosstatisztika Excel", type=["xlsx", "xls"], key="clean_opp_player_tactical_xlsx_v102")
+
+        st.markdown("#### Mapping / ellenőrzés")
+        own_pdf_text, own_pdf_pages = _fpi_tactical_app_combine_pdf_texts_v88(st.session_state.get("tactical_pro_own_clean_pdf_bytes_v88", []))
+        opp_pdf_text, opp_pdf_pages = _fpi_tactical_app_combine_pdf_texts_v88(st.session_state.get("tactical_pro_opp_clean_pdf_bytes_v88", []))
+        if not own_pdf_text:
+            own_pdf_text, own_pdf_pages = _fpi_tactical_extract_pdf_text(own_pdfs or [])
+        if not opp_pdf_text:
+            opp_pdf_text, opp_pdf_pages = _fpi_tactical_extract_pdf_text(opp_pdfs or [])
+
+        own_pdf_uploaded = bool(own_pdfs)
+        opp_pdf_uploaded = bool(opp_pdfs)
+        own_pdf_insights = _fpi_tactical_pdf_insights(own_pdf_text) if own_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": own_pdf_uploaded, "pdf_pages": len(own_pdf_pages)}
+        opp_pdf_insights = _fpi_tactical_pdf_insights(opp_pdf_text) if opp_pdf_text else {"blocks": {}, "topics": [], "raw_text_len": 0, "pdf_uploaded": opp_pdf_uploaded, "pdf_pages": len(opp_pdf_pages)}
+        own_pdf_insights["pdf_uploaded"] = own_pdf_uploaded
+        own_pdf_insights["pdf_pages"] = len([p for p in own_pdf_pages if p.get("has_text") or p.get("text")])
+        opp_pdf_insights["pdf_uploaded"] = opp_pdf_uploaded
+        opp_pdf_insights["pdf_pages"] = len([p for p in opp_pdf_pages if p.get("has_text") or p.get("text")])
+
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("Saját PDF oldal", own_pdf_insights.get("pdf_pages", 0))
+        p2.metric("Ellenfél PDF oldal", opp_pdf_insights.get("pdf_pages", 0))
+        p3.metric("Saját PDF karakter", own_pdf_insights.get("raw_text_len", len(own_pdf_text or "")))
+        p4.metric("Ellenfél PDF karakter", opp_pdf_insights.get("raw_text_len", len(opp_pdf_text or "")))
+
+        own_team_metrics, opp_team_metrics = {}, {}
+        own_player_tables, opp_player_tables = {}, {}
+
+        if own_team_xlsx is not None:
+            own_team_df, own_team_mapping = _fpi_tactical_mapper_ui(own_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "clean_own_team_tactical", "Saját csapat Excel")
+            own_team_metrics = _fpi_tactical_parse_team_excel(own_team_df, own_team_mapping)
+        if opp_team_xlsx is not None:
+            opp_team_df, opp_team_mapping = _fpi_tactical_mapper_ui(opp_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "clean_opp_team_tactical", "Ellenfél csapat Excel")
+            opp_team_metrics = _fpi_tactical_parse_team_excel(opp_team_df, opp_team_mapping)
+        if own_player_xlsx is not None:
+            own_player_df, own_player_mapping = _fpi_tactical_mapper_ui(own_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "clean_own_player_tactical", "Saját játékos Excel")
+            own_player_tables = _fpi_tactical_parse_player_excel(own_player_df, own_player_mapping)
+        if opp_player_xlsx is not None:
+            opp_player_df, opp_player_mapping = _fpi_tactical_mapper_ui(opp_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "clean_opp_player_tactical", "Ellenfél játékos Excel")
+            opp_player_tables = _fpi_tactical_parse_player_excel(opp_player_df, opp_player_mapping)
+
+        merged_pdf_insights = _merge_tactical_pdf_insights(own_pdf_insights, opp_pdf_insights)
+        tactical_ctx_for_plan = {
+            "analysis_level_label": "Clean workspace – GPS + opcionális taktikai input",
+            "pdf_insights": merged_pdf_insights,
+            "team_metrics": opp_team_metrics,
+            "player_tables": opp_player_tables,
+            "own": {"pdf_insights": own_pdf_insights, "team_metrics": own_team_metrics, "player_tables": own_player_tables},
+            "opponent": {"pdf_insights": opp_pdf_insights, "team_metrics": opp_team_metrics, "player_tables": opp_player_tables},
+        }
+        plan = _fpi_build_adaptive_match_training_plan(gps_context or {}, tactical_ctx_for_plan)
+        executive_ctx = _build_tactical_executive_context(gps_context or {}, tactical_ctx_for_plan, plan)
+        st.session_state["tactical_pro_context"] = executive_ctx
+
+        has_any = any([
+            own_pdf_uploaded, opp_pdf_uploaded,
+            own_team_xlsx is not None, opp_team_xlsx is not None,
+            own_player_xlsx is not None, opp_player_xlsx is not None,
+        ])
+        if has_any:
+            st.success("Taktikai input feldolgozva. Az Executive Summary és Full Report export ezt is figyelembe veszi.")
+            if executive_ctx.get("pdf_provider_lines"):
+                st.caption("PDF-ből kinyert adatok: " + " | ".join([str(x) for x in executive_ctx.get("pdf_provider_lines", [])[:3]]))
+        else:
+            st.info("Nincs taktikai input. Az export GPS-only / GPS fókuszú marad.")
+        return executive_ctx if has_any else None
+
+
+
 def render_fpi_clean_workspace_v101() -> None:
     """Tiszta import / szűrő / export oldal.
     A régi teljes app továbbra is elérhető külön gombbal, de ez az oldal a klubdemóhoz és gyors használathoz letisztított flow.
@@ -7800,7 +7888,7 @@ def render_fpi_clean_workspace_v101() -> None:
                 <div class="fpi-landing-kicker">IMPORT / SZŰRŐK / EXPORT</div>
                 <div class="fpi-landing-title" style="font-size:2.25rem;">Tiszta munkafelület: GPS feltöltésből azonnal riport.</div>
                 <div class="fpi-landing-sub">
-                    Itt csak a lényeg van: adatfeltöltés, meccskontextus, korosztály/szint referencia, hétválasztás és PDF export.
+                    Itt csak a lényeg van: GPS import, Smart Mapper, taktikai PDF/Excel import, meccskontextus, korosztály/szint, hétválasztás és PDF export.
                     A teljes, részletes dashboard külön oldalon marad.
                 </div>
             </div>
@@ -7851,11 +7939,18 @@ def render_fpi_clean_workspace_v101() -> None:
     st.markdown("### 2. Kontextus és szűrők")
     df_clean, mapping_clean, missing_clean = standardize_dataframe(raw_df_clean)
     if missing_clean:
-        st.warning("A gyors munkafelület nem tudta automatikusan felismerni az összes kötelező oszlopot. Nyisd meg a teljes appot a Smart Mapperhez.")
+        st.warning("A gyors munkafelület nem tudta automatikusan felismerni az összes kötelező oszlopot. Állítsd be itt a Smart Mapperrel, vagy nyisd meg a teljes appot.")
         st.write("Hiányzó mezők:", ", ".join(missing_clean))
-        if st.button("Smart Mapper megnyitása a teljes appban", key="clean_open_full_mapper_v101"):
+        render_emergency_mapper(raw_df_clean, mapping_clean, missing_clean)
+        if st.button("Smart Mapper / teljes app megnyitása", key="clean_open_full_mapper_v102"):
             _fpi_set_page_v100("app")
         st.stop()
+    else:
+        with st.expander("🧭 GPS Smart Mapper ellenőrzés", expanded=False):
+            render_mapping_score(mapping_clean)
+            st.dataframe(enhanced_mapping_quality_df(raw_df_clean, mapping_clean), use_container_width=True, hide_index=True)
+            if st.button("Haladó mapping szerkesztése a teljes appban", key="clean_advanced_mapping_full_v102"):
+                _fpi_set_page_v100("app")
 
     df_clean = add_position_group(df_clean)
     if df_clean.empty or "week" not in df_clean.columns:
@@ -7933,24 +8028,31 @@ def render_fpi_clean_workspace_v101() -> None:
 
     analysis_clean = df_clean[df_clean["player_name"].astype(str).isin(selected_players_clean)].copy() if selected_players_clean else df_clean.copy()
 
-    st.markdown("### 3. Gyors döntési kép")
+    # Belső számítás az exporthoz és a taktikai importhoz, de nincs külön gyors döntési kép blokk.
     try:
         ctx_clean = _fpi_report_context(analysis_clean, selected_week_clean, selected_playstyle_clean)
         readiness_clean = int(ctx_clean.get("readiness_score", 70) or 70)
-        risk_clean = ctx_clean.get("risk_df") if isinstance(ctx_clean.get("risk_df"), pd.DataFrame) else pd.DataFrame()
-        high_clean = int((risk_clean.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Magas").sum()) if not risk_clean.empty else 0
-        med_clean = int((risk_clean.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Közepes").sum()) if not risk_clean.empty else 0
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Readiness", f"{readiness_clean}/100", score_to_label(readiness_clean))
-        m2.metric("High risk", f"{high_clean} fő")
-        m3.metric("Medium risk", f"{med_clean} fő")
-        m4.metric("Referencia", ref_profile_clean)
-        conclusions_clean = _fpi_gps_only_conclusions_v99(ctx_clean, ctx_clean.get("priorities", []), readiness_clean, str(selected_week_clean), limit=5)
-        st.markdown("**GPS-only konklúziók**")
-        for i, c in enumerate(conclusions_clean, 1):
-            st.write(f"{i}. {c}")
-    except Exception as e:
-        st.warning(f"Gyors döntési kép nem készíthető: {e}")
+        tactical_gps_context_clean = {
+            "has_gps": True,
+            "selected_week": selected_week_clean,
+            "readiness_score": readiness_clean,
+            "playstyle": selected_playstyle_clean,
+            "priorities": ctx_clean.get("priorities", []),
+            "periodization_type": ctx_clean.get("periodization_type", "n.a."),
+            "df": analysis_clean,
+        }
+    except Exception:
+        tactical_gps_context_clean = {
+            "has_gps": True,
+            "selected_week": selected_week_clean,
+            "readiness_score": 70,
+            "playstyle": selected_playstyle_clean,
+            "priorities": [],
+            "periodization_type": "n.a.",
+            "df": analysis_clean,
+        }
+
+    clean_tactical_context = _fpi_clean_tactical_import_v102(tactical_gps_context_clean)
 
     st.markdown("### 4. Export")
     e1, e2, e3 = st.columns(3)
@@ -7960,11 +8062,11 @@ def render_fpi_clean_workspace_v101() -> None:
         if gps_pdf_clean is not None:
             st.download_button("⬇️ GPS-only PDF", data=gps_pdf_clean, file_name=f"fpi_gps_only_report_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_gps_v101")
     with e2:
-        exec_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="executive", tactical_context=None)
+        exec_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="executive", tactical_context=clean_tactical_context)
         if exec_pdf_clean is not None:
             st.download_button("⬇️ Executive Summary PDF", data=exec_pdf_clean, file_name=f"fpi_executive_summary_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_exec_v101")
     with e3:
-        full_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="full", tactical_context=None)
+        full_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="full", tactical_context=clean_tactical_context)
         if full_pdf_clean is not None:
             st.download_button("⬇️ Full Report PDF", data=full_pdf_clean, file_name=f"fpi_full_report_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_full_v101")
 
