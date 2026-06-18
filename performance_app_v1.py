@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V084_LEGACY_TACTICAL_PDF_ENGINE_1TO1_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V085_ATOMBIZTOS_PDF_EXTRACTION_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7607,12 +7607,285 @@ def _fpi_fallback_topics_from_terms_v77(text: str, top_terms: List[dict]) -> Lis
             })
     return sorted(rows, key=lambda x: x["Bizonyosság"], reverse=True)
 
+
+# =========================================================
+# V8.5 - PROVIDER-AWARE PDF EXTRACTION
+# SportsBase kompatibilis, de általános fallbackekkel is működik.
+# A cél: ne csak témaszavakat találjon, hanem konkrét taktikai adatpontokat is.
+# =========================================================
+
+def _fpi_float_v85(x: object, default: float = 0.0) -> float:
+    try:
+        s = str(x).replace(",", ".").replace("%", "").strip()
+        if not s or s in ["—", "-", "None", "nan"]:
+            return default
+        return float(s)
+    except Exception:
+        return default
+
+def _fpi_int_v85(x: object, default: int = 0) -> int:
+    try:
+        s = str(x).replace(",", ".").strip()
+        if not s or s in ["—", "-", "None", "nan"]:
+            return default
+        return int(float(s))
+    except Exception:
+        return default
+
+def _fpi_ratio_pair_v85(text: str, label_regex: str) -> Optional[Tuple[int, int, int, int]]:
+    """Két csapat értékeit olvassa ilyen mintából: Label 9 / 2 9 / 4."""
+    try:
+        m = re.search(label_regex + r"\s+(\d+)\s*/\s*(\d+)\s+(\d+)\s*/\s*(\d+)", text, flags=re.I)
+        if m:
+            return tuple(_fpi_int_v85(g) for g in m.groups())
+    except Exception:
+        pass
+    return None
+
+def _fpi_extract_match_teams_v85(text: str) -> Dict[str, str]:
+    # SportsBase első oldalak: "Ajka 1:2 Csakvari TK"
+    m = re.search(r"\n([A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű .'-]+)\s+\d+\s*:\s*\d+\s+([A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű .'-]+)\n", "\n" + str(text or "") + "\n")
+    if m:
+        return {"team_a": m.group(1).strip(), "team_b": m.group(2).strip()}
+    # fallback: Match report line
+    m = re.search(r"MATCH REPORT\s+(.+?)\s+(.+?)\s+Hungary", str(text or ""), flags=re.I | re.S)
+    if m:
+        return {"team_a": re.sub(r"\s+", " ", m.group(1)).strip(), "team_b": re.sub(r"\s+", " ", m.group(2)).strip()}
+    return {"team_a": "Csapat A", "team_b": "Csapat B"}
+
+def _fpi_extract_formations_v85(text: str) -> Dict[str, str]:
+    forms = re.findall(r"Match start\s+([3-5][–\-\u2013][1-5][–\-\u2013][1-5](?:[–\-\u2013][1-3])?)", str(text or ""), flags=re.I)
+    forms = [f.replace("–", "-").replace("—", "-") for f in forms]
+    out = {}
+    if len(forms) >= 1:
+        out["team_a_start"] = forms[0]
+    if len(forms) >= 2:
+        out["team_b_start"] = forms[1]
+    end_forms = re.findall(r"Match end\s+([3-5][–\-\u2013][1-5][–\-\u2013][1-5](?:[–\-\u2013][1-3])?)", str(text or ""), flags=re.I)
+    end_forms = [f.replace("–", "-").replace("—", "-") for f in end_forms]
+    if len(end_forms) >= 1:
+        out["team_a_end"] = end_forms[0]
+    if len(end_forms) >= 2:
+        out["team_b_end"] = end_forms[1]
+    return out
+
+def _fpi_extract_sportsbase_team_stats_v85(text: str) -> Dict[str, object]:
+    """SportsBase Team statistics / Match info jellegű PDF-ekből konkrét KPI-k."""
+    raw = str(text or "")
+    flat = re.sub(r"\s+", " ", raw)
+    teams = _fpi_extract_match_teams_v85(raw)
+    formations = _fpi_extract_formations_v85(raw)
+    metrics = {"teams": teams, "formations": formations, "provider": "SportsBase-like"}
+
+    # Match info indexes
+    m = re.search(r"([\d.]+)\s*/\s*([\d.]+)\s+xG\s*/\s*per shot\s+([\d.]+)\s*/\s*([\d.]+)", flat, flags=re.I)
+    if m:
+        metrics["xg_a"] = _fpi_float_v85(m.group(1))
+        metrics["xg_per_shot_a"] = _fpi_float_v85(m.group(2))
+        metrics["xg_b"] = _fpi_float_v85(m.group(3))
+        metrics["xg_per_shot_b"] = _fpi_float_v85(m.group(4))
+
+    m = re.search(r"([\d.]+)\s+PPDA\s+([\d.]+)", flat, flags=re.I)
+    if m:
+        metrics["ppda_a"] = _fpi_float_v85(m.group(1))
+        metrics["ppda_b"] = _fpi_float_v85(m.group(2))
+
+    m = re.search(r"([\d.]+)\s*/\s*([\d.]+)\s+Speed of passes\s*/\s*accurate\s+([\d.]+)\s*/\s*([\d.]+)", flat, flags=re.I)
+    if m:
+        metrics["pass_speed_a"] = _fpi_float_v85(m.group(1))
+        metrics["accurate_pass_speed_a"] = _fpi_float_v85(m.group(2))
+        metrics["pass_speed_b"] = _fpi_float_v85(m.group(3))
+        metrics["accurate_pass_speed_b"] = _fpi_float_v85(m.group(4))
+
+    # Team statistics
+    pair = _fpi_ratio_pair_v85(flat, r"Shots\s*/\s*on target")
+    if pair:
+        metrics["shots_a"], metrics["shots_on_target_a"], metrics["shots_b"], metrics["shots_on_target_b"] = pair
+
+    m = re.search(r"\bxG\s+([\d.]+)\s+([\d.]+)", flat, flags=re.I)
+    if m:
+        # team statistics page can overwrite match info with same xG; okay
+        metrics["xg_a"] = _fpi_float_v85(m.group(1))
+        metrics["xg_b"] = _fpi_float_v85(m.group(2))
+
+    m = re.search(r"Ball possession\s+(\d+)%\s+(\d+)%", flat, flags=re.I)
+    if m:
+        metrics["possession_a"] = _fpi_float_v85(m.group(1))
+        metrics["possession_b"] = _fpi_float_v85(m.group(2))
+
+    pair = _fpi_ratio_pair_v85(flat, r"Key passes")
+    if pair:
+        metrics["key_passes_a"], metrics["key_passes_acc_a"], metrics["key_passes_b"], metrics["key_passes_acc_b"] = pair
+
+    pair = _fpi_ratio_pair_v85(flat, r"Passes\s*/\s*accurate")
+    if pair:
+        metrics["passes_a"], metrics["passes_acc_a"], metrics["passes_b"], metrics["passes_acc_b"] = pair
+        metrics["pass_accuracy_a"] = round(metrics["passes_acc_a"] / max(metrics["passes_a"], 1) * 100, 1)
+        metrics["pass_accuracy_b"] = round(metrics["passes_acc_b"] / max(metrics["passes_b"], 1) * 100, 1)
+
+    pair = _fpi_ratio_pair_v85(flat, r"Passes into the penalty box")
+    if pair:
+        metrics["box_passes_a"], metrics["box_passes_acc_a"], metrics["box_passes_b"], metrics["box_passes_acc_b"] = pair
+
+    pair = _fpi_ratio_pair_v85(flat, r"Crosses")
+    if pair:
+        metrics["crosses_a"], metrics["crosses_acc_a"], metrics["crosses_b"], metrics["crosses_acc_b"] = pair
+
+    pair = _fpi_ratio_pair_v85(flat, r"Passes into the final third of the pitch")
+    if pair:
+        metrics["final_third_passes_a"], metrics["final_third_passes_acc_a"], metrics["final_third_passes_b"], metrics["final_third_passes_acc_b"] = pair
+
+    # Attacks block
+    pair = _fpi_ratio_pair_v85(flat, r"Attacks\s*/\s*with shots")
+    if pair:
+        metrics["attacks_a"], metrics["attacks_with_shots_a"], metrics["attacks_b"], metrics["attacks_with_shots_b"] = pair
+
+    pair = _fpi_ratio_pair_v85(flat, r"Positional attacks\s*/\s*with shots")
+    if pair:
+        metrics["pos_attacks_a"], metrics["pos_attacks_shots_a"], metrics["pos_attacks_b"], metrics["pos_attacks_shots_b"] = pair
+
+    pair = _fpi_ratio_pair_v85(flat, r"Counter-attacks\s*/\s*with shots")
+    if pair:
+        metrics["counter_attacks_a"], metrics["counter_attacks_shots_a"], metrics["counter_attacks_b"], metrics["counter_attacks_shots_b"] = pair
+
+    pair = _fpi_ratio_pair_v85(flat, r"Set-piece attacks\s*/\s*with shots")
+    if pair:
+        metrics["set_piece_attacks_a"], metrics["set_piece_attacks_shots_a"], metrics["set_piece_attacks_b"], metrics["set_piece_attacks_shots_b"] = pair
+
+    pair = _fpi_ratio_pair_v85(flat, r"Corners\s*/\s*with shots")
+    if pair:
+        metrics["corner_attacks_a"], metrics["corner_attacks_shots_a"], metrics["corner_attacks_b"], metrics["corner_attacks_shots_b"] = pair
+
+    # Lost balls / recoveries
+    pair = _fpi_ratio_pair_v85(flat, r"Lost balls\s*/\s*in own half")
+    if pair:
+        metrics["lost_balls_a"], metrics["lost_own_half_a"], metrics["lost_balls_b"], metrics["lost_own_half_b"] = pair
+
+    pair = _fpi_ratio_pair_v85(flat, r"Ball recoveries\s*/\s*in opp\. half")
+    if pair:
+        metrics["recoveries_a"], metrics["recoveries_opp_half_a"], metrics["recoveries_b"], metrics["recoveries_opp_half_b"] = pair
+
+    pair = _fpi_ratio_pair_v85(flat, r"Pressing\s*/\s*successful")
+    if pair:
+        metrics["pressing_a"], metrics["pressing_success_a"], metrics["pressing_b"], metrics["pressing_success_b"] = pair
+        metrics["pressing_success_pct_a"] = round(metrics["pressing_success_a"] / max(metrics["pressing_a"], 1) * 100, 1)
+        metrics["pressing_success_pct_b"] = round(metrics["pressing_success_b"] / max(metrics["pressing_b"], 1) * 100, 1)
+
+    pair = _fpi_ratio_pair_v85(flat, r"High pressing\s*/\s*successful")
+    if pair:
+        metrics["high_press_a"], metrics["high_press_success_a"], metrics["high_press_b"], metrics["high_press_success_b"] = pair
+
+    pair = _fpi_ratio_pair_v85(flat, r"Low pressing\s*/\s*successful")
+    if pair:
+        metrics["low_press_a"], metrics["low_press_success_a"], metrics["low_press_b"], metrics["low_press_success_b"] = pair
+
+    return metrics
+
+def _fpi_sportsbase_metric_lines_v85(metrics: Dict[str, object]) -> List[str]:
+    if not metrics or len(metrics.keys()) <= 3:
+        return []
+    ta = (metrics.get("teams") or {}).get("team_a", "A csapat")
+    tb = (metrics.get("teams") or {}).get("team_b", "B csapat")
+    lines = []
+    if metrics.get("formations"):
+        fa = metrics["formations"].get("team_a_start")
+        fb = metrics["formations"].get("team_b_start")
+        if fa or fb:
+            lines.append(f"Formáció: {ta} {fa or 'n.a.'}, {tb} {fb or 'n.a.'}.")
+    if metrics.get("xg_a") or metrics.get("xg_b"):
+        better = tb if metrics.get("xg_b", 0) > metrics.get("xg_a", 0) else ta
+        lines.append(f"xG: {ta} {metrics.get('xg_a', 0):.2f}, {tb} {metrics.get('xg_b', 0):.2f}; helyzetminőségben {better} állt jobban.")
+    if metrics.get("shots_a") or metrics.get("shots_b"):
+        lines.append(f"Lövések: {ta} {metrics.get('shots_a', 0)}/{metrics.get('shots_on_target_a', 0)} kaput találó, {tb} {metrics.get('shots_b', 0)}/{metrics.get('shots_on_target_b', 0)} kaput találó.")
+    if metrics.get("possession_a") or metrics.get("possession_b"):
+        poss_team = ta if metrics.get("possession_a", 0) > metrics.get("possession_b", 0) else tb
+        lines.append(f"Labdabirtoklás: {ta} {metrics.get('possession_a', 0):.0f}%, {tb} {metrics.get('possession_b', 0):.0f}%; kontrollban {poss_team} volt fölényben.")
+    if metrics.get("ppda_a") or metrics.get("ppda_b"):
+        press_team = ta if metrics.get("ppda_a", 99) < metrics.get("ppda_b", 99) else tb
+        lines.append(f"PPDA: {ta} {metrics.get('ppda_a', 0):.2f}, {tb} {metrics.get('ppda_b', 0):.2f}; presszingintenzitásban {press_team} aktívabb.")
+    if metrics.get("counter_attacks_a") or metrics.get("counter_attacks_b"):
+        lines.append(f"Kontrák: {ta} {metrics.get('counter_attacks_a', 0)}/{metrics.get('counter_attacks_shots_a', 0)} lövéssel, {tb} {metrics.get('counter_attacks_b', 0)}/{metrics.get('counter_attacks_shots_b', 0)} lövéssel.")
+    if metrics.get("set_piece_attacks_a") or metrics.get("set_piece_attacks_b"):
+        lines.append(f"Pontrúgásos támadások: {ta} {metrics.get('set_piece_attacks_a', 0)}/{metrics.get('set_piece_attacks_shots_a', 0)} lövéssel, {tb} {metrics.get('set_piece_attacks_b', 0)}/{metrics.get('set_piece_attacks_shots_b', 0)} lövéssel.")
+    if metrics.get("key_passes_a") or metrics.get("key_passes_b"):
+        key_team = ta if metrics.get("key_passes_a", 0) > metrics.get("key_passes_b", 0) else tb
+        lines.append(f"Kulcspasszok: {ta} {metrics.get('key_passes_a', 0)}, {tb} {metrics.get('key_passes_b', 0)}; kreatív előny: {key_team}.")
+    if metrics.get("crosses_a") or metrics.get("crosses_b"):
+        wide_team = ta if metrics.get("crosses_a", 0) > metrics.get("crosses_b", 0) else tb
+        lines.append(f"Beadások: {ta} {metrics.get('crosses_a', 0)}, {tb} {metrics.get('crosses_b', 0)}; szélső játékban {wide_team} aktívabb.")
+    if metrics.get("lost_balls_a") or metrics.get("lost_balls_b"):
+        risk_team = ta if metrics.get("lost_own_half_a", 0) > metrics.get("lost_own_half_b", 0) else tb
+        lines.append(f"Labdavesztés saját térfélen: {ta} {metrics.get('lost_own_half_a', 0)}, {tb} {metrics.get('lost_own_half_b', 0)}; átmeneti kockázat: {risk_team}.")
+    if metrics.get("pressing_a") or metrics.get("pressing_b"):
+        lines.append(f"Presszing: {ta} {metrics.get('pressing_a', 0)}/{metrics.get('pressing_success_a', 0)} ({metrics.get('pressing_success_pct_a', 0):.0f}%), {tb} {metrics.get('pressing_b', 0)}/{metrics.get('pressing_success_b', 0)} ({metrics.get('pressing_success_pct_b', 0):.0f}%).")
+    return lines
+
+def _fpi_sportsbase_findings_v85(metrics: Dict[str, object], pdf_role: str = "PDF") -> List[dict]:
+    findings = []
+    if not metrics or len(metrics.keys()) <= 3:
+        return findings
+    ta = (metrics.get("teams") or {}).get("team_a", "A csapat")
+    tb = (metrics.get("teams") or {}).get("team_b", "B csapat")
+
+    def add(title, evidence, decision, priority="Közepes"):
+        findings.append({"Téma": title, "Bizonyíték": evidence, "Edzői következtetés": decision, "Prioritás": priority, "Forrás": pdf_role})
+
+    # xG / shot quality
+    if metrics.get("xg_a") or metrics.get("xg_b"):
+        xa, xb = metrics.get("xg_a", 0), metrics.get("xg_b", 0)
+        if xb > xa * 1.15:
+            add(f"{pdf_role}: {tb} jobb helyzetminőséget hozott", f"xG: {ta} {xa:.2f}, {tb} {xb:.2f}.", "Boxvédekezés, belső zónák és átmeneti védekezés külön fókusz.", "Magas")
+        elif xa > xb * 1.15:
+            add(f"{pdf_role}: {ta} jobb helyzetminőséget hozott", f"xG: {ta} {xa:.2f}, {tb} {xb:.2f}.", "Támadó alapirány vállalhatóbb, de minőségi befejezés és rest defense kell.", "Közepes")
+
+    # Possession vs efficiency
+    if metrics.get("possession_a") and metrics.get("xg_a") is not None and metrics.get("xg_b") is not None:
+        if metrics.get("possession_a", 0) > metrics.get("possession_b", 0) + 10 and metrics.get("xg_b", 0) > metrics.get("xg_a", 0):
+            add(f"{pdf_role}: labdabirtoklás vs hatékonyság ellentmondás", f"{ta} birtokolt többet ({metrics.get('possession_a'):.0f}%), de {tb} xG-je magasabb ({metrics.get('xg_b'):.2f}).", "Nem elég kontrollálni a labdát: az ellenfél átmeneti/helyzetminőségi veszélyét kell zárni.", "Magas")
+
+    # Counters
+    if metrics.get("counter_attacks_a") or metrics.get("counter_attacks_b"):
+        ca, cb = metrics.get("counter_attacks_a", 0), metrics.get("counter_attacks_b", 0)
+        csa, csb = metrics.get("counter_attacks_shots_a", 0), metrics.get("counter_attacks_shots_b", 0)
+        if cb >= ca and csb > csa:
+            add(f"{pdf_role}: ellenfél kontrái veszélyesek", f"Kontrák/lövés: {ta} {ca}/{csa}, {tb} {cb}/{csb}.", "MD-3 átmeneti játék + HSR, MD-2 rest defense és labdavesztés utáni első reakció.", "Magas")
+        elif ca > cb:
+            add(f"{pdf_role}: saját/első csapat kontraaktivitás", f"Kontrák: {ta} {ca}, {tb} {cb}.", "A gyors átmeneti játék támadható út, de mögöttes biztosítás kell.", "Közepes")
+
+    # Set pieces
+    if metrics.get("set_piece_attacks_a") or metrics.get("set_piece_attacks_b"):
+        spa, spb = metrics.get("set_piece_attacks_a", 0), metrics.get("set_piece_attacks_b", 0)
+        ssa, ssb = metrics.get("set_piece_attacks_shots_a", 0), metrics.get("set_piece_attacks_shots_b", 0)
+        if spb > 0 and ssb >= ssa:
+            add(f"{pdf_role}: pontrúgás-veszély", f"Pontrúgásos támadások/lövések: {ta} {spa}/{ssa}, {tb} {spb}/{ssb}.", "MD-1 pontrúgás-védekezés, első kontakt és második labdák kontrollja.", "Magas")
+
+    # Key passes / creative player zones
+    if metrics.get("key_passes_a") or metrics.get("key_passes_b"):
+        ka, kb = metrics.get("key_passes_a", 0), metrics.get("key_passes_b", 0)
+        if kb > ka * 1.5:
+            add(f"{pdf_role}: ellenfél kreatív előny", f"Kulcspasszok: {ta} {ka}, {tb} {kb}.", "Kulcspassz-sávok, félterületek és 10-es körüli védekezés kiemelt.", "Magas")
+        elif ka > kb * 1.5:
+            add(f"{pdf_role}: saját kreatív előny", f"Kulcspasszok: {ta} {ka}, {tb} {kb}.", "A támadóharmadba jutás fenntartható, minőségi befejezésekre kell fókuszálni.", "Közepes")
+
+    # Pressing
+    if metrics.get("ppda_a") or metrics.get("ppda_b"):
+        pa, pb = metrics.get("ppda_a", 0), metrics.get("ppda_b", 0)
+        if pa and pb:
+            active = ta if pa < pb else tb
+            add(f"{pdf_role}: presszingprofil", f"PPDA: {ta} {pa:.2f}, {tb} {pb:.2f}.", f"Presszingintenzitásban {active} aktívabb; ehhez kell igazítani a labdakihozatalt és a trigger-zónákat.", "Közepes")
+
+    return findings[:10]
+
+
 def _fpi_tactical_pdf_insights(text: str) -> Dict[str, object]:
     """V8.4: a régi Tactical app build_pdf_insights motorja dolgozik.
     A visszatérő struktúrát FPI-kompatibilissé alakítjuk, hogy a meglévő Match Plan / PDF / Excel logika is használja.
     """
     raw_text = str(text or "")
     legacy = _fpi_legacy_build_pdf_insights(raw_text)
+    sportsbase_metrics = _fpi_extract_sportsbase_team_stats_v85(raw_text)
+    sportsbase_lines = _fpi_sportsbase_metric_lines_v85(sportsbase_metrics)
+    sportsbase_findings = _fpi_sportsbase_findings_v85(sportsbase_metrics, pdf_role="PDF")
 
     topic_rows = legacy.get("topic_debug", []) or []
     blocks = {
@@ -7633,7 +7906,19 @@ def _fpi_tactical_pdf_insights(text: str) -> Dict[str, object]:
         "goalkeeper": legacy.get("universal_blocks", {}).get("goalkeeper", []),
         "match_dynamics": legacy.get("dynamics_lines", []),
         "recommendation": legacy.get("recommendation_lines", []),
+        "sportsbase_metrics": sportsbase_lines,
+        "provider_metrics": sportsbase_lines,
     }
+
+    # Provider-aware topics: ha konkrét SportsBase KPI-k vannak, ezek is témának számítanak.
+    for sb_line in sportsbase_lines[:8]:
+        topic_rows.append({
+            "Téma": "SportsBase KPI / taktikai adat",
+            "Kulcs": "sportsbase_metrics",
+            "Találat": 1,
+            "Bizonyosság": 75,
+            "Minta": sb_line,
+        })
 
     # Legacy detected topics -> FPI topics. Ha nincs topic_debug, detected_topicsből fallback.
     topics = []
@@ -7678,6 +7963,9 @@ def _fpi_tactical_pdf_insights(text: str) -> Dict[str, object]:
         "legacy_player_threat_lines": legacy.get("player_threat_lines", []),
         "legacy_recommendation_lines": legacy.get("recommendation_lines", []),
         "legacy_detected_names": legacy.get("detected_names", []),
+        "sportsbase_metrics": sportsbase_metrics,
+        "sportsbase_lines": sportsbase_lines,
+        "sportsbase_findings": sportsbase_findings,
     }
 
 def _fpi_analysis_level(has_gps: bool, has_pdf: bool, has_team_excel: bool, has_player_excel: bool) -> Tuple[int, str]:
@@ -7796,9 +8084,14 @@ def _fpi_build_excel_driven_tactical_findings_v79(
     def add(title, evidence, decision, priority="Közepes"):
         findings.append({"Téma": title, "Bizonyíték": evidence, "Edzői következtetés": decision, "Prioritás": priority})
 
-    # V8.4: PDF insightok elsőként kerülnek be, ha a régi Tactical engine konkrét témát/sort talált.
+    # V8.5: Provider-aware PDF findings elsőbbség, ha konkrét KPI-t nyertünk ki a PDF-ből.
     pdf_topics = pdf_topics or []
-    for row in pdf_topics[:5]:
+    for row in pdf_topics:
+        if isinstance(row, dict) and row.get("Forrás") in ["Saját PDF", "Ellenfél PDF"] and row.get("Edzői következtetés"):
+            add(str(row.get("Téma", "PDF taktikai adat")), str(row.get("Bizonyíték", "")), str(row.get("Edzői következtetés", "")), str(row.get("Prioritás", "Közepes")))
+
+    # V8.4: PDF insightok elsőként kerülnek be, ha a régi Tactical engine konkrét témát/sort talált.
+    for row in pdf_topics[:8]:
         tema = str(row.get("Téma", "")).strip()
         sample = str(row.get("Minta", "")).strip()
         if not tema:
@@ -7899,6 +8192,8 @@ def _fpi_build_adaptive_match_training_plan(gps_context: Dict[str, object], tact
     own_player_tables = ((tactical.get("own") or {}).get("player_tables") or {})
     blocks = pdfi.get("blocks", {}) if isinstance(pdfi, dict) else {}
     pdf_topics = pdfi.get("topics", []) if isinstance(pdfi, dict) else []
+    if isinstance(pdfi, dict):
+        pdf_topics = list(pdfi.get("sportsbase_findings", []) or []) + list(pdf_topics or [])
 
     tactical_findings = _fpi_build_excel_driven_tactical_findings_v79(
         own_team_metrics,
@@ -8006,11 +8301,21 @@ def _merge_tactical_pdf_insights(own_insights: Dict[str, object], opp_insights: 
     topics = sorted(topics, key=lambda x: x.get("Bizonyosság", 0), reverse=True)
 
     formation = (opp_insights or {}).get("formation") or (own_insights or {}).get("formation") or "n.a."
+    sportsbase_findings = []
+    for role, src in [("Saját PDF", own_insights or {}), ("Ellenfél PDF", opp_insights or {})]:
+        for f in src.get("sportsbase_findings", []) or []:
+            ff = dict(f)
+            ff["Forrás"] = role
+            sportsbase_findings.append(ff)
+    sportsbase_lines = [f"Saját: {x}" for x in ((own_insights or {}).get("sportsbase_lines", []) or [])[:8]] + [f"Ellenfél: {x}" for x in ((opp_insights or {}).get("sportsbase_lines", []) or [])[:8]]
+
     return {
         "formation": formation,
         "blocks": merged_blocks,
         "topics": topics[:18],
         "raw_text_len": int((own_insights or {}).get("raw_text_len", 0) or 0) + int((opp_insights or {}).get("raw_text_len", 0) or 0),
+        "sportsbase_findings": sportsbase_findings[:12],
+        "sportsbase_lines": sportsbase_lines[:16],
         "own": own_insights or {},
         "opponent": opp_insights or {},
     }
@@ -8077,6 +8382,8 @@ def _build_tactical_executive_context(gps_context: Dict[str, object], tactical_c
         "player_focus": plan.get("player_focus", []),
         "tactical_findings": plan.get("tactical_findings", []),
         "team_comparison": plan.get("team_comparison", []),
+        "pdf_provider_lines": ((tactical_ctx.get("pdf_insights") or {}).get("sportsbase_lines", []) or []),
+        "pdf_provider_findings": ((tactical_ctx.get("pdf_insights") or {}).get("sportsbase_findings", []) or []),
     }
 
 def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
@@ -8249,6 +8556,11 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         st.dataframe(pd.DataFrame(executive_ctx.get("tactical_findings")), use_container_width=True, hide_index=True)
     else:
         st.caption("Nincs még értelmezhető taktikai következtetés. Ellenőrizd a Team/Player Excel mappinget.")
+
+    if executive_ctx.get("pdf_provider_lines"):
+        with st.expander("✅ PDF-ből konkrétan kinyert SportsBase / provider adatok", expanded=False):
+            for line in executive_ctx.get("pdf_provider_lines", [])[:16]:
+                st.markdown(f"- {line}")
 
     st.markdown("### 3. Saját vs ellenfél gyors összevetés")
     comp_rows = [
