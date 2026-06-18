@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V078_MULTI_READER_INTEGRATED_REPORT_2026_06_17"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V079_EXCEL_DRIVEN_TACTICAL_CONCLUSIONS_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5751,6 +5751,14 @@ def build_fpi_product_pdf_bytes(
         story.append(table(concl_rows, [5.4*cm, 22.3*cm], header_bg="#1E40AF", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
         story.append(Spacer(1, 0.20*cm))
 
+        if tactical_context.get("tactical_findings"):
+            story.append(section("Taktikai Excel + PDF alapján képzett következtetések", "#FEF3C7"))
+            f_rows = [[P("Téma", head), P("Bizonyíték", head), P("Edzői következtetés", head)]]
+            for f in (tactical_context.get("tactical_findings") or [])[:6]:
+                f_rows.append([P(str(f.get("Téma", "")), small), P(str(f.get("Bizonyíték", "")), small), P(str(f.get("Edzői következtetés", "")), small)])
+            story.append(table(f_rows, [6.0*cm, 9.2*cm, 12.5*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"), colors.white]))
+            story.append(Spacer(1, 0.20*cm))
+
         story.append(section("Mit jelent ez magyarul?", "#DCFCE7"))
         expl_rows = [[P("Rövid értelmezés", head)]]
         for line in _tactical_plain_hungarian_explanation(tactical_context):
@@ -7099,63 +7107,265 @@ def _fpi_analysis_level(has_gps: bool, has_pdf: bool, has_team_excel: bool, has_
         return 1, "GPS Only – Performance Intelligence"
     return 0, "Nincs elegendő adat"
 
+
+def _fpi_metric_value_v79(metrics: Dict[str, float], key: str, default: float = 0.0) -> float:
+    try:
+        v = metrics.get(key, default) if isinstance(metrics, dict) else default
+        if v in [None, "", "-", "nan"]:
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+def _fpi_normalized_tactical_metric_v79(key: str, value: float) -> float:
+    """PDF/riportbarát normalizálás.
+    Néhány taktikai export összesíti a százalékokat/PPDA-t több meccsre, ezért a nyers érték
+    irreálisan nagy lehet. Itt csak riport-értelmezéshez normalizálunk, nem írjuk felül az alapadatot.
+    """
+    try:
+        v = float(value)
+    except Exception:
+        return 0.0
+    if key in ["possession_pct", "pressing_success_pct", "passes_accurate_pct"]:
+        if 0 < v <= 1:
+            return v * 100
+        if v > 1000:
+            return v / 100
+        if v > 100:
+            return v / 10
+        return v
+    if key == "ppda":
+        if v > 1000:
+            return v / 1000
+        if v > 100:
+            return v / 10
+        return v
+    if key == "xg":
+        if v > 100:
+            return v / 10
+        return v
+    return v
+
+def _fpi_tactical_metric_label_v79(key: str) -> str:
+    return {
+        "possession_pct": "Labdabirtoklás",
+        "shots": "Lövések",
+        "xg": "xG",
+        "entries_box": "Box entries",
+        "key_passes": "Kulcspasszok",
+        "corners": "Szögletek",
+        "ppda": "PPDA",
+        "pressing_success_pct": "Pressing sikeresség",
+        "passes_accurate_pct": "Passzpontosság",
+        "counterattacks": "Kontrák",
+        "recoveries": "Labdaszerzések",
+        "lost_balls": "Labdavesztések",
+        "crosses": "Beadások",
+    }.get(key, key)
+
+def _fpi_tactical_compare_team_metrics_v79(own_metrics: Dict[str, float], opp_metrics: Dict[str, float]) -> List[dict]:
+    rows = []
+    metric_keys = ["possession_pct", "shots", "xg", "entries_box", "key_passes", "corners", "ppda", "pressing_success_pct", "counterattacks", "recoveries", "lost_balls", "crosses"]
+    for k in metric_keys:
+        own_raw = _fpi_metric_value_v79(own_metrics, k, 0.0)
+        opp_raw = _fpi_metric_value_v79(opp_metrics, k, 0.0)
+        if own_raw == 0 and opp_raw == 0:
+            continue
+        own = _fpi_normalized_tactical_metric_v79(k, own_raw)
+        opp = _fpi_normalized_tactical_metric_v79(k, opp_raw)
+        diff = own - opp
+        if k == "ppda":
+            better = "Saját intenzívebb presszing" if own < opp else "Ellenfél intenzívebb presszing" if opp < own else "Hasonló"
+        else:
+            better = "Saját előny" if diff > 0 else "Ellenfél előny" if diff < 0 else "Hasonló"
+        rows.append({
+            "metric": k,
+            "Mutató": _fpi_tactical_metric_label_v79(k),
+            "Saját": own,
+            "Ellenfél": opp,
+            "Eltérés": diff,
+            "Értelmezés": better,
+        })
+    return rows
+
+def _fpi_player_table_top_v79(player_tables: Dict[str, pd.DataFrame], key: str, value_col: str) -> Tuple[str, float]:
+    try:
+        df = player_tables.get(key)
+        if not isinstance(df, pd.DataFrame) or df.empty or "player" not in df.columns:
+            return "", 0.0
+        row = df.iloc[0]
+        return str(row.get("player", "")), float(row.get(value_col, 0) or 0)
+    except Exception:
+        return "", 0.0
+
+def _fpi_build_excel_driven_tactical_findings_v79(
+    own_team: Dict[str, float],
+    opp_team: Dict[str, float],
+    own_players: Dict[str, pd.DataFrame],
+    opp_players: Dict[str, pd.DataFrame],
+    pdf_topics: Optional[List[dict]] = None,
+) -> List[dict]:
+    findings = []
+    comparisons = _fpi_tactical_compare_team_metrics_v79(own_team, opp_team)
+    by_key = {r["metric"]: r for r in comparisons}
+
+    def add(title, evidence, decision, priority="Közepes"):
+        findings.append({"Téma": title, "Bizonyíték": evidence, "Edzői következtetés": decision, "Prioritás": priority})
+
+    # Team Excel alapján
+    if "shots" in by_key:
+        r = by_key["shots"]
+        if r["Ellenfél"] > r["Saját"] * 1.10:
+            add("Ellenfél lövésvolumen előnye", f"Ellenfél lövések: {r['Ellenfél']:.1f}, saját: {r['Saját']:.1f}.", "A lövőzónák zárása, box előtti nyomás és második labdák kontrollja kiemelt.", "Magas")
+        elif r["Saját"] > r["Ellenfél"] * 1.10:
+            add("Saját lövésvolumen előny", f"Saját lövések: {r['Saját']:.1f}, ellenfél: {r['Ellenfél']:.1f}.", "A támadóharmadba jutás fenntartható, a minőségi befejezésekre kell fókuszálni.", "Közepes")
+
+    if "xg" in by_key:
+        r = by_key["xg"]
+        if r["Ellenfél"] > r["Saját"] * 1.10:
+            add("Ellenfél magasabb xG-profil", f"Ellenfél xG: {r['Ellenfél']:.1f}, saját: {r['Saját']:.1f}.", "Nem csak lövésszám, hanem helyzetminőség ellen is védekezni kell: boxvédekezés és belső zónák.", "Magas")
+        elif r["Saját"] > r["Ellenfél"] * 1.10:
+            add("Saját xG-előny", f"Saját xG: {r['Saját']:.1f}, ellenfél: {r['Ellenfél']:.1f}.", "A meccsterv támadó oldalon vállalhatóbb lehet, ha a readiness ezt elbírja.", "Közepes")
+
+    if "possession_pct" in by_key:
+        r = by_key["possession_pct"]
+        if r["Saját"] - r["Ellenfél"] > 5:
+            add("Saját labdabirtoklási előny", f"Saját labdabirtoklás: {r['Saját']:.1f}%, ellenfél: {r['Ellenfél']:.1f}%.", "Türelmesebb labdabirtoklás / POZ-KIE irány támogatható, de rest defense biztosítás kell.", "Közepes")
+        elif r["Ellenfél"] - r["Saját"] > 5:
+            add("Ellenfél labdabirtoklási fölény várható", f"Ellenfél labdabirtoklás: {r['Ellenfél']:.1f}%, saját: {r['Saját']:.1f}%.", "Középső blokk + átmenet, labdaszerzés utáni első passz és kontraindítás fókusz.", "Magas")
+
+    if "ppda" in by_key:
+        r = by_key["ppda"]
+        if r["Ellenfél"] < r["Saját"] * 0.85:
+            add("Ellenfél aktívabb presszingprofil", f"Ellenfél PPDA: {r['Ellenfél']:.1f}, saját: {r['Saját']:.1f}.", "Presszingkijátszás, kapus/CB első döntés, harmadik emberes megoldások MD-2 fókuszban.", "Magas")
+        elif r["Saját"] < r["Ellenfél"] * 0.85:
+            add("Saját presszingelőny", f"Saját PPDA: {r['Saját']:.1f}, ellenfél: {r['Ellenfél']:.1f}.", "Magasabb labdaszerzésre épülő PRS opció reális, ha a GPS readiness megfelelő.", "Közepes")
+
+    if "corners" in by_key:
+        r = by_key["corners"]
+        if r["Ellenfél"] > r["Saját"] * 1.10:
+            add("Ellenfél pontrúgás-terhelés", f"Ellenfél szögletek: {r['Ellenfél']:.1f}, saját: {r['Saját']:.1f}.", "MD-1 pontrúgás-védekezés, zónák és második labdák kötelező blokk.", "Magas")
+
+    if "recoveries" in by_key:
+        r = by_key["recoveries"]
+        if r["Ellenfél"] > r["Saját"] * 1.08:
+            add("Ellenfél labdaszerzési aktivitás", f"Ellenfél labdaszerzések: {r['Ellenfél']:.1f}, saját: {r['Saját']:.1f}.", "Labdabiztonság, első érintés és visszatámadás elleni biztosítás fontos.", "Közepes")
+        elif r["Saját"] > r["Ellenfél"] * 1.08:
+            add("Saját labdaszerzési előny", f"Saját labdaszerzések: {r['Saját']:.1f}, ellenfél: {r['Ellenfél']:.1f}.", "Aktívabb presszing vagy középső blokkban labdaszerzésre építő terv működhet.", "Közepes")
+
+    # Player Excel alapján
+    own_creator, own_creator_val = _fpi_player_table_top_v79(own_players, "creators", "key_passes")
+    opp_creator, opp_creator_val = _fpi_player_table_top_v79(opp_players, "creators", "key_passes")
+    if opp_creator:
+        add("Ellenfél kreatív kulcsjátékos", f"{opp_creator}: {opp_creator_val:.1f} kulcspassz.", "A kreatív játékos passzsávjait és testhelyzetét kontrollálni kell.", "Magas")
+    if own_creator:
+        add("Saját kreatív kapcsolódási pont", f"{own_creator}: {own_creator_val:.1f} kulcspassz.", "A saját támadást érdemes rajta keresztül strukturálni, különösen átmenetben vagy félterületben.", "Közepes")
+
+    own_prog, own_prog_val = _fpi_player_table_top_v79(own_players, "progressors", "progressive_passes")
+    opp_prog, opp_prog_val = _fpi_player_table_top_v79(opp_players, "progressors", "progressive_passes")
+    if opp_prog:
+        add("Ellenfél progresszor", f"{opp_prog}: {opp_prog_val:.1f} progresszív passz.", "Nyomástrigger: ha ő kapja szabadon, zárni kell a belső passzsávot.", "Magas")
+    if own_prog:
+        add("Saját progresszor", f"{own_prog}: {own_prog_val:.1f} progresszív passz.", "Build-upban ő lehet a gyors előrehaladás egyik kulcsa.", "Közepes")
+
+    opp_duel, opp_duel_val = _fpi_player_table_top_v79(opp_players, "duel_players", "defensive_challenges")
+    if opp_duel:
+        add("Ellenfél párharcerős játékos", f"{opp_duel}: {opp_duel_val:.1f} védekező párharc.", "Kerülni kell az izolált 1v1-et vele szemben; kombinációval vagy oldalváltással bontani.", "Közepes")
+
+    # PDF téma fallback, ha van
+    for row in (pdf_topics or [])[:3]:
+        tema = row.get("Téma")
+        if tema and not any(tema in f["Téma"] for f in findings):
+            add(f"PDF téma: {tema}", row.get("Minta", "PDF-ből felismert taktikai jelzés."), "A PDF-jelzés ellenőrzendő videóval, majd edzéscélként beépíthető.", "Közepes")
+
+    if not findings:
+        add("Nincs elég taktikai adatból képzett következtetés", "A taktikai Excel/PDF mapping nem adott értelmezhető különbséget.", "Ellenőrizd a Tactical Mapper mezőit, különösen: xG, lövések, PPDA, labdabirtoklás, kulcspasszok, játékperc.", "Alacsony")
+
+    return findings[:10]
+
+
 def _fpi_build_adaptive_match_training_plan(gps_context: Dict[str, object], tactical: Dict[str, object]) -> Dict[str, object]:
     readiness = int(gps_context.get("readiness_score", 70) or 70)
-    playstyle = gps_context.get("playstyle", "Kiegyensúlyozott")
     priorities = gps_context.get("priorities", []) or []
     pdfi = tactical.get("pdf_insights") or {}
-    team_metrics = tactical.get("team_metrics") or {}
-    player_tables = tactical.get("player_tables") or {}
+    opp_team_metrics = tactical.get("team_metrics") or {}
+    opp_player_tables = tactical.get("player_tables") or {}
+    own_team_metrics = ((tactical.get("own") or {}).get("team_metrics") or {})
+    own_player_tables = ((tactical.get("own") or {}).get("player_tables") or {})
     blocks = pdfi.get("blocks", {}) if isinstance(pdfi, dict) else {}
+    pdf_topics = pdfi.get("topics", []) if isinstance(pdfi, dict) else []
+
+    tactical_findings = _fpi_build_excel_driven_tactical_findings_v79(
+        own_team_metrics,
+        opp_team_metrics,
+        own_player_tables,
+        opp_player_tables,
+        pdf_topics,
+    )
 
     risks = []
+    for f in tactical_findings:
+        if f.get("Prioritás") in ["Magas", "Közepes"]:
+            risks.append(f"{f.get('Téma')}: {f.get('Edzői következtetés')}")
     if blocks.get("transition_attack"):
-        risks.append("Ellenfél-kontrák / gyors átmenetek kezelése")
+        risks.append("PDF alapján: ellenfél-kontrák / gyors átmenetek kezelése")
     if blocks.get("set_pieces"):
-        risks.append("Pontrúgás-védekezés és második labdák")
+        risks.append("PDF alapján: pontrúgás-védekezés és második labdák")
     if blocks.get("wide_play"):
-        risks.append("Szélső játék, beadások, oldali túlterhelések")
+        risks.append("PDF alapján: szélső játék, beadások, oldali túlterhelések")
     if blocks.get("pressing"):
-        risks.append("Presszing kijátszása és első passzsor döntései")
-    if team_metrics.get("counterattacks", 0) > 0:
-        risks.append("Adat alapján kimutatható kontraveszély")
+        risks.append("PDF alapján: presszing kijátszása és első passzsor döntései")
     if not risks:
         risks.append("GPS-alapú terhelési és readiness kockázatok")
 
-    plan_a = "KIE – Kiegyensúlyozott" if readiness >= 65 else "BAT – középső blokk + átmenet"
-    if blocks.get("transition_attack") or team_metrics.get("counterattacks", 0) > 0:
-        plan_a = "BAT – középső blokk + átmenet"
-    if blocks.get("defensive_block") and blocks.get("direct_play"):
-        plan_a = "POZ/KIE – türelmes labdabirtoklás + biztosítás"
-    if blocks.get("pressing") and readiness >= 70:
-        plan_a = "PRS – presszing + átmenet, de kontrolláltan"
+    # Plan A: Excel + PDF + GPS együtt
+    plan_a = "KIE – Kiegyensúlyozott"
+    opp_pos = _fpi_normalized_tactical_metric_v79("possession_pct", _fpi_metric_value_v79(opp_team_metrics, "possession_pct"))
+    own_pos = _fpi_normalized_tactical_metric_v79("possession_pct", _fpi_metric_value_v79(own_team_metrics, "possession_pct"))
+    opp_ppda = _fpi_normalized_tactical_metric_v79("ppda", _fpi_metric_value_v79(opp_team_metrics, "ppda"))
+    own_ppda = _fpi_normalized_tactical_metric_v79("ppda", _fpi_metric_value_v79(own_team_metrics, "ppda"))
+    opp_counters = _fpi_metric_value_v79(opp_team_metrics, "counterattacks")
+    opp_corners = _fpi_metric_value_v79(opp_team_metrics, "corners")
+    opp_xg = _fpi_normalized_tactical_metric_v79("xg", _fpi_metric_value_v79(opp_team_metrics, "xg"))
+    own_xg = _fpi_normalized_tactical_metric_v79("xg", _fpi_metric_value_v79(own_team_metrics, "xg"))
 
-    md_plan = []
     if readiness < 55:
-        md_plan = [
-            ("MD+1/MD-5", "Regeneráció + egyéni monitoring", "Magasabb kockázat miatt terheléskontroll."),
-            ("MD-4", "Technikai/taktikai volumen közepes intenzitással", "Kerüljük a túl nagy sprint/HSR csúcsot."),
-            ("MD-3", "Rövid specifikus exponálás", "Csak célzott HSR/sprint inger, alacsony volumen."),
-            ("MD-2", "Meccsterv + taktikai ismétlés", "Ellenfél-specifikus fókusz alacsonyabb fizikai kockázattal."),
-            ("MD-1", "Aktiváció", "Frissítés, döntési gyorsaság, pontrúgás."),
-        ]
-    else:
-        md_plan = [
-            ("MD+1/MD-5", "Regeneráció / alacsony intenzitás", "Előző terhelés visszarendezése."),
-            ("MD-4", "Volumen + játékmodell", "Stabil csapatvolumen és pozíciós/taktikai alapok."),
-            ("MD-3", "HSR / sprint exponálás", "Meccsintenzitás előkészítése."),
-            ("MD-2", "Ellenfél-specifikus taktikai nap", ", ".join(risks[:2]) if risks else "Meccsterv."),
-            ("MD-1", "Aktiváció + pontrúgások", "Frissítés, gyors döntések, fix helyzetek."),
-        ]
-    if blocks.get("transition_attack"):
-        md_plan[3] = ("MD-2", "Kontrák elleni biztosítás + rest defense", "Az ellenfél átmeneti veszélyei miatt.")
-    if blocks.get("set_pieces"):
-        md_plan[-1] = ("MD-1", "Aktiváció + pontrúgás fókusz", "PDF alapján pontrúgás téma megjelent.")
+        plan_a = "BAT – középső blokk + átmenet, alacsonyabb kockázattal"
+    elif opp_pos and own_pos and opp_pos > own_pos + 5:
+        plan_a = "BAT – középső blokk + gyors átmenet"
+    elif opp_counters > 0 or blocks.get("transition_attack"):
+        plan_a = "BAT – középső blokk + rest defense biztosítás"
+    elif opp_ppda and own_ppda and opp_ppda < own_ppda * 0.85:
+        plan_a = "POZ/KIE – presszingkijátszás + türelmes labdakihozatal"
+    elif own_xg and opp_xg and own_xg > opp_xg * 1.10 and readiness >= 65:
+        plan_a = "KIE/POZ – kontrollált támadóbb alapirány"
+    elif blocks.get("pressing") and readiness >= 70:
+        plan_a = "PRS – presszing + átmenet, kontrolláltan"
+
+    md_plan = [
+        ("MD+1/MD-5", "Regeneráció / alacsony intenzitás", "Előző terhelés visszarendezése."),
+        ("MD-4", "Volumen + saját játékmodell", "Stabil csapatvolumen és saját labdakihozatal / védekezési alapok."),
+        ("MD-3", "HSR / sprint exponálás + átmenetek", "Meccsintenzitás előkészítése, de kontrollált mennyiséggel."),
+        ("MD-2", "Ellenfél-specifikus taktikai nap", "; ".join(risks[:2]) if risks else "Meccsterv."),
+        ("MD-1", "Aktiváció + pontrúgások", "Frissítés, gyors döntések, fix helyzetek."),
+    ]
+    if readiness < 55:
+        md_plan[2] = ("MD-3", "Rövid specifikus exponálás", "Csak célzott HSR/sprint inger, alacsony volumen.")
+    if any("presszing" in r.lower() or "ppda" in r.lower() for r in risks):
+        md_plan[1] = ("MD-4", "Presszingkijátszás + labdakihozatal", "Ellenfél presszingprofil / PPDA alapján első passzsor és harmadik ember.")
+    if any("kontra" in r.lower() or "átmenet" in r.lower() for r in risks):
+        md_plan[2] = ("MD-3", "Átmeneti játék + HSR/sprint", "Kontrák és gyors átmenetek miatt futóintenzitás + döntésgyorsaság.")
+        md_plan[3] = ("MD-2", "Rest defense + kontrák elleni biztosítás", "Ellenfél átmeneti veszélyei miatt.")
+    if opp_corners > 0 or blocks.get("set_pieces"):
+        md_plan[-1] = ("MD-1", "Aktiváció + pontrúgás fókusz", "Szöglet/pontrúgás profil alapján.")
 
     player_focus = []
-    if isinstance(player_tables, dict):
-        for key, label in [("creators", "kreatív játékos"), ("progressors", "progresszor"), ("duel_players", "párharcerős játékos")]:
-            dfp = player_tables.get(key)
+    for f in tactical_findings:
+        if "játékos" in f.get("Téma", "").lower() or "progresszor" in f.get("Téma", "").lower():
+            player_focus.append(f"{f.get('Téma')}: {f.get('Bizonyíték')} -> {f.get('Edzői következtetés')}")
+    if not player_focus and isinstance(opp_player_tables, dict):
+        for key, label in [("creators", "ellenfél kreatív játékos"), ("progressors", "ellenfél progresszor"), ("duel_players", "ellenfél párharcerős játékos")]:
+            dfp = opp_player_tables.get(key)
             if isinstance(dfp, pd.DataFrame) and not dfp.empty and "player" in dfp.columns:
                 player_focus.append(f"{dfp.iloc[0]['player']} – {label}")
     if not player_focus and priorities:
@@ -7163,7 +7373,16 @@ def _fpi_build_adaptive_match_training_plan(gps_context: Dict[str, object], tact
             if isinstance(p, dict):
                 player_focus.append(p.get("Teendő", p.get("Cím", "Játékosszintű monitoring")))
 
-    return {"analysis_level": tactical.get("analysis_level_label", "GPS Only"), "plan_a": plan_a, "risks": list(dict.fromkeys(risks))[:5], "md_plan": md_plan, "player_focus": player_focus[:5]}
+    return {
+        "analysis_level": tactical.get("analysis_level_label", "GPS Only"),
+        "plan_a": plan_a,
+        "risks": list(dict.fromkeys(risks))[:6],
+        "md_plan": md_plan,
+        "player_focus": player_focus[:6],
+        "tactical_findings": tactical_findings[:10],
+        "team_comparison": _fpi_tactical_compare_team_metrics_v79(own_team_metrics, opp_team_metrics),
+    }
+
 
 def _merge_tactical_pdf_insights(own_insights: Dict[str, object], opp_insights: Dict[str, object]) -> Dict[str, object]:
     """Saját + ellenfél taktikai PDF insightok összefűzése úgy, hogy a régi logika se vesszen el."""
@@ -7203,19 +7422,26 @@ def _tactical_key_numbers_summary(metrics: Dict[str, float]) -> str:
         "corners": "Szögletek",
         "ppda": "PPDA",
         "pressing_success_pct": "Pressing %",
+        "passes_accurate_pct": "Passzpontosság %",
         "counterattacks": "Kontrák",
         "recoveries": "Labdaszerzések",
         "lost_balls": "Labdavesztések",
+        "crosses": "Beadások",
     }
     parts = []
     for k, lab in label_map.items():
         v = metrics.get(k)
         if v not in [None, 0, 0.0, ""]:
             try:
-                parts.append(f"{lab}: {float(v):.1f}")
+                fv = _fpi_normalized_tactical_metric_v79(k, float(v))
+                if k in ["possession_pct", "pressing_success_pct", "passes_accurate_pct"]:
+                    parts.append(f"{lab}: {fv:.1f}%")
+                else:
+                    parts.append(f"{lab}: {fv:.1f}")
             except Exception:
                 parts.append(f"{lab}: {v}")
-    return " | ".join(parts[:8]) if parts else "Nincs kiemelkedő taktikai KPI."
+    return " | ".join(parts[:10]) if parts else "Nincs kiemelkedő taktikai KPI."
+
 
 def _build_tactical_executive_context(gps_context: Dict[str, object], tactical_ctx: Dict[str, object], plan: Dict[str, object]) -> Dict[str, object]:
     own = tactical_ctx.get("own", {}) if tactical_ctx else {}
@@ -7240,6 +7466,8 @@ def _build_tactical_executive_context(gps_context: Dict[str, object], tactical_c
         "risks": plan.get("risks", []),
         "md_plan": plan.get("md_plan", []),
         "player_focus": plan.get("player_focus", []),
+        "tactical_findings": plan.get("tactical_findings", []),
+        "team_comparison": plan.get("team_comparison", []),
     }
 
 def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
@@ -7407,28 +7635,34 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     for r in plan["risks"]:
         st.markdown(f"- {r}")
 
-    st.markdown("### 2. Saját vs ellenfél gyors összevetés")
+    st.markdown("### 2. Taktikai Excel + PDF következtetések")
+    if executive_ctx.get("tactical_findings"):
+        st.dataframe(pd.DataFrame(executive_ctx.get("tactical_findings")), use_container_width=True, hide_index=True)
+    else:
+        st.caption("Nincs még értelmezhető taktikai következtetés. Ellenőrizd a Team/Player Excel mappinget.")
+
+    st.markdown("### 3. Saját vs ellenfél gyors összevetés")
     comp_rows = [
         {"Oldal": "Saját csapat", "PDF témák": len(own_pdf_insights.get("topics", []) or []), "Csapat KPI": _tactical_key_numbers_summary(own_team_metrics)},
         {"Oldal": "Ellenfél", "PDF témák": len(opp_pdf_insights.get("topics", []) or []), "Csapat KPI": _tactical_key_numbers_summary(opp_team_metrics)},
     ]
     st.dataframe(pd.DataFrame(comp_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("### 3. Integrált mikrociklus – erőnléti + taktikai cél")
+    st.markdown("### 4. Integrált mikrociklus – erőnléti + taktikai cél")
     try:
         md_df = pd.DataFrame(_combined_md_rows(executive_ctx), columns=["Nap", "Erőnléti cél", "Taktikai cél", "Indoklás"])
     except Exception:
         md_df = pd.DataFrame(plan["md_plan"], columns=["Nap", "Taktikai cél", "Indoklás"])
     st.dataframe(md_df, use_container_width=True, hide_index=True)
 
-    st.markdown("### 4. Játékosszintű/taktikai fókusz")
+    st.markdown("### 5. Játékosszintű/taktikai fókusz")
     if plan["player_focus"]:
         for p in plan["player_focus"]:
             st.markdown(f"- {p}")
     else:
         st.caption("Nincs külön játékos Excel vagy kiemelt játékos. GPS-alapú monitoring marad aktív.")
 
-    st.markdown("### 5. PDF-ből felismert taktikai témák")
+    st.markdown("### 6. PDF-ből felismert taktikai témák")
     tcol1, tcol2 = st.columns(2)
     with tcol1:
         st.markdown("**Saját csapat PDF témák**")
