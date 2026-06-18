@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V107_CLEAN_TACTICAL_MAPPER_SCOPE_FIX_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V108_CLEAN_TACTICAL_ALIASES_SCOPE_FIX_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7971,6 +7971,49 @@ def _fpi_safe_build_tactical_executive_context_v104(gps_context: Dict[str, objec
 
 
 
+
+def _fpi_clean_team_aliases_v108() -> Dict[str, List[str]]:
+    """Clean oldal fallback aliasok, ha a teljes TACTICAL_TEAM_ALIASES_FPI még nincs definiálva."""
+    if "TACTICAL_TEAM_ALIASES_FPI" in globals():
+        return TACTICAL_TEAM_ALIASES_FPI
+    return {
+        "team": ["team", "csapat", "squad", "club", "name"],
+        "possession_pct": ["possession", "ball possession", "labdabirtoklás", "birtoklás", "possession %"],
+        "shots": ["shots", "lövés", "lövések", "shot"],
+        "xg": ["xg", "expected goals", "várható gól"],
+        "key_passes": ["key pass", "key passes", "kulcspassz"],
+        "corners": ["corner", "corners", "szöglet", "szögletek"],
+        "ppda": ["ppda"],
+        "pressing_success_pct": ["pressing", "pressing %", "pressing success", "letámadás"],
+        "recoveries": ["recovery", "recoveries", "labdaszerzés", "ball recoveries"],
+        "final_third_entries": ["final third", "támadóharmad", "final third entries"],
+        "box_entries": ["box entries", "entrances to box", "tizenhatosba", "büntetőterület"],
+        "counter_attacks": ["counter", "counter attacks", "kontra", "ellentámadás"],
+        "build_up": ["build up", "build-up", "építkezés", "labdakihozatal"],
+    }
+
+def _fpi_clean_player_aliases_v108() -> Dict[str, List[str]]:
+    """Clean oldal fallback player aliasok, ha a teljes TACTICAL_PLAYER_ALIASES_FPI még nincs definiálva."""
+    if "TACTICAL_PLAYER_ALIASES_FPI" in globals():
+        return TACTICAL_PLAYER_ALIASES_FPI
+    return {
+        "player": ["player", "játékos", "name", "név"],
+        "position": ["position", "poszt", "pos"],
+        "minutes": ["minutes", "mins", "perc", "játékperc"],
+        "shots": ["shots", "lövés", "lövések"],
+        "xg": ["xg", "expected goals"],
+        "key_passes": ["key passes", "kulcspassz"],
+        "passes": ["passes", "passz"],
+        "duels": ["duels", "párharc"],
+        "recoveries": ["recoveries", "labdaszerzés"],
+        "losses": ["losses", "labdavesztés"],
+        "pressures": ["pressures", "pressing", "nyomás"],
+        "sprints": ["sprints", "sprint"],
+        "distance": ["distance", "táv", "total distance"],
+    }
+
+
+
 def _fpi_safe_tactical_mapper_ui_v107(uploaded_file, aliases: Dict[str, List[str]], state_prefix: str, title: str) -> Tuple[pd.DataFrame, Dict[str, Optional[str]]]:
     """Clean oldal korai futási sorrend kompatibilis tactical mapper.
     Ha a teljes _fpi_tactical_mapper_ui még nincs definiálva, egyszerű Excel beolvasást és oszlopválasztós mappinget ad.
@@ -8097,16 +8140,16 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
         own_player_tables, opp_player_tables = {}, {}
 
         if own_team_xlsx is not None:
-            own_team_df, own_team_mapping = _fpi_safe_tactical_mapper_ui_v107(own_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "clean_own_team_tactical", "Saját csapat Excel")
+            own_team_df, own_team_mapping = _fpi_safe_tactical_mapper_ui_v107(own_team_xlsx, _fpi_clean_team_aliases_v108(), "clean_own_team_tactical", "Saját csapat Excel")
             own_team_metrics = _fpi_safe_tactical_parse_team_excel_v107(own_team_df, own_team_mapping)
         if opp_team_xlsx is not None:
-            opp_team_df, opp_team_mapping = _fpi_safe_tactical_mapper_ui_v107(opp_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "clean_opp_team_tactical", "Ellenfél csapat Excel")
+            opp_team_df, opp_team_mapping = _fpi_safe_tactical_mapper_ui_v107(opp_team_xlsx, _fpi_clean_team_aliases_v108(), "clean_opp_team_tactical", "Ellenfél csapat Excel")
             opp_team_metrics = _fpi_safe_tactical_parse_team_excel_v107(opp_team_df, opp_team_mapping)
         if own_player_xlsx is not None:
-            own_player_df, own_player_mapping = _fpi_safe_tactical_mapper_ui_v107(own_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "clean_own_player_tactical", "Saját játékos Excel")
+            own_player_df, own_player_mapping = _fpi_safe_tactical_mapper_ui_v107(own_player_xlsx, _fpi_clean_player_aliases_v108(), "clean_own_player_tactical", "Saját játékos Excel")
             own_player_tables = _fpi_safe_tactical_parse_player_excel_v107(own_player_df, own_player_mapping)
         if opp_player_xlsx is not None:
-            opp_player_df, opp_player_mapping = _fpi_safe_tactical_mapper_ui_v107(opp_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "clean_opp_player_tactical", "Ellenfél játékos Excel")
+            opp_player_df, opp_player_mapping = _fpi_safe_tactical_mapper_ui_v107(opp_player_xlsx, _fpi_clean_player_aliases_v108(), "clean_opp_player_tactical", "Ellenfél játékos Excel")
             opp_player_tables = _fpi_safe_tactical_parse_player_excel_v107(opp_player_df, opp_player_mapping)
 
         merged_pdf_insights = _fpi_safe_merge_tactical_pdf_insights_v104(own_pdf_insights, opp_pdf_insights)
