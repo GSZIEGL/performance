@@ -10,6 +10,7 @@ import hashlib
 import os
 import json
 import re
+import unicodedata
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -49,7 +50,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V073_TACTICAL_UPLOAD_FIX_SAMPLE_REPORTS_2026_06_17"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V074_TACTICAL_STABILITY_PDF_READABILITY_2026_06_17"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -708,6 +709,73 @@ st.markdown(
      border-radius: 999px !important;
      opacity: 1 !important;
  }
+
+ 
+ /* ===== V7.4 HARD readability patch for Tactical Pro+ ===== */
+ [data-testid="stFileUploader"],
+ [data-testid="stFileUploader"] section,
+ [data-testid="stFileUploader"] div {
+     background: #ffffff !important;
+     color: #0f172a !important;
+     border-color: #cbd5e1 !important;
+ }
+ [data-testid="stFileUploader"] label,
+ [data-testid="stFileUploader"] span,
+ [data-testid="stFileUploader"] small,
+ [data-testid="stFileUploader"] p,
+ [data-testid="stFileUploader"] svg {
+     color: #0f172a !important;
+     fill: #0f172a !important;
+     opacity: 1 !important;
+ }
+ [data-testid="stFileUploader"] button {
+     background: #2563eb !important;
+     color: #ffffff !important;
+     border-radius: 12px !important;
+     border: 1px solid #1d4ed8 !important;
+ }
+ [data-testid="stFileUploader"] button *,
+ [data-testid="stFileUploader"] button svg {
+     color: #ffffff !important;
+     fill: #ffffff !important;
+ }
+ [data-testid="stFileUploaderDeleteBtn"],
+ [data-testid="stFileUploaderDeleteBtn"] *,
+ button[title*="Delete"],
+ button[aria-label*="Delete"],
+ button[title*="Remove"],
+ button[aria-label*="Remove"] {
+     background: #dc2626 !important;
+     color: #ffffff !important;
+     fill: #ffffff !important;
+     opacity: 1 !important;
+ }
+ div[data-testid="stExpander"],
+ div[data-testid="stExpander"] *,
+ div[data-testid="stExpander"] label,
+ div[data-testid="stExpander"] p,
+ div[data-testid="stExpander"] span {
+     color: #0f172a !important;
+ }
+ div[data-testid="stExpander"] {
+     background: #ffffff !important;
+ }
+ [data-baseweb="select"] *,
+ [data-baseweb="popover"] *,
+ [data-baseweb="menu"] * {
+     color: #0f172a !important;
+     background: #ffffff !important;
+ }
+ .tactical-readable-box {
+     background:#ffffff;
+     color:#0f172a;
+     border:1px solid #cbd5e1;
+     border-radius:18px;
+     padding:16px 18px;
+     margin:10px 0;
+     box-shadow:0 8px 24px rgba(15,23,42,.10);
+ }
+ .tactical-readable-box * { color:#0f172a !important; }
 
  </style>
     """,
@@ -5531,6 +5599,37 @@ def build_fpi_product_pdf_bytes(
             story.append(table(ad, [27.7*cm/len(cols)]*len(cols), header_bg="#7F1D1D", row_bgs=[colors.HexColor("#FEF2F2"), colors.white]))
 
 
+
+    def _strategy_palette_pdf_rows():
+        """Coach-friendly magyar magyarázat a taktikai stratégiai palettához."""
+        return [
+            ("KON", "Kontra mély blokkból", "Mélyebb védekezésből gyors, direkt támadásindítás."),
+            ("GAT", "Gyors átmenet", "Labdaszerzés után gyors előrejáték, kevés passzból veszély."),
+            ("BAT", "Középső blokk + átmenet", "Középső zónás védekezés, majd gyors átmeneti támadás."),
+            ("KIE", "Kiegyensúlyozott", "Stabil, kockázatkerülőbb alapjáték, kontrollált intenzitással."),
+            ("PRS", "Presszing + átmenet", "Aktív letámadás, labdaszerzés után gyors támadásvezetés."),
+            ("MLT", "Magas letámadás", "Magas blokkból agresszív nyomás és korai labdaszerzés."),
+            ("DOM", "Dominancia", "Labdabirtoklásra és területi fölényre épülő meccskontroll."),
+            ("POZ", "Pozíciós támadás", "Türelmes építkezés, félterületek és szélesség használata."),
+            ("LAB", "Labdatartás mélyebben", "Biztonságosabb labdatartás mélyebb szerkezetből."),
+        ]
+
+    def _tactical_plain_hungarian_explanation(tactical_context: Dict[str, object]) -> List[str]:
+        risks = tactical_context.get("risks", []) or []
+        plan_a = tactical_context.get("plan_a", "KIE – kiegyensúlyozott")
+        out = [
+            f"Javasolt alapirány: {plan_a}.",
+            "Az értelmezés lényege: a GPS a saját csapat fizikai állapotát mutatja, a Tactical Pro+ pedig azt, hogy ehhez milyen ellenfélprofil és meccsterv illeszkedik.",
+        ]
+        if tactical_context.get("has_opp_pdf") or tactical_context.get("has_opp_team_excel"):
+            out.append("Az ellenfélanyag alapján a rendszer kiemeli, hol várható veszély: átmenetek, szélső játék, pontrúgások, presszing vagy mély blokk.")
+        if tactical_context.get("has_own_pdf") or tactical_context.get("has_own_team_excel"):
+            out.append("A saját csapat taktikai anyaga segít eldönteni, hogy a javasolt terv illeszkedik-e a saját játékmodellhez.")
+        if risks:
+            out.append("Fő fókuszok: " + "; ".join(str(x) for x in risks[:3]) + ".")
+        out.append("A javaslat nem kész meccsterv helyett van, hanem a stáb döntését készíti elő.")
+        return out
+
     def add_tactical_executive_page():
         def _pdf_tactical_key_numbers_summary(metrics: Dict[str, float]) -> str:
             """PDF-safe local helper. Avoids NameError if the UI helper is defined later or not available."""
@@ -5576,6 +5675,20 @@ def build_fpi_product_pdf_bytes(
             [P("Plan A", head), P(str(tactical_context.get("plan_a", "n.a.")), small)],
         ]
         story.append(table(status_rows, [6.0*cm, 21.7*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
+        story.append(Spacer(1, 0.20*cm))
+
+        story.append(section("Mit jelent ez magyarul?", "#DCFCE7"))
+        expl_rows = [[P("Rövid értelmezés", head)]]
+        for line in _tactical_plain_hungarian_explanation(tactical_context):
+            expl_rows.append([P(line, small)])
+        story.append(table(expl_rows, [27.7*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
+        story.append(Spacer(1, 0.20*cm))
+
+        story.append(section("Taktikai stratégiai paletta", "#F0FDFA"))
+        pal = [[P("Kód", head), P("Stratégia", head), P("Egyszerű jelentés", head)]]
+        for code, name, desc in _strategy_palette_pdf_rows():
+            pal.append([P(code, small), P(name, small), P(desc, small)])
+        story.append(table(pal, [2.0*cm, 7.2*cm, 18.5*cm], header_bg="#0F766E", row_bgs=[colors.HexColor("#F0FDFA"), colors.white]))
         story.append(Spacer(1, 0.20*cm))
 
         story.append(section("Fő taktikai kockázatok / fókuszok", "#FEE2E2"))
@@ -6181,11 +6294,10 @@ TACTICAL_PLAYER_ALIASES_FPI = {
 }
 
 def _fpi_tactical_norm(x: object) -> str:
-    s = unicodedata.normalize("NFKD", str(x or "").lower().replace("\u00ad", " "))
-    s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    s = re.sub(r"[^a-z0-9%]+", " ", s)
-    return re.sub(r"\s+", " ", s).strip()
-
+    import unicodedata as _unicodedata
+    s = _unicodedata.normalize("NFKD", str(x or "").lower().replace("\\u00ad", " "))
+    s = "".join(ch for ch in s if not _unicodedata.combining(ch))
+    return re.sub(r"\\s+", " ", s).strip()
 def _fpi_tactical_score(col: object, aliases: List[str], field: str = "") -> int:
     src = _fpi_tactical_norm(col)
     if not src:
@@ -6555,8 +6667,14 @@ def _build_tactical_executive_context(gps_context: Dict[str, object], tactical_c
 def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     st.markdown("## 🧠 Tactical Pro+ / Adaptive Intelligence")
     st.markdown(
-        "GPS-alapon önállóan is működik. Ha saját csapatról és/vagy ellenfélről taktikai PDF-et, "
-        "csapat Excelt vagy játékos Excelt töltesz fel, azokat beépíti a meccstervbe és a heti edzésterv-javaslatba."
+        """
+        <div class="tactical-readable-box">
+        <b>Hogyan működik?</b><br>
+        GPS-alapon önállóan is működik. Ha saját csapatról és/vagy ellenfélről taktikai PDF-et,
+        csapat Excelt vagy játékos Excelt töltesz fel, azokat beépíti a meccstervbe és a heti edzésterv-javaslatba.
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     with st.expander("📥 Taktikai inputok – saját csapat és ellenfél", expanded=True):
@@ -6629,6 +6747,13 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     k2.metric("Saját PDF oldalak", len(own_pdf_pages))
     k3.metric("Ellenfél PDF oldalak", len(opp_pdf_pages))
     k4.metric("Taktikai KPI-k", len([v for v in {**own_team_metrics, **opp_team_metrics}.values() if v not in [0, 0.0, None]]))
+
+    st.markdown("### Taktikai stratégiai paletta")
+    st.caption("A kódok jelentése, hogy a javasolt Plan A / Plan B ne legyen félreérthető.")
+    try:
+        st.dataframe(pd.DataFrame(_strategy_palette_pdf_rows(), columns=["Kód", "Stratégia", "Egyszerű jelentés"]), use_container_width=True, hide_index=True)
+    except Exception:
+        pass
 
     st.markdown("### 1. Match Plan AI – javasolt meccsterv")
     st.markdown(f"**Plan A:** {plan['plan_a']}")
