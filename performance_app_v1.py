@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V106_CLEAN_SCOPE_FINAL_PATCH_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V107_CLEAN_TACTICAL_MAPPER_SCOPE_FIX_2026_06_18"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7970,6 +7970,84 @@ def _fpi_safe_build_tactical_executive_context_v104(gps_context: Dict[str, objec
 
 
 
+
+def _fpi_safe_tactical_mapper_ui_v107(uploaded_file, aliases: Dict[str, List[str]], state_prefix: str, title: str) -> Tuple[pd.DataFrame, Dict[str, Optional[str]]]:
+    """Clean oldal korai futási sorrend kompatibilis tactical mapper.
+    Ha a teljes _fpi_tactical_mapper_ui még nincs definiálva, egyszerű Excel beolvasást és oszlopválasztós mappinget ad.
+    """
+    if uploaded_file is None:
+        return pd.DataFrame(), {}
+
+    if "_fpi_tactical_mapper_ui" in globals():
+        try:
+            return _fpi_tactical_mapper_ui(uploaded_file, aliases, state_prefix, title)
+        except Exception as e:
+            st.warning(f"{title}: teljes mapper hiba, egyszerű mapperre váltok: {e}")
+
+    try:
+        file_bytes = uploaded_file.getvalue()
+        xls = pd.ExcelFile(io.BytesIO(file_bytes))
+        sheet_name = xls.sheet_names[0]
+        df2 = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
+    except Exception as e:
+        st.error(f"{title}: Excel beolvasási hiba: {e}")
+        return pd.DataFrame(), {}
+
+    mapping = {}
+    cols = [""] + [str(c) for c in df2.columns]
+    with st.expander(f"🧭 {title} – egyszerű Smart Mapper", expanded=True):
+        st.caption("A teljes tactical mapper később töltődne be, ezért itt egyszerű fallback mapping fut.")
+        grid = st.columns(3)
+        for i, field in enumerate((aliases or {}).keys()):
+            # simple alias guess
+            default = ""
+            field_aliases = [str(a).lower() for a in (aliases or {}).get(field, [])]
+            for c in df2.columns:
+                cl = str(c).lower()
+                if any(a and a in cl for a in field_aliases):
+                    default = str(c)
+                    break
+            with grid[i % 3]:
+                mapping[field] = st.selectbox(
+                    field,
+                    cols,
+                    index=cols.index(default) if default in cols else 0,
+                    key=f"{state_prefix}_fallback_{field}_{hashlib.md5(str(cols).encode()).hexdigest()[:8]}",
+                ) or None
+        st.dataframe(pd.DataFrame([{"Mező": k, "Oszlop": v or ""} for k, v in mapping.items()]), use_container_width=True)
+        if st.checkbox("Előnézet", key=f"{state_prefix}_fallback_preview"):
+            st.dataframe(df2.head(15), use_container_width=True)
+    return df2, mapping
+
+def _fpi_safe_tactical_parse_team_excel_v107(df2: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> Dict[str, float]:
+    if "_fpi_tactical_parse_team_excel" in globals():
+        try:
+            return _fpi_tactical_parse_team_excel(df2, mapping)
+        except Exception:
+            pass
+    metrics = {}
+    if df2 is None or df2.empty or not mapping:
+        return metrics
+    row = df2.iloc[-1] if len(df2) else None
+    for k, col in (mapping or {}).items():
+        if col and col in df2.columns:
+            vals = pd.to_numeric(df2[col].astype(str).str.replace(",", ".", regex=False).str.replace("%", "", regex=False), errors="coerce").dropna()
+            if len(vals):
+                metrics[k] = float(vals.sum() if k not in ["possession_pct", "pressing_success_pct"] else vals.mean())
+    return metrics
+
+def _fpi_safe_tactical_parse_player_excel_v107(df2: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> Dict[str, object]:
+    if "_fpi_tactical_parse_player_excel" in globals():
+        try:
+            return _fpi_tactical_parse_player_excel(df2, mapping)
+        except Exception:
+            pass
+    if df2 is None or df2.empty:
+        return {}
+    return {"raw_rows": len(df2), "mapping": mapping or {}}
+
+
+
 def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[Dict[str, object]]:
     """Tiszta oldalra áthozott taktikai import + mapping.
     Nem rajzol teljes Tactical Pro dashboardot, csak az import/mapping és a context építés marad.
@@ -8019,17 +8097,17 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
         own_player_tables, opp_player_tables = {}, {}
 
         if own_team_xlsx is not None:
-            own_team_df, own_team_mapping = _fpi_tactical_mapper_ui(own_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "clean_own_team_tactical", "Saját csapat Excel")
-            own_team_metrics = _fpi_tactical_parse_team_excel(own_team_df, own_team_mapping)
+            own_team_df, own_team_mapping = _fpi_safe_tactical_mapper_ui_v107(own_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "clean_own_team_tactical", "Saját csapat Excel")
+            own_team_metrics = _fpi_safe_tactical_parse_team_excel_v107(own_team_df, own_team_mapping)
         if opp_team_xlsx is not None:
-            opp_team_df, opp_team_mapping = _fpi_tactical_mapper_ui(opp_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "clean_opp_team_tactical", "Ellenfél csapat Excel")
-            opp_team_metrics = _fpi_tactical_parse_team_excel(opp_team_df, opp_team_mapping)
+            opp_team_df, opp_team_mapping = _fpi_safe_tactical_mapper_ui_v107(opp_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "clean_opp_team_tactical", "Ellenfél csapat Excel")
+            opp_team_metrics = _fpi_safe_tactical_parse_team_excel_v107(opp_team_df, opp_team_mapping)
         if own_player_xlsx is not None:
-            own_player_df, own_player_mapping = _fpi_tactical_mapper_ui(own_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "clean_own_player_tactical", "Saját játékos Excel")
-            own_player_tables = _fpi_tactical_parse_player_excel(own_player_df, own_player_mapping)
+            own_player_df, own_player_mapping = _fpi_safe_tactical_mapper_ui_v107(own_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "clean_own_player_tactical", "Saját játékos Excel")
+            own_player_tables = _fpi_safe_tactical_parse_player_excel_v107(own_player_df, own_player_mapping)
         if opp_player_xlsx is not None:
-            opp_player_df, opp_player_mapping = _fpi_tactical_mapper_ui(opp_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "clean_opp_player_tactical", "Ellenfél játékos Excel")
-            opp_player_tables = _fpi_tactical_parse_player_excel(opp_player_df, opp_player_mapping)
+            opp_player_df, opp_player_mapping = _fpi_safe_tactical_mapper_ui_v107(opp_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "clean_opp_player_tactical", "Ellenfél játékos Excel")
+            opp_player_tables = _fpi_safe_tactical_parse_player_excel_v107(opp_player_df, opp_player_mapping)
 
         merged_pdf_insights = _fpi_safe_merge_tactical_pdf_insights_v104(own_pdf_insights, opp_pdf_insights)
         tactical_ctx_for_plan = {
@@ -10835,19 +10913,19 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
 
     if own_team_xlsx is not None:
         own_team_df, own_team_mapping = _fpi_tactical_mapper_ui(own_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "own_team_tactical", "Saját csapat Excel")
-        own_team_metrics = _fpi_tactical_parse_team_excel(own_team_df, own_team_mapping)
+        own_team_metrics = _fpi_safe_tactical_parse_team_excel_v107(own_team_df, own_team_mapping)
 
     if opp_team_xlsx is not None:
         opp_team_df, opp_team_mapping = _fpi_tactical_mapper_ui(opp_team_xlsx, TACTICAL_TEAM_ALIASES_FPI, "opp_team_tactical", "Ellenfél csapat Excel")
-        opp_team_metrics = _fpi_tactical_parse_team_excel(opp_team_df, opp_team_mapping)
+        opp_team_metrics = _fpi_safe_tactical_parse_team_excel_v107(opp_team_df, opp_team_mapping)
 
     if own_player_xlsx is not None:
         own_player_df, own_player_mapping = _fpi_tactical_mapper_ui(own_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "own_player_tactical", "Saját játékos Excel")
-        own_player_tables = _fpi_tactical_parse_player_excel(own_player_df, own_player_mapping)
+        own_player_tables = _fpi_safe_tactical_parse_player_excel_v107(own_player_df, own_player_mapping)
 
     if opp_player_xlsx is not None:
         opp_player_df, opp_player_mapping = _fpi_tactical_mapper_ui(opp_player_xlsx, TACTICAL_PLAYER_ALIASES_FPI, "opp_player_tactical", "Ellenfél játékos Excel")
-        opp_player_tables = _fpi_tactical_parse_player_excel(opp_player_df, opp_player_mapping)
+        opp_player_tables = _fpi_safe_tactical_parse_player_excel_v107(opp_player_df, opp_player_mapping)
 
     # A régi plan-motor ellenfél fókuszú volt. Megtartjuk, de kibővített, merge-elt PDF insighttal és ellenfél KPI-okkal etetjük.
     tactical_ctx_for_plan = {
