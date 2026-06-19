@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V111_LANDING_FLOW_BOX_EQUAL_HEIGHT_2026_06_18"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V112_REFERENCE_ENGINE_V2_MICROCYCLE_V2_2026_06_19"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -853,9 +853,13 @@ METRIC_LABELS = {
 
 PLAYSTYLE_OPTIONS = {
     "Kiegyensúlyozott": "Általános, kiegyensúlyozott performance profil.",
-    "Pressing": "Magas intenzitás, sok gyorsulás/lassítás, erős munkasűrűség.",
-    "Transition": "Gyors átmenetek, magas sprint- és maximális sebességű inger igény.",
-    "Possession": "Stabil volumen, kontrollált intenzitás, fenntartható terhelés.",
+    "Dominancia": "Labdabirtoklásra és kontrollra építő modell: stabil volumen, kontrollált sebesség- és sprintinger.",
+    "Magas presszing": "Magas intenzitás, sok gyorsulás/lassítás, sok High Effort és erős munkasűrűség.",
+    "Átmeneti játék": "Gyors átmenetek, magas sprint- és maximális sebességű inger igény.",
+    "Direkt játék": "Mélységi futások, sprint- és HSR-expozíció, gyors előrehaladás.",
+    "Pressing": "Régi kompatibilitási név: magas presszing profil.",
+    "Transition": "Régi kompatibilitási név: átmeneti játék profil.",
+    "Possession": "Régi kompatibilitási név: dominancia/possession profil.",
     "Low Block": "Rövidebb, robbanékony intenzív blokkok, kontrollált összterhelés.",
 }
 
@@ -6040,6 +6044,17 @@ FPI_NB2_ADULT_REFERENCE_RANGES_V93 = {
         "avg_high": 75,
         "explain": "Nagy intenzitású akciók összesített mutatója. Rendszertől függően sprint, gyorsulás, lassítás vagy robbanékony effort is lehet benne.",
     },
+    "training_load": {
+        "label": "Load",
+        "unit": "pont",
+        "weekly_ref": "260–410%",
+        "avg_ref": "55–95%",
+        "low": 260,
+        "high": 410,
+        "avg_low": 55,
+        "avg_high": 95,
+        "explain": "GPS/rendszer által számolt terhelési pont. A heti load és az edzésátlag is külön értékelődik.",
+    },
 }
 
 def _fpi_session_kind_v93(x: object) -> str:
@@ -7027,57 +7042,83 @@ def _build_demo_tactical_context() -> Dict[str, object]:
 # V9.7 - Edzői kontextus: korosztály/szint referencia + edzésnapok
 # =========================================================
 
+FPI_REFERENCE_AGE_OPTIONS_V112 = ["Felnőtt", "U21", "U19", "U17", "U16", "U15", "U14", "U13"]
+FPI_REFERENCE_LEVEL_OPTIONS_V112 = ["NB I", "NB II", "NB III", "Akadémia", "Regionális", "Megye I", "Egyéb"]
+FPI_REFERENCE_POSITION_OPTIONS_V112 = ["Kapus", "Középhátvéd", "Szélső hátvéd", "Védekező középpályás", "Középpályás", "Támadó középpályás", "Szélső", "Csatár"]
+FPI_COACH_WEEK_OPTIONS_V112 = ["Regeneráló hét", "Fenntartó hét", "Terhelő hét", "Fejlesztő hét", "Élező hét", "Meccsre felkészítő hét"]
+FPI_PLAYMODEL_OPTIONS_V112 = ["Dominancia", "Magas presszing", "Átmeneti játék", "Direkt játék", "Kiegyensúlyozott"]
+
+# V11.2 - Referencia motor V2
+# A százalékos tartományok azt mutatják, hogy a heti edzésösszeg / edzésátlag hány %-a a meccsreferenciának.
+FPI_REFERENCE_BASE_RANGES_V112 = {
+    "total_distance": ("280–420%", "60–100%", 280, 420, 60, 100),
+    "training_load": ("260–410%", "55–95%", 260, 410, 55, 95),
+    "hsr_distance": ("150–250%", "35–70%", 150, 250, 35, 70),
+    "sprint_distance": ("100–200%", "25–55%", 100, 200, 25, 55),
+    "sprints": ("100–220%", "25–60%", 100, 220, 25, 60),
+    "high_efforts": ("150–280%", "35–75%", 150, 280, 35, 75),
+}
+
+FPI_AGE_FACTOR_V112 = {
+    "Felnőtt": 1.00, "U21": 0.97, "U19": 0.93, "U17": 0.86,
+    "U16": 0.80, "U15": 0.73, "U14": 0.66, "U13": 0.58,
+}
+FPI_LEVEL_FACTOR_V112 = {
+    "NB I": 1.08, "NB II": 1.00, "NB III": 0.92, "Akadémia": 0.94,
+    "Regionális": 0.84, "Megye I": 0.78, "Egyéb": 0.82,
+}
+FPI_POSITION_FACTORS_V112 = {
+    "Kapus": {"total_distance": .62, "training_load": .65, "hsr_distance": .35, "sprint_distance": .25, "sprints": .35, "high_efforts": .55},
+    "Középhátvéd": {"total_distance": .92, "training_load": .92, "hsr_distance": .78, "sprint_distance": .70, "sprints": .75, "high_efforts": .82},
+    "Szélső hátvéd": {"total_distance": 1.05, "training_load": 1.04, "hsr_distance": 1.16, "sprint_distance": 1.12, "sprints": 1.10, "high_efforts": 1.08},
+    "Védekező középpályás": {"total_distance": 1.08, "training_load": 1.06, "hsr_distance": .96, "sprint_distance": .82, "sprints": .88, "high_efforts": .98},
+    "Középpályás": {"total_distance": 1.10, "training_load": 1.08, "hsr_distance": 1.02, "sprint_distance": .92, "sprints": .96, "high_efforts": 1.02},
+    "Támadó középpályás": {"total_distance": 1.00, "training_load": 1.00, "hsr_distance": 1.04, "sprint_distance": 1.02, "sprints": 1.00, "high_efforts": 1.04},
+    "Szélső": {"total_distance": 1.02, "training_load": 1.02, "hsr_distance": 1.22, "sprint_distance": 1.25, "sprints": 1.22, "high_efforts": 1.12},
+    "Csatár": {"total_distance": .96, "training_load": .98, "hsr_distance": 1.08, "sprint_distance": 1.18, "sprints": 1.15, "high_efforts": 1.05},
+}
+FPI_PLAYMODEL_FACTORS_V112 = {
+    "Dominancia": {"total_distance": 1.03, "training_load": .98, "hsr_distance": .92, "sprint_distance": .88, "sprints": .90, "high_efforts": .94},
+    "Magas presszing": {"total_distance": 1.04, "training_load": 1.08, "hsr_distance": 1.10, "sprint_distance": 1.08, "sprints": 1.12, "high_efforts": 1.22},
+    "Átmeneti játék": {"total_distance": 1.00, "training_load": 1.03, "hsr_distance": 1.18, "sprint_distance": 1.22, "sprints": 1.18, "high_efforts": 1.10},
+    "Direkt játék": {"total_distance": .98, "training_load": 1.02, "hsr_distance": 1.16, "sprint_distance": 1.18, "sprints": 1.12, "high_efforts": 1.02},
+    "Kiegyensúlyozott": {"total_distance": 1.00, "training_load": 1.00, "hsr_distance": 1.00, "sprint_distance": 1.00, "sprints": 1.00, "high_efforts": 1.00},
+    "Pressing": {"total_distance": 1.04, "training_load": 1.08, "hsr_distance": 1.10, "sprint_distance": 1.08, "sprints": 1.12, "high_efforts": 1.22},
+    "Transition": {"total_distance": 1.00, "training_load": 1.03, "hsr_distance": 1.18, "sprint_distance": 1.22, "sprints": 1.18, "high_efforts": 1.10},
+    "Possession": {"total_distance": 1.03, "training_load": .98, "hsr_distance": .92, "sprint_distance": .88, "sprints": .90, "high_efforts": .94},
+    "Low Block": {"total_distance": .92, "training_load": .94, "hsr_distance": .88, "sprint_distance": .92, "sprints": .92, "high_efforts": .96},
+}
+
+
+def _fpi_scale_range_v112(rng: Tuple[str, str, float, float, float, float], factor: float) -> Tuple[str, str, float, float, float, float]:
+    _, _, low, high, avg_low, avg_high = rng
+    low2, high2 = int(round(low * factor)), int(round(high * factor))
+    avg_low2, avg_high2 = int(round(avg_low * factor)), int(round(avg_high * factor))
+    return (f"{low2}–{high2}%", f"{avg_low2}–{avg_high2}%", low2, high2, avg_low2, avg_high2)
+
+
+def _fpi_build_reference_profile_v112(age: str, level: str, position: str, playmodel: str) -> Dict[str, object]:
+    age = age if age in FPI_AGE_FACTOR_V112 else "Felnőtt"
+    level = level if level in FPI_LEVEL_FACTOR_V112 else "NB II"
+    position = position if position in FPI_POSITION_FACTORS_V112 else "Középpályás"
+    playmodel = playmodel if playmodel in FPI_PLAYMODEL_FACTORS_V112 else "Kiegyensúlyozott"
+    ranges = {}
+    for metric, base in FPI_REFERENCE_BASE_RANGES_V112.items():
+        factor = FPI_AGE_FACTOR_V112[age] * FPI_LEVEL_FACTOR_V112[level]
+        factor *= FPI_POSITION_FACTORS_V112[position].get(metric, 1.0)
+        factor *= FPI_PLAYMODEL_FACTORS_V112[playmodel].get(metric, 1.0)
+        factor = max(0.25, min(1.45, factor))
+        ranges[metric] = _fpi_scale_range_v112(base, factor)
+    label = f"{age} / {level} / {position} / {playmodel}"
+    return {"label": label, "age": age, "level": level, "position": position, "playmodel": playmodel, "ranges": ranges}
+
+# V9.7 régi profilok megtartva kompatibilitás miatt, de a V2 motor már a fenti négy komponensből épít profilt.
 FPI_REFERENCE_PROFILES_V97 = {
-    "Felnőtt NB2": {
-        "label": "Felnőtt NB2",
-        "ranges": {
-            "total_distance": ("280–420%", "60–100%", 280, 420, 60, 100),
-            "hsr_distance": ("150–250%", "35–70%", 150, 250, 35, 70),
-            "sprint_distance": ("100–200%", "25–55%", 100, 200, 25, 55),
-            "sprints": ("100–220%", "25–60%", 100, 220, 25, 60),
-            "high_efforts": ("150–280%", "35–75%", 150, 280, 35, 75),
-        },
-    },
-    "Felnőtt NB3 / megyei felnőtt": {
-        "label": "Felnőtt NB3 / megyei felnőtt",
-        "ranges": {
-            "total_distance": ("240–380%", "55–95%", 240, 380, 55, 95),
-            "hsr_distance": ("120–220%", "30–65%", 120, 220, 30, 65),
-            "sprint_distance": ("80–170%", "20–50%", 80, 170, 20, 50),
-            "sprints": ("80–190%", "20–55%", 80, 190, 20, 55),
-            "high_efforts": ("120–250%", "30–70%", 120, 250, 30, 70),
-        },
-    },
-    "Akadémia U19": {
-        "label": "Akadémia U19",
-        "ranges": {
-            "total_distance": ("260–400%", "55–95%", 260, 400, 55, 95),
-            "hsr_distance": ("140–240%", "30–65%", 140, 240, 30, 65),
-            "sprint_distance": ("90–190%", "20–50%", 90, 190, 20, 50),
-            "sprints": ("90–210%", "20–55%", 90, 210, 20, 55),
-            "high_efforts": ("140–270%", "30–70%", 140, 270, 30, 70),
-        },
-    },
-    "Akadémia U17": {
-        "label": "Akadémia U17",
-        "ranges": {
-            "total_distance": ("230–360%", "50–90%", 230, 360, 50, 90),
-            "hsr_distance": ("110–210%", "25–60%", 110, 210, 25, 60),
-            "sprint_distance": ("70–160%", "18–45%", 70, 160, 18, 45),
-            "sprints": ("80–180%", "20–50%", 80, 180, 20, 50),
-            "high_efforts": ("120–240%", "28–65%", 120, 240, 28, 65),
-        },
-    },
-    "Megyei / grassroots U13-U15": {
-        "label": "Megyei / grassroots U13-U15",
-        "ranges": {
-            "total_distance": ("180–320%", "45–85%", 180, 320, 45, 85),
-            "hsr_distance": ("70–170%", "18–50%", 70, 170, 18, 50),
-            "sprint_distance": ("40–120%", "10–35%", 40, 120, 10, 35),
-            "sprints": ("50–150%", "12–40%", 50, 150, 12, 40),
-            "high_efforts": ("80–200%", "20–55%", 80, 200, 20, 55),
-        },
-    },
+    "Felnőtt NB2": _fpi_build_reference_profile_v112("Felnőtt", "NB II", "Középpályás", "Kiegyensúlyozott"),
+    "Felnőtt NB3 / megyei felnőtt": _fpi_build_reference_profile_v112("Felnőtt", "NB III", "Középpályás", "Kiegyensúlyozott"),
+    "Akadémia U19": _fpi_build_reference_profile_v112("U19", "Akadémia", "Középpályás", "Kiegyensúlyozott"),
+    "Akadémia U17": _fpi_build_reference_profile_v112("U17", "Akadémia", "Középpályás", "Kiegyensúlyozott"),
+    "Megyei / grassroots U13-U15": _fpi_build_reference_profile_v112("U14", "Megye I", "Középpályás", "Kiegyensúlyozott"),
 }
 
 def _fpi_fmt_thousands_v97(x: object) -> str:
@@ -7091,6 +7132,13 @@ def _fpi_get_coach_context_v97() -> Dict[str, object]:
 
 def _fpi_reference_profile_v97() -> Dict[str, object]:
     ctx = _fpi_get_coach_context_v97()
+    if any(k in ctx for k in ["reference_age", "reference_level", "reference_position", "playmodel_profile"]):
+        return _fpi_build_reference_profile_v112(
+            str(ctx.get("reference_age") or "Felnőtt"),
+            str(ctx.get("reference_level") or "NB II"),
+            str(ctx.get("reference_position") or "Középpályás"),
+            str(ctx.get("playmodel_profile") or ctx.get("selected_playstyle") or "Kiegyensúlyozott"),
+        )
     key = ctx.get("reference_profile", "Felnőtt NB2")
     return FPI_REFERENCE_PROFILES_V97.get(key, FPI_REFERENCE_PROFILES_V97["Felnőtt NB2"])
 
@@ -7102,7 +7150,7 @@ def _fpi_periodization_label_v97(ctx: Dict[str, object]) -> str:
 
 def _fpi_reference_ranges_for_metric_v97(metric: str) -> Tuple[str, str, float, float, float, float]:
     prof = _fpi_reference_profile_v97()
-    return prof.get("ranges", {}).get(metric, FPI_REFERENCE_PROFILES_V97["Felnőtt NB2"]["ranges"].get(metric, ("n.a.", "n.a.", 0, 9999, 0, 9999)))
+    return prof.get("ranges", {}).get(metric, FPI_REFERENCE_BASE_RANGES_V112.get(metric, ("n.a.", "n.a.", 0, 9999, 0, 9999)))
 
 def _fpi_ratio_status_v97(value: Optional[float], low: float, high: float) -> str:
     return _fpi_ratio_status_v93(value, low, high)
@@ -7114,6 +7162,7 @@ def _fpi_match_ratio_reference_df_v97(df: pd.DataFrame, week: str) -> pd.DataFra
         return base
     # profile-specific overrides
     metric_by_label = {v["label"]: k for k, v in FPI_NB2_ADULT_REFERENCE_RANGES_V93.items()}
+    metric_by_label.update({"Load": "training_load", "Terhelési pont": "training_load"})
     rows = []
     for _, r in base.iterrows():
         rr = r.to_dict()
@@ -7122,6 +7171,8 @@ def _fpi_match_ratio_reference_df_v97(df: pd.DataFrame, week: str) -> pd.DataFra
             weekly_ref, avg_ref, low, high, avg_low, avg_high = _fpi_reference_ranges_for_metric_v97(metric)
             weekly_pct = r.get("Edzés/heti meccs %")
             avg_pct = r.get("Edzésátlag/meccs %")
+            rr["Profil heti ref."] = weekly_ref
+            rr["Profil edzésátlag ref."] = avg_ref
             rr["NB2 felnőtt heti ref."] = weekly_ref
             rr["NB2 felnőtt edzésátlag ref."] = avg_ref
             rr["Referencia profil"] = _fpi_reference_profile_v97().get("label", "Felnőtt NB2")
@@ -7265,13 +7316,17 @@ def _fpi_gps_only_md_plan_v99(ctx: Dict[str, object], readiness: int, priorities
     # hét típus szerinti globális irány
     week_low = coach_week.lower()
     if "regener" in week_low:
-        default_focus = ("Regeneráló fókusz", f"Edzői hét típus: regeneráló hét. Trend: {trend_txt}.")
-    elif "friss" in week_low:
-        default_focus = ("Frissítő fókusz", f"Meccsre frissítés, readiness megtartás. Trend: {trend_txt}.")
+        default_focus = ("Regeneráló fókusz", f"Regeneráló hét: alacsonyabb volumen, kontrollált intenzitás. Trend: {trend_txt}.")
+    elif "fenntart" in week_low:
+        default_focus = ("Fenntartó fókusz", f"Fenntartó hét: a fő fizikai képességek expozíciója túlterhelés nélkül. Trend: {trend_txt}.")
     elif "terhel" in week_low:
-        default_focus = ("Terhelő fókusz", f"Edzői hét típus: terhelő hét. A terhelést a GPS referenciazónákhoz igazítsd. Trend: {trend_txt}.")
-    elif "tanul" in week_low:
-        default_focus = ("Tanuló hét", f"Edzői hét típus: tanuló hét. Alacsonyabb fizikai kockázat mellett technikai/tanulási fókusz. Trend: {trend_txt}.")
+        default_focus = ("Terhelő fókusz", f"Terhelő hét: volumen/load építés referenciazónákhoz igazítva. Trend: {trend_txt}.")
+    elif "fejleszt" in week_low:
+        default_focus = ("Fejlesztő fókusz", f"Fejlesztő hét: célzott HSR/sprint/High Effort inger, de játékoskockázat kontrollal. Trend: {trend_txt}.")
+    elif "elez" in week_low or "élez" in week_low:
+        default_focus = ("Élező fókusz", f"Élező hét: rövid, minőségi intenzitás, alacsony fárasztás. Trend: {trend_txt}.")
+    elif "felkeszit" in week_low or "felkész" in week_low or "friss" in week_low:
+        default_focus = ("Meccsre felkészítő fókusz", f"Meccsre felkészítő hét: frissesség megtartása, célzott sebességinger. Trend: {trend_txt}.")
     else:
         default_focus = ("GPS-alapú fókusz", f"Readiness, referenciaarányok és trend alapján. Trend: {trend_txt}.")
 
@@ -8408,14 +8463,19 @@ def render_fpi_clean_workspace_v101() -> None:
     with c2:
         match_date_clean = st.date_input("Meccsnap", value=st.session_state.get("fpi_match_date_v94", pd.Timestamp.today().date()), key="clean_match_date_v101")
     with c3:
-        ref_profile_clean = st.selectbox("Korosztály / szint", list(FPI_REFERENCE_PROFILES_V97.keys()), index=0, key="clean_ref_profile_v101")
+        reference_age_clean = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=0, key="clean_ref_age_v112")
     with c4:
-        week_type_clean = st.selectbox(
-            "Heti típus",
-            ["Edző által nem megadva", "Tanuló hét", "Terhelő hét", "Meccsre frissítő hét", "Regeneráló hét", "Vegyes hét"],
-            index=0,
-            key="clean_week_type_v101",
-        )
+        reference_level_clean = st.selectbox("Szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=1, key="clean_ref_level_v112")
+
+    r1, r2, r3 = st.columns(3)
+    with r1:
+        reference_position_clean = st.selectbox("Referencia poszt", FPI_REFERENCE_POSITION_OPTIONS_V112, index=4, key="clean_ref_position_v112")
+    with r2:
+        week_type_clean = st.selectbox("Mi a hét célja?", FPI_COACH_WEEK_OPTIONS_V112, index=1, key="clean_week_type_v112")
+    with r3:
+        playmodel_profile_clean = st.selectbox("Játékmodell profil", FPI_PLAYMODEL_OPTIONS_V112, index=4, key="clean_playmodel_profile_v112")
+    ref_profile_clean = _fpi_build_reference_profile_v112(reference_age_clean, reference_level_clean, reference_position_clean, playmodel_profile_clean)["label"]
+    st.caption(f"Aktív referencia profil: {ref_profile_clean}")
 
     match_week_clean = _fpi_iso_week_from_date_v94(match_date_clean)
     default_idx_clean = weeks_clean.index(match_week_clean) if match_week_clean in weeks_clean else (len(weeks_clean)-1 if weeks_clean else 0)
@@ -8423,7 +8483,7 @@ def render_fpi_clean_workspace_v101() -> None:
     with f1:
         selected_week_clean = st.selectbox("Elemzett hét", weeks_clean, index=default_idx_clean, format_func=week_label_short, key="clean_week_v101")
     with f2:
-        selected_playstyle_clean = st.selectbox("Játékmodell", list(PLAYSTYLE_OPTIONS.keys()), index=0, key="clean_playstyle_v101")
+        selected_playstyle_clean = st.selectbox("Játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=FPI_PLAYMODEL_OPTIONS_V112.index(playmodel_profile_clean) if playmodel_profile_clean in FPI_PLAYMODEL_OPTIONS_V112 else 4, key="clean_playstyle_v112")
     with f3:
         selected_players_clean = st.multiselect("Játékosok", players_clean, default=players_clean, key="clean_players_v101")
 
@@ -8437,24 +8497,45 @@ def render_fpi_clean_workspace_v101() -> None:
         "today_week": _fpi_iso_week_from_date_v94(pd.Timestamp.today().date()),
     }
 
-    # Coach context for references and microcycle
-    n_train_clean = st.number_input("Tervezett edzések száma a meccsig", min_value=0, max_value=8, value=4, step=1, key="clean_n_train_v101")
+    # Coach context for references and microcycle V2
+    mc1, mc2, mc3 = st.columns(3)
+    with mc1:
+        cycle_days_clean = st.number_input("Hány napos a ciklus?", min_value=3, max_value=10, value=7, step=1, key="clean_cycle_days_v112")
+    with mc2:
+        n_train_clean = st.number_input("Hány edzés lesz?", min_value=0, max_value=6, value=4, step=1, key="clean_n_train_v112")
+    with mc3:
+        n_rest_clean = st.number_input("Hány pihenőnap?", min_value=0, max_value=5, value=1, step=1, key="clean_n_rest_v112")
+    md_day_options_clean = [f"MD-{i}" for i in range(int(cycle_days_clean)-1, 0, -1)] + ["MD"]
+    md_match_day_clean = st.selectbox("Melyik nap az MD?", md_day_options_clean, index=len(md_day_options_clean)-1, key="clean_md_match_day_v112")
     session_plan_clean = []
-    if n_train_clean:
-        with st.expander("Mikrociklus napok beállítása", expanded=False):
-            for i in range(int(n_train_clean)):
-                d1, d2, d3 = st.columns([1, 1.2, 3])
-                with d1:
-                    md_v = st.selectbox(f"Nap {i+1}", ["MD-6", "MD-5", "MD-4", "MD-3", "MD-2", "MD-1"], index=min(i,5), key=f"clean_md_day_v101_{i}")
-                with d2:
-                    typ_v = st.selectbox(f"Típus {i+1}", ["Edzés", "Pihenő", "Regeneráció", "Aktiváció", "Meccs"], index=0, key=f"clean_md_type_v101_{i}")
-                with d3:
-                    note_v = st.text_input(f"Edzői megjegyzés {i+1}", value="", key=f"clean_md_note_v101_{i}")
-                session_plan_clean.append({"md": md_v, "type": typ_v, "note": note_v})
+    total_slots_clean = int(n_train_clean) + int(n_rest_clean) + (1 if md_match_day_clean == "MD" else 0)
+    total_slots_clean = max(1, min(int(cycle_days_clean), total_slots_clean))
+    with st.expander("Mikrociklus V2 napok beállítása", expanded=False):
+        for i in range(total_slots_clean):
+            d1, d2, d3 = st.columns([1, 1.2, 3])
+            with d1:
+                md_default = min(i, len(md_day_options_clean)-1)
+                md_v = st.selectbox(f"Nap {i+1}", md_day_options_clean, index=md_default, key=f"clean_md_day_v112_{i}")
+            with d2:
+                default_type = "Meccs" if md_v == "MD" else ("Pihenő" if i >= int(n_train_clean) else "Edzés")
+                type_options = ["Edzés", "Pihenő", "Regeneráció", "Aktiváció", "Meccs"]
+                typ_v = st.selectbox(f"Típus {i+1}", type_options, index=type_options.index(default_type), key=f"clean_md_type_v112_{i}")
+            with d3:
+                note_v = st.text_input(f"Edzői megjegyzés {i+1}", value="", key=f"clean_md_note_v112_{i}")
+            session_plan_clean.append({"md": md_v, "type": typ_v, "note": note_v})
 
     st.session_state["fpi_coach_context_v97"] = {
         "reference_profile": ref_profile_clean,
+        "reference_age": reference_age_clean,
+        "reference_level": reference_level_clean,
+        "reference_position": reference_position_clean,
+        "playmodel_profile": playmodel_profile_clean,
+        "selected_playstyle": selected_playstyle_clean,
         "coach_week_type": week_type_clean,
+        "cycle_days": int(cycle_days_clean),
+        "training_days": int(n_train_clean),
+        "rest_days": int(n_rest_clean),
+        "md_day": md_match_day_clean,
         "session_plan": session_plan_clean,
     }
 
@@ -8652,35 +8733,52 @@ with st.sidebar:
     }
     st.caption(f"Mai hét: {_fpi_iso_week_from_date_v94(today_v94)} | Meccshét: {match_week_v94}")
 
-    st.header("Edzői kontextus / referencia")
-    ref_profile_v97 = st.selectbox("Korosztály / szint referencia", list(FPI_REFERENCE_PROFILES_V97.keys()), index=0)
-    coach_week_type_v97 = st.selectbox(
-        "Heti periodizáció típusa – edzői megadás",
-        ["Edző által nem megadva", "Tanuló hét", "Terhelő hét", "Meccsre frissítő hét", "Regeneráló hét", "Vegyes hét"],
-        index=0,
-    )
-    n_train_v97 = st.number_input("Tervezett edzések száma a meccsig", min_value=0, max_value=8, value=4, step=1)
+    st.header("Edzői kontextus / referencia V2")
+    reference_age_v97 = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=0, key="app_ref_age_v112")
+    reference_level_v97 = st.selectbox("Szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=1, key="app_ref_level_v112")
+    reference_position_v97 = st.selectbox("Referencia poszt", FPI_REFERENCE_POSITION_OPTIONS_V112, index=4, key="app_ref_position_v112")
+    coach_week_type_v97 = st.selectbox("Mi a hét célja?", FPI_COACH_WEEK_OPTIONS_V112, index=1, key="app_week_type_v112")
+    playmodel_profile_v97 = st.selectbox("Játékmodell profil", FPI_PLAYMODEL_OPTIONS_V112, index=4, key="app_playmodel_profile_v112")
+    ref_profile_v97 = _fpi_build_reference_profile_v112(reference_age_v97, reference_level_v97, reference_position_v97, playmodel_profile_v97)["label"]
+    st.caption(f"Aktív referencia profil: {ref_profile_v97}")
+
+    cycle_days_v97 = st.number_input("Hány napos a ciklus?", min_value=3, max_value=10, value=7, step=1, key="app_cycle_days_v112")
+    n_train_v97 = st.number_input("Hány edzés lesz?", min_value=0, max_value=6, value=4, step=1, key="app_n_train_v112")
+    n_rest_v97 = st.number_input("Hány pihenőnap?", min_value=0, max_value=5, value=1, step=1, key="app_n_rest_v112")
+    md_day_options_v97 = [f"MD-{i}" for i in range(int(cycle_days_v97)-1, 0, -1)] + ["MD"]
+    md_match_day_v97 = st.selectbox("Melyik nap az MD?", md_day_options_v97, index=len(md_day_options_v97)-1, key="app_md_match_day_v112")
     session_plan_v97 = []
     st.caption("Add meg, melyik napon van edzés/pihenő/meccs. Így a mikrociklus nem fix 4 edzésre épül.")
-    for i in range(int(n_train_v97)):
+    total_slots_v97 = max(1, min(int(cycle_days_v97), int(n_train_v97) + int(n_rest_v97) + (1 if md_match_day_v97 == "MD" else 0)))
+    for i in range(total_slots_v97):
         c1, c2 = st.columns([1, 2])
         with c1:
-            md_v = st.selectbox(f"Nap {i+1}", ["MD-6", "MD-5", "MD-4", "MD-3", "MD-2", "MD-1"], index=min(i,5), key=f"md_day_v97_{i}")
+            md_v = st.selectbox(f"Nap {i+1}", md_day_options_v97, index=min(i, len(md_day_options_v97)-1), key=f"md_day_v112_{i}")
         with c2:
-            typ_v = st.selectbox(f"Típus {i+1}", ["Edzés", "Pihenő", "Regeneráció", "Aktiváció", "Meccs"], index=0, key=f"md_type_v97_{i}")
-        note_v = st.text_input(f"Edzői megjegyzés {i+1}", value="", key=f"md_note_v97_{i}")
+            type_options = ["Edzés", "Pihenő", "Regeneráció", "Aktiváció", "Meccs"]
+            default_type = "Meccs" if md_v == "MD" else ("Pihenő" if i >= int(n_train_v97) else "Edzés")
+            typ_v = st.selectbox(f"Típus {i+1}", type_options, index=type_options.index(default_type), key=f"md_type_v112_{i}")
+        note_v = st.text_input(f"Edzői megjegyzés {i+1}", value="", key=f"md_note_v112_{i}")
         session_plan_v97.append({"md": md_v, "type": typ_v, "note": note_v})
     st.session_state["fpi_coach_context_v97"] = {
         "reference_profile": ref_profile_v97,
+        "reference_age": reference_age_v97,
+        "reference_level": reference_level_v97,
+        "reference_position": reference_position_v97,
+        "playmodel_profile": playmodel_profile_v97,
         "coach_week_type": coach_week_type_v97,
+        "cycle_days": int(cycle_days_v97),
+        "training_days": int(n_train_v97),
+        "rest_days": int(n_rest_v97),
+        "md_day": md_match_day_v97,
         "session_plan": session_plan_v97,
     }
 
     st.header("Szűrők")
     default_week_idx_v94 = weeks.index(match_week_v94) if match_week_v94 in weeks else (len(weeks) - 1 if weeks else 0)
     selected_week = st.selectbox("Hét", weeks, index=default_week_idx_v94, format_func=week_label_short)
-    selected_playstyle = st.selectbox("Játékmodell", list(PLAYSTYLE_OPTIONS.keys()), index=0)
-    st.caption(PLAYSTYLE_OPTIONS[selected_playstyle])
+    selected_playstyle = st.selectbox("Játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=4)
+    st.caption(PLAYSTYLE_OPTIONS.get(selected_playstyle, "Játékmodell-alapú referencia és következtetés."))
     selected_types = st.multiselect("Típus", session_types, default=session_types)
     selected_players = st.multiselect("Játékosok", players, default=players)
 
