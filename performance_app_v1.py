@@ -7789,6 +7789,27 @@ def _fpi_landing_css_v100() -> None:
             line-height: 1.38;
             min-height: 44px;
         }
+        .fpi-section-banner {
+            border-radius: 20px;
+            padding: 15px 18px;
+            margin: 18px 0 12px 0;
+            border: 1px solid rgba(255,255,255,.18);
+            box-shadow: 0 12px 28px rgba(15,23,42,.10);
+        }
+        .fpi-section-banner h3 { margin: 0; color: #ffffff; font-size: 1.22rem; font-weight: 950; }
+        .fpi-section-banner p { margin: 5px 0 0 0; color: rgba(255,255,255,.88); line-height: 1.35; }
+        .fpi-section-gps { background: linear-gradient(135deg,#0f766e,#14b8a6); }
+        .fpi-section-tactical { background: linear-gradient(135deg,#1d4ed8,#60a5fa); }
+        .fpi-section-settings { background: linear-gradient(135deg,#7c3aed,#a78bfa); }
+        .fpi-section-export { background: linear-gradient(135deg,#15803d,#22c55e); }
+        .fpi-settings-panel {
+            border-radius: 18px;
+            padding: 14px 16px;
+            background: #f8fafc;
+            border: 1px solid #dbeafe;
+            margin: 8px 0 14px 0;
+        }
+        .fpi-settings-panel, .fpi-settings-panel * { color: #0f172a !important; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -7953,10 +7974,13 @@ def render_fpi_landing_page_v100() -> None:
             st.markdown(f'<div class="fpi-flow-step"><b>{title}</b><div>{desc}</div></div>', unsafe_allow_html=True)
 
     st.markdown("")
-    cta1, cta2, cta3 = st.columns([1, 1.2, 1])
-    with cta2:
-        if st.button("🚀 Tovább az import / export oldalra", use_container_width=True, key="landing_go_to_app_v100"):
+    cta1, cta2 = st.columns(2)
+    with cta1:
+        if st.button("🚀 Tovább az import / export oldalra", use_container_width=True, key="landing_go_to_clean_v113"):
             _fpi_set_page_v100("clean")
+    with cta2:
+        if st.button("⚙️ Teljes app megnyitása", use_container_width=True, key="landing_go_to_full_app_v113"):
+            _fpi_set_page_v100("app")
 
 
 
@@ -8111,6 +8135,69 @@ def _fpi_safe_build_tactical_executive_context_v104(gps_context: Dict[str, objec
 
 
 
+
+# =========================================================
+# V11.3 - Clean workspace section headers + saved user defaults
+# =========================================================
+def _fpi_current_user_key_v113() -> str:
+    """Belépési azonosítóhoz kötött, fájlnév-biztos beállításkulcs."""
+    lic = st.session_state.get("license_status", {}) or {}
+    raw = lic.get("email") or st.session_state.get("user_email") or "demo_user"
+    raw = str(raw).strip().lower() or "demo_user"
+    safe = re.sub(r"[^a-z0-9_.@-]+", "_", raw)
+    return safe[:80]
+
+
+def _fpi_settings_path_v113() -> Path:
+    base = Path(os.environ.get("FPI_SETTINGS_DIR", ".fpi_user_settings"))
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        base = Path(".")
+    return base / f"fpi_defaults_{_fpi_current_user_key_v113()}.json"
+
+
+def _fpi_load_user_defaults_v113() -> Dict[str, object]:
+    path = _fpi_settings_path_v113()
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    return {}
+
+
+def _fpi_save_user_defaults_v113(payload: Dict[str, object]) -> Tuple[bool, str]:
+    path = _fpi_settings_path_v113()
+    try:
+        payload = dict(payload or {})
+        payload["saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        payload["user_key"] = _fpi_current_user_key_v113()
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        return True, str(path)
+    except Exception as e:
+        return False, str(e)
+
+
+def _fpi_idx_v113(options: List[object], value: object, fallback: int = 0) -> int:
+    try:
+        return list(options).index(value)
+    except Exception:
+        return max(0, min(int(fallback), len(options) - 1)) if options else 0
+
+
+def _fpi_section_header_v113(title: str, subtitle: str = "", kind: str = "gps") -> None:
+    kind_class = {
+        "gps": "fpi-section-gps",
+        "tactical": "fpi-section-tactical",
+        "settings": "fpi-section-settings",
+        "export": "fpi-section-export",
+    }.get(kind, "fpi-section-gps")
+    st.markdown(
+        f"""<div class=\"fpi-section-banner {kind_class}\"><h3>{html.escape(title)}</h3><p>{html.escape(subtitle)}</p></div>""",
+        unsafe_allow_html=True,
+    )
+
 def _fpi_clean_team_aliases_v108() -> Dict[str, List[str]]:
     """Clean oldal fallback aliasok, ha a teljes TACTICAL_TEAM_ALIASES_FPI még nincs definiálva."""
     if "TACTICAL_TEAM_ALIASES_FPI" in globals():
@@ -8234,7 +8321,7 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
     """Tiszta oldalra áthozott taktikai import + mapping.
     Nem rajzol teljes Tactical Pro dashboardot, csak az import/mapping és a context építés marad.
     """
-    st.markdown("### 3. Taktikai import és mapping")
+    _fpi_section_header_v113("3. Import taktikai fájlok", "Opcionális PDF / Excel import saját csapatra és ellenfélre. GPS-only módban ez kihagyható.", "tactical")
     st.caption("Opcionális. Ha nincs taktikai anyag, a GPS-only riport továbbra is teljesen használható.")
 
     with st.expander("📥 Taktikai PDF / Excel feltöltés – saját csapat és ellenfél", expanded=True):
@@ -8325,6 +8412,7 @@ def render_fpi_clean_workspace_v101() -> None:
     """
     _fpi_landing_css_v100()
     _fpi_mapper_contrast_css_v109()
+    user_defaults_clean = _fpi_load_user_defaults_v113()
 
     top1, top2 = st.columns([5, 1.2])
     with top1:
@@ -8347,7 +8435,7 @@ def render_fpi_clean_workspace_v101() -> None:
         if st.button("⚙️ Teljes app", use_container_width=True, key="clean_go_full_app_v101"):
             _fpi_set_page_v100("app")
 
-    st.markdown("### 1. Adatfeltöltés")
+    _fpi_section_header_v113("1. Import GPS", "GPS / terhelési Excel feltöltése, mintaadat vagy sablon letöltése.", "gps")
     up1, up2 = st.columns([2, 1])
     with up1:
         uploaded_clean = st.file_uploader("GPS / terhelési Excel feltöltése", type=["xlsx", "xls"], key="clean_gps_upload_v101")
@@ -8390,7 +8478,7 @@ def render_fpi_clean_workspace_v101() -> None:
             st.error(f"Nem sikerült beolvasni az Excelt: {e}")
             st.stop()
 
-    st.markdown("### 2. Kontextus és szűrők")
+    _fpi_section_header_v113("2. Választók és alapbeállítások", "Meccsnap, ellenfél, referencia, játékmodell és mikrociklus beállításai.", "settings")
     if "clean_mapped_df_override_v105" in st.session_state and isinstance(st.session_state["clean_mapped_df_override_v105"], pd.DataFrame):
         df_clean = st.session_state["clean_mapped_df_override_v105"].copy()
         mapping_clean = st.session_state.get("clean_manual_mapping_v105", {})
@@ -8459,23 +8547,41 @@ def render_fpi_clean_workspace_v101() -> None:
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        opponent_clean = st.text_input("Ellenfél", value=st.session_state.get("fpi_match_opponent_v94", ""), key="clean_opponent_v101")
+        opponent_clean = st.text_input("Ellenfél", value=st.session_state.get("fpi_match_opponent_v94", user_defaults_clean.get("opponent", "")), key="clean_opponent_v101")
     with c2:
         match_date_clean = st.date_input("Meccsnap", value=st.session_state.get("fpi_match_date_v94", pd.Timestamp.today().date()), key="clean_match_date_v101")
     with c3:
-        reference_age_clean = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=0, key="clean_ref_age_v112")
+        reference_age_clean = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=_fpi_idx_v113(FPI_REFERENCE_AGE_OPTIONS_V112, user_defaults_clean.get("reference_age", "Felnőtt"), 0), key="clean_ref_age_v112")
     with c4:
-        reference_level_clean = st.selectbox("Szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=1, key="clean_ref_level_v112")
+        reference_level_clean = st.selectbox("Szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=_fpi_idx_v113(FPI_REFERENCE_LEVEL_OPTIONS_V112, user_defaults_clean.get("reference_level", "NB II"), 1), key="clean_ref_level_v112")
 
     r1, r2, r3 = st.columns(3)
     with r1:
-        reference_position_clean = st.selectbox("Referencia poszt", FPI_REFERENCE_POSITION_OPTIONS_V112, index=4, key="clean_ref_position_v112")
+        reference_position_clean = st.selectbox("Referencia poszt", FPI_REFERENCE_POSITION_OPTIONS_V112, index=_fpi_idx_v113(FPI_REFERENCE_POSITION_OPTIONS_V112, user_defaults_clean.get("reference_position", "Középpályás"), 4), key="clean_ref_position_v112")
     with r2:
-        week_type_clean = st.selectbox("Mi a hét célja?", FPI_COACH_WEEK_OPTIONS_V112, index=1, key="clean_week_type_v112")
+        week_type_clean = st.selectbox("Mi a hét célja?", FPI_COACH_WEEK_OPTIONS_V112, index=_fpi_idx_v113(FPI_COACH_WEEK_OPTIONS_V112, user_defaults_clean.get("coach_week_type", "Fenntartó hét"), 1), key="clean_week_type_v112")
     with r3:
-        playmodel_profile_clean = st.selectbox("Játékmodell profil", FPI_PLAYMODEL_OPTIONS_V112, index=4, key="clean_playmodel_profile_v112")
+        playmodel_profile_clean = st.selectbox("Játékmodell profil", FPI_PLAYMODEL_OPTIONS_V112, index=_fpi_idx_v113(FPI_PLAYMODEL_OPTIONS_V112, user_defaults_clean.get("playmodel_profile", "Kiegyensúlyozott"), 4), key="clean_playmodel_profile_v112")
     ref_profile_clean = _fpi_build_reference_profile_v112(reference_age_clean, reference_level_clean, reference_position_clean, playmodel_profile_clean)["label"]
     st.caption(f"Aktív referencia profil: {ref_profile_clean}")
+    st.markdown('<div class="fpi-settings-panel"><b>Menthető alapbeállítás</b><br>Az alábbi gomb a belépési e-mailhez / azonosítóhoz menti a választókat, így a következő indításkor ezek töltődnek be.</div>', unsafe_allow_html=True)
+    if st.button("💾 Alapbeállítás mentése ehhez a belépéshez", use_container_width=True, key="clean_save_defaults_v113"):
+        ok_save, msg_save = _fpi_save_user_defaults_v113({
+            "opponent": opponent_clean,
+            "reference_age": reference_age_clean,
+            "reference_level": reference_level_clean,
+            "reference_position": reference_position_clean,
+            "coach_week_type": week_type_clean,
+            "playmodel_profile": playmodel_profile_clean,
+            "cycle_days": int(st.session_state.get("clean_cycle_days_v112", 7)),
+            "training_days": int(st.session_state.get("clean_n_train_v112", 4)),
+            "rest_days": int(st.session_state.get("clean_n_rest_v112", 1)),
+            "md_day": st.session_state.get("clean_md_match_day_v112", "MD"),
+        })
+        if ok_save:
+            st.success("Alapbeállítás mentve ehhez a belépési azonosítóhoz.")
+        else:
+            st.warning(f"Nem sikerült menteni: {msg_save}")
 
     match_week_clean = _fpi_iso_week_from_date_v94(match_date_clean)
     default_idx_clean = weeks_clean.index(match_week_clean) if match_week_clean in weeks_clean else (len(weeks_clean)-1 if weeks_clean else 0)
@@ -8500,13 +8606,13 @@ def render_fpi_clean_workspace_v101() -> None:
     # Coach context for references and microcycle V2
     mc1, mc2, mc3 = st.columns(3)
     with mc1:
-        cycle_days_clean = st.number_input("Hány napos a ciklus?", min_value=3, max_value=10, value=7, step=1, key="clean_cycle_days_v112")
+        cycle_days_clean = st.number_input("Hány napos a ciklus?", min_value=3, max_value=10, value=int(user_defaults_clean.get("cycle_days", 7)), step=1, key="clean_cycle_days_v112")
     with mc2:
-        n_train_clean = st.number_input("Hány edzés lesz?", min_value=0, max_value=6, value=4, step=1, key="clean_n_train_v112")
+        n_train_clean = st.number_input("Hány edzés lesz?", min_value=0, max_value=6, value=int(user_defaults_clean.get("training_days", 4)), step=1, key="clean_n_train_v112")
     with mc3:
-        n_rest_clean = st.number_input("Hány pihenőnap?", min_value=0, max_value=5, value=1, step=1, key="clean_n_rest_v112")
+        n_rest_clean = st.number_input("Hány pihenőnap?", min_value=0, max_value=5, value=int(user_defaults_clean.get("rest_days", 1)), step=1, key="clean_n_rest_v112")
     md_day_options_clean = [f"MD-{i}" for i in range(int(cycle_days_clean)-1, 0, -1)] + ["MD"]
-    md_match_day_clean = st.selectbox("Melyik nap az MD?", md_day_options_clean, index=len(md_day_options_clean)-1, key="clean_md_match_day_v112")
+    md_match_day_clean = st.selectbox("Melyik nap az MD?", md_day_options_clean, index=_fpi_idx_v113(md_day_options_clean, user_defaults_clean.get("md_day", "MD"), len(md_day_options_clean)-1), key="clean_md_match_day_v112")
     session_plan_clean = []
     total_slots_clean = int(n_train_clean) + int(n_rest_clean) + (1 if md_match_day_clean == "MD" else 0)
     total_slots_clean = max(1, min(int(cycle_days_clean), total_slots_clean))
