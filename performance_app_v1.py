@@ -1020,6 +1020,156 @@ def _fpi_apply_v115_light_ui_patch() -> None:
 
 _fpi_apply_v115_light_ui_patch()
 
+# =========================================================
+# V117 - Final readable UI controls patch
+# =========================================================
+def _fpi_apply_v117_control_readability_patch() -> None:
+    """Végső kontrasztjavítás: minden gomb, lenyíló, léptető, popover olvasható.
+    A korábbi sötét gomb/CSS szabályokat ez felülírja.
+    """
+    st.markdown(
+        """
+        <style>
+        :root {
+            --fpi-control-bg: #ffffff;
+            --fpi-control-text: #0f172a;
+            --fpi-control-border: #cbd5e1;
+            --fpi-primary: #0f766e;
+            --fpi-primary-2: #2563eb;
+            --fpi-soft-blue: #e0f2fe;
+            --fpi-soft-green: #ecfdf5;
+        }
+
+        /* A Streamlit/BaseWeb gyakran inline style-t ad a select és number_input elemeknek.
+           Ezért több szelektorral, végső sorrendben írjuk felül. */
+        div[data-baseweb="select"],
+        div[data-baseweb="select"] > div,
+        div[data-baseweb="select"] div,
+        div[data-baseweb="select"] span,
+        div[data-baseweb="select"] input,
+        div[data-baseweb="select"] svg,
+        div[data-baseweb="input"],
+        div[data-baseweb="input"] > div,
+        div[data-baseweb="input"] div,
+        div[data-baseweb="input"] input,
+        [data-testid="stNumberInput"] div,
+        [data-testid="stNumberInput"] input,
+        [data-testid="stTextInput"] div,
+        [data-testid="stTextInput"] input,
+        [data-testid="stDateInput"] div,
+        [data-testid="stDateInput"] input {
+            background-color: var(--fpi-control-bg) !important;
+            color: var(--fpi-control-text) !important;
+            -webkit-text-fill-color: var(--fpi-control-text) !important;
+            fill: var(--fpi-control-text) !important;
+            opacity: 1 !important;
+            border-color: var(--fpi-control-border) !important;
+        }
+
+        /* Lenyitott dropdown menü */
+        div[data-baseweb="popover"],
+        div[data-baseweb="popover"] div,
+        div[data-baseweb="popover"] span,
+        div[data-baseweb="popover"] ul,
+        div[data-baseweb="popover"] li,
+        div[data-baseweb="menu"],
+        div[data-baseweb="menu"] div,
+        div[data-baseweb="menu"] span,
+        ul[role="listbox"],
+        ul[role="listbox"] *,
+        li[role="option"],
+        li[role="option"] *,
+        div[role="option"],
+        div[role="option"] * {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            fill: #0f172a !important;
+            opacity: 1 !important;
+        }
+        li[role="option"]:hover,
+        div[role="option"]:hover,
+        li[role="option"][aria-selected="true"],
+        div[role="option"][aria-selected="true"] {
+            background-color: #dbeafe !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+        }
+
+        /* Number input léptető gombok */
+        [data-testid="stNumberInput"] button,
+        [data-testid="stNumberInput"] button *,
+        div[data-baseweb="input"] button,
+        div[data-baseweb="input"] button *,
+        button[aria-label="Increment"], button[aria-label="Increment"] *,
+        button[aria-label="Decrement"], button[aria-label="Decrement"] *,
+        button[aria-label="Növelés"], button[aria-label="Növelés"] *,
+        button[aria-label="Csökkentés"], button[aria-label="Csökkentés"] * {
+            background: #e2e8f0 !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            fill: #0f172a !important;
+            border-color: #cbd5e1 !important;
+            opacity: 1 !important;
+        }
+
+        /* Általános gombok: ne maradjanak fekete, szöveg nélküli téglalapok. */
+        .stButton > button,
+        .stButton > button *,
+        button[kind="secondary"],
+        button[kind="secondary"] *,
+        button[data-testid="baseButton-secondary"],
+        button[data-testid="baseButton-secondary"] * {
+            background: linear-gradient(135deg, var(--fpi-primary), var(--fpi-primary-2)) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            fill: #ffffff !important;
+            border: 0 !important;
+            border-radius: 16px !important;
+            font-weight: 900 !important;
+            opacity: 1 !important;
+        }
+        .stButton > button:hover,
+        button[data-testid="baseButton-secondary"]:hover {
+            filter: brightness(1.05) !important;
+            transform: translateY(-1px);
+        }
+
+        /* File uploader gomb marad olvasható. */
+        [data-testid="stFileUploader"] button,
+        [data-testid="stFileUploader"] button * {
+            background: linear-gradient(135deg, #2563eb, #0f766e) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            fill: #ffffff !important;
+        }
+
+        /* Sötét maradék panelek kényszerített világosítása. */
+        div[style*="background:#0f172a"], div[style*="background: #0f172a"],
+        div[style*="background:#111827"], div[style*="background: #111827"],
+        div[style*="background:#020617"], div[style*="background: #020617"],
+        div[style*="background:rgba(15,23,42"], div[style*="background: rgba(15,23,42"],
+        div[style*="background:rgba(17,24,39"], div[style*="background: rgba(17,24,39"] {
+            background: linear-gradient(135deg, #ffffff, #f0f9ff) !important;
+            color: #0f172a !important;
+            border-color: #dbeafe !important;
+        }
+        div[style*="background:#0f172a"] *, div[style*="background: #0f172a"] *,
+        div[style*="background:#111827"] *, div[style*="background: #111827"] *,
+        div[style*="background:#020617"] *, div[style*="background: #020617"] *,
+        div[style*="background:rgba(15,23,42"] *, div[style*="background: rgba(15,23,42"] *,
+        div[style*="background:rgba(17,24,39"] *, div[style*="background: rgba(17,24,39"] * {
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            opacity: 1 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+_fpi_apply_v117_control_readability_patch()
+
 # -----------------------------------------------------------------------------
 # Oszlopmapping
 # -----------------------------------------------------------------------------
@@ -8461,9 +8611,35 @@ def _fpi_settings_path_v113() -> Path:
 
 
 def _fpi_load_user_defaults_v113() -> Dict[str, object]:
+    """Belépési azonosítóhoz kötött alapbeállítás betöltése.
+
+    Prioritás:
+    1) Supabase tábla: fpi_user_defaults, ha létezik és a Supabase secret be van állítva.
+    2) Lokális JSON fallback: .fpi_user_settings/fpi_defaults_<email>.json
+
+    A fallback fontos Streamlit Community Cloud / lokális teszt esetén is.
+    """
+    user_key = _fpi_current_user_key_v113()
+
+    client = get_supabase_client() if "get_supabase_client" in globals() else None
+    if client is not None:
+        try:
+            resp = client.table("fpi_user_defaults").select("settings").eq("user_key", user_key).limit(1).execute()
+            data = getattr(resp, "data", None) or []
+            if data:
+                settings = data[0].get("settings") or {}
+                if isinstance(settings, str):
+                    settings = json.loads(settings)
+                if isinstance(settings, dict):
+                    st.session_state["fpi_defaults_storage_v117"] = "Supabase"
+                    return settings
+        except Exception as exc:
+            st.session_state["fpi_defaults_storage_warning_v117"] = f"Supabase alapbeállítás betöltés nem elérhető, lokális fallback: {exc}"
+
     path = _fpi_settings_path_v113()
     try:
         if path.exists():
+            st.session_state["fpi_defaults_storage_v117"] = f"lokális JSON: {path}"
             return json.loads(path.read_text(encoding="utf-8")) or {}
     except Exception:
         return {}
@@ -8471,12 +8647,33 @@ def _fpi_load_user_defaults_v113() -> Dict[str, object]:
 
 
 def _fpi_save_user_defaults_v113(payload: Dict[str, object]) -> Tuple[bool, str]:
+    """Alapbeállítás mentése.
+
+    Ha Supabase elérhető és van fpi_user_defaults tábla, oda ment.
+    Ha nincs, automatikusan lokális JSON fájlba ment.
+    """
+    user_key = _fpi_current_user_key_v113()
+    payload = dict(payload or {})
+    payload["saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload["user_key"] = user_key
+
+    client = get_supabase_client() if "get_supabase_client" in globals() else None
+    if client is not None:
+        try:
+            client.table("fpi_user_defaults").upsert({
+                "user_key": user_key,
+                "settings": payload,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            }, on_conflict="user_key").execute()
+            st.session_state["fpi_defaults_storage_v117"] = "Supabase"
+            return True, "Supabase"
+        except Exception as exc:
+            st.session_state["fpi_defaults_storage_warning_v117"] = f"Supabase mentés nem sikerült, lokális JSON fallback: {exc}"
+
     path = _fpi_settings_path_v113()
     try:
-        payload = dict(payload or {})
-        payload["saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        payload["user_key"] = _fpi_current_user_key_v113()
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        st.session_state["fpi_defaults_storage_v117"] = f"lokális JSON: {path}"
         return True, str(path)
     except Exception as e:
         return False, str(e)
@@ -8867,6 +9064,10 @@ def render_fpi_clean_workspace_v101() -> None:
     ref_profile_clean = f"{reference_age_clean} / {reference_level_clean} / játékosonkénti poszt / {playmodel_profile_clean}"
     st.caption(f"Aktív referencia: {ref_profile_clean}. A posztot az app játékosonként a Poszt/Position oszlopból veszi; ha nincs poszt, mezőnyátlaggal számol.")
     st.markdown('<div class="fpi-settings-panel"><b>Menthető alapbeállítás</b><br>Az alábbi gomb a belépési e-mailhez / azonosítóhoz menti a választókat, így a következő indításkor ezek töltődnek be.</div>', unsafe_allow_html=True)
+    _storage_note = st.session_state.get("fpi_defaults_storage_v117", "még nincs mentett alapbeállítás")
+    st.caption(f"Mentés helye: {_storage_note}. A mentés gombnyomásra történik, nem automatikusan.")
+    if st.session_state.get("fpi_defaults_storage_warning_v117"):
+        st.caption(st.session_state.get("fpi_defaults_storage_warning_v117"))
     if st.button("💾 Alapbeállítás mentése ehhez a belépéshez", use_container_width=True, key="clean_save_defaults_v113"):
         ok_save, msg_save = _fpi_save_user_defaults_v113({
             "opponent": opponent_clean,
