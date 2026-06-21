@@ -974,6 +974,45 @@ def _fpi_apply_v115_light_ui_patch() -> None:
             border: 1px solid var(--fpi-line) !important;
         }
         div[data-baseweb="tab-border"] { background-color:#0f766e !important; }
+
+        /* V116: BaseWeb legördülők + léptetők végső olvashatósági javítása */
+        div[data-baseweb="popover"], div[data-baseweb="popover"] *,
+        div[data-baseweb="menu"], div[data-baseweb="menu"] *,
+        ul[role="listbox"], ul[role="listbox"] *,
+        li[role="option"], li[role="option"] *,
+        div[role="option"], div[role="option"] * {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            opacity: 1 !important;
+        }
+        li[role="option"]:hover, div[role="option"]:hover,
+        li[role="option"][aria-selected="true"], div[role="option"][aria-selected="true"] {
+            background: #e0f2fe !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+        }
+        div[data-baseweb="select"] > div,
+        div[data-baseweb="select"] input,
+        div[data-baseweb="select"] span,
+        div[data-baseweb="select"] svg,
+        div[data-baseweb="input"] > div,
+        div[data-baseweb="input"] input {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            fill: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            opacity: 1 !important;
+        }
+        div[data-baseweb="input"] button,
+        div[data-baseweb="input"] button *,
+        button[aria-label="Increment"], button[aria-label="Decrement"],
+        button[aria-label="Növelés"], button[aria-label="Csökkentés"] {
+            background: #e2e8f0 !important;
+            color: #0f172a !important;
+            fill: #0f172a !important;
+            border-color: #cbd5e1 !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -7293,6 +7332,90 @@ def _fpi_build_reference_profile_v112(age: str, level: str, position: str, playm
     label = f"{age} / {level} / {position} / {playmodel}"
     return {"label": label, "age": age, "level": level, "position": position, "playmodel": playmodel, "ranges": ranges}
 
+
+def _fpi_position_to_reference_position_v116(value: object, is_goalkeeper: bool = False) -> str:
+    """Nyers poszt / position_group -> FPI referencia poszt.
+    Ha van kapus jelölés, mindig Kapus. Ha nincs poszt, mezőnyátlagként középpályás fallbacket használunk,
+    de a riportban jelezzük, hogy játékosposzt-alapú súlyozás csak posztoszlop esetén pontos.
+    """
+    if is_goalkeeper:
+        return "Kapus"
+    txt = _norm_mapping_text(value)
+    if not txt:
+        return "Középpályás"
+    if any(x in txt for x in ["kapus", "goalkeeper", "keeper", "gk"]):
+        return "Kapus"
+    if any(x in txt for x in ["szelso hatved", "fullback", "wing back", "wingback", "fb", "rb", "lb"]):
+        return "Szélső hátvéd"
+    if any(x in txt for x in ["kozep hatved", "kozephatved", "centre back", "center back", "central defender", "cb"]):
+        return "Középhátvéd"
+    if any(x in txt for x in ["vedekezo kozeppalyas", "defensive mid", "dm", "cdm", "six", "6"]):
+        return "Védekező középpályás"
+    if any(x in txt for x in ["tamado kozeppalyas", "attacking mid", "am", "cam", "10"]):
+        return "Támadó középpályás"
+    if any(x in txt for x in ["szelso", "winger", "wide", "lw", "rw"]):
+        return "Szélső"
+    if any(x in txt for x in ["csatar", "striker", "forward", "fw", "st", "9"]):
+        return "Csatár"
+    if any(x in txt for x in ["kozeppalyas", "midfield", "cm", "8"]):
+        return "Középpályás"
+    # position_group régi címkék
+    if "ved" in txt and "kozep" in txt:
+        return "Középhátvéd"
+    if "kozeppalya" in txt:
+        return "Középpályás"
+    return "Középpályás"
+
+
+def _fpi_reference_profile_for_player_v116(row: pd.Series, age: str, level: str, playmodel: str) -> Dict[str, object]:
+    pos_source = row.get("position", row.get("position_group", ""))
+    ref_pos = _fpi_position_to_reference_position_v116(pos_source, bool(row.get("is_goalkeeper", False)))
+    return _fpi_build_reference_profile_v112(age, level, ref_pos, playmodel)
+
+
+def _fpi_composition_reference_ranges_v116(df: pd.DataFrame, week: str, metric: str) -> Tuple[str, str, float, float, float, float, str]:
+    """Csapat referencia játékosösszetétel alapján.
+    A korosztály + bajnoki szint + játékmodell globális, a poszt játékosonként jön a Poszt oszlopból.
+    Kapusok kisebb súlyt kapnak a csapatszintű sebesség/HSR/sprint benchmarkban.
+    """
+    ctx = _fpi_get_coach_context_v97()
+    age = str(ctx.get("reference_age") or "Felnőtt")
+    level = str(ctx.get("reference_level") or "NB II")
+    playmodel = str(ctx.get("playmodel_profile") or ctx.get("selected_playstyle") or "Kiegyensúlyozott")
+    data = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    if not data.empty and "week" in data.columns and week:
+        data = data[data["week"].astype(str) == str(week)]
+    if data.empty:
+        prof = _fpi_build_reference_profile_v112(age, level, "Középpályás", playmodel)
+        a,b,c,d,e,f = prof["ranges"].get(metric, FPI_REFERENCE_BASE_RANGES_V112.get(metric, ("n.a.", "n.a.", 0, 9999, 0, 9999)))
+        return a,b,c,d,e,f, f"{age} / {level} / játékosposzt nincs adat / {playmodel}"
+    if "player_name" in data.columns:
+        # egy játékos egyszer számítson, a leggyakoribb vagy utolsó posztjával
+        sort_cols = [c for c in ["player_name", "position", "position_group", "is_goalkeeper"] if c in data.columns]
+        players_df = data[sort_cols].drop_duplicates(subset=["player_name"], keep="last") if sort_cols else data.head(0)
+    else:
+        players_df = data.copy()
+    if players_df.empty:
+        prof = _fpi_build_reference_profile_v112(age, level, "Középpályás", playmodel)
+        a,b,c,d,e,f = prof["ranges"].get(metric, FPI_REFERENCE_BASE_RANGES_V112.get(metric, ("n.a.", "n.a.", 0, 9999, 0, 9999)))
+        return a,b,c,d,e,f, f"{age} / {level} / mezőnyátlag / {playmodel}"
+    vals = []
+    labels = []
+    for _, row in players_df.iterrows():
+        pos = _fpi_position_to_reference_position_v116(row.get("position", row.get("position_group", "")), bool(row.get("is_goalkeeper", False)))
+        prof = _fpi_build_reference_profile_v112(age, level, pos, playmodel)
+        rng = prof["ranges"].get(metric, FPI_REFERENCE_BASE_RANGES_V112.get(metric, ("n.a.", "n.a.", 0, 9999, 0, 9999)))
+        # Kapus kisebb súllyal a csapatszintű benchmarkban, de nem tűnik el.
+        w = 0.35 if pos == "Kapus" and metric in ["hsr_distance", "sprint_distance", "sprints", "total_distance"] else 1.0
+        vals.append((rng[2], rng[3], rng[4], rng[5], w))
+        labels.append(pos)
+    sw = sum(v[4] for v in vals) or 1.0
+    low = int(round(sum(v[0]*v[4] for v in vals)/sw)); high = int(round(sum(v[1]*v[4] for v in vals)/sw))
+    avg_low = int(round(sum(v[2]*v[4] for v in vals)/sw)); avg_high = int(round(sum(v[3]*v[4] for v in vals)/sw))
+    from collections import Counter
+    comp = ", ".join(f"{k}:{v}" for k,v in Counter(labels).most_common(4))
+    return f"{low}–{high}%", f"{avg_low}–{avg_high}%", low, high, avg_low, avg_high, f"{age} / {level} / játékosposzt-súlyozott ({comp}) / {playmodel}"
+
 # V9.7 régi profilok megtartva kompatibilitás miatt, de a V2 motor már a fenti négy komponensből épít profilt.
 FPI_REFERENCE_PROFILES_V97 = {
     "Felnőtt NB2": _fpi_build_reference_profile_v112("Felnőtt", "NB II", "Középpályás", "Kiegyensúlyozott"),
@@ -7337,11 +7460,10 @@ def _fpi_ratio_status_v97(value: Optional[float], low: float, high: float) -> st
     return _fpi_ratio_status_v93(value, low, high)
 
 def _fpi_match_ratio_reference_df_v97(df: pd.DataFrame, week: str) -> pd.DataFrame:
-    # V9.8 fix: base calculation must call the original V9.3 engine, not itself.
+    # V11.6: a korosztály/szint/játékmodell globális, a referencia poszt játékosonként jön a Poszt oszlopból.
     base = _fpi_match_ratio_reference_df_v93(df, week)
     if base is None or base.empty:
         return base
-    # profile-specific overrides
     metric_by_label = {v["label"]: k for k, v in FPI_NB2_ADULT_REFERENCE_RANGES_V93.items()}
     metric_by_label.update({"Load": "training_load", "Terhelési pont": "training_load"})
     rows = []
@@ -7349,26 +7471,26 @@ def _fpi_match_ratio_reference_df_v97(df: pd.DataFrame, week: str) -> pd.DataFra
         rr = r.to_dict()
         metric = metric_by_label.get(str(r.get("Mutató", "")))
         if metric:
-            weekly_ref, avg_ref, low, high, avg_low, avg_high = _fpi_reference_ranges_for_metric_v97(metric)
+            weekly_ref, avg_ref, low, high, avg_low, avg_high, ref_label = _fpi_composition_reference_ranges_v116(df, week, metric)
             weekly_pct = r.get("Edzés/heti meccs %")
             avg_pct = r.get("Edzésátlag/meccs %")
             rr["Profil heti ref."] = weekly_ref
             rr["Profil edzésátlag ref."] = avg_ref
             rr["NB2 felnőtt heti ref."] = weekly_ref
             rr["NB2 felnőtt edzésátlag ref."] = avg_ref
-            rr["Referencia profil"] = _fpi_reference_profile_v97().get("label", "Felnőtt NB2")
+            rr["Referencia profil"] = ref_label
             status_w = _fpi_ratio_status_v97(weekly_pct, low, high)
             status_a = _fpi_ratio_status_v97(avg_pct, avg_low, avg_high)
             if weekly_pct is None or pd.isna(weekly_pct):
                 rr["Értékelés"] = "Nincs meccs referencia vagy nincs értelmezhető adat."
             elif status_w == "alacsony" and metric in ["hsr_distance", "sprint_distance", "sprints"]:
-                rr["Értékelés"] = f"A választott profilhoz képest alacsony lehet a heti sebesség/sprint inger. Profil: {rr['Referencia profil']}."
+                rr["Értékelés"] = f"A játékosposzt-súlyozott profilhoz képest alacsony lehet a heti sebesség/sprint inger. Profil: {ref_label}."
             elif status_w == "magas":
-                rr["Értékelés"] = f"A választott profilhoz képest magas heti összterhelés; ellenőrizd a napokra bontást. Profil: {rr['Referencia profil']}."
+                rr["Értékelés"] = f"A játékosposzt-súlyozott profilhoz képest magas heti összterhelés; ellenőrizd a napokra bontást. Profil: {ref_label}."
             elif status_w == "célzónában" and status_a == "célzónában":
-                rr["Értékelés"] = f"A heti összeg és az edzésátlag is a választott profil referenciazónájában van. Profil: {rr['Referencia profil']}."
+                rr["Értékelés"] = f"A heti összeg és az edzésátlag is a játékosposzt-súlyozott referenciazónában van. Profil: {ref_label}."
             else:
-                rr["Értékelés"] = f"Heti: {status_w}, edzésátlag: {status_a}. Profil: {rr['Referencia profil']}."
+                rr["Értékelés"] = f"Heti: {status_w}, edzésátlag: {status_a}. Profil: {ref_label}."
         rows.append(rr)
     return pd.DataFrame(rows)
 
@@ -8718,6 +8840,7 @@ def render_fpi_clean_workspace_v101() -> None:
                 _fpi_set_page_v100("app")
 
     df_clean = add_position_group(df_clean)
+    df_clean = render_keeper_controls_and_apply(df_clean)
     if df_clean.empty or "week" not in df_clean.columns:
         st.warning("Nincs elemzésre alkalmas hétadat.")
         st.stop()
@@ -8736,22 +8859,19 @@ def render_fpi_clean_workspace_v101() -> None:
     with c4:
         reference_level_clean = st.selectbox("Szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=_fpi_idx_v113(FPI_REFERENCE_LEVEL_OPTIONS_V112, user_defaults_clean.get("reference_level", "NB II"), 1), key="clean_ref_level_v112")
 
-    r1, r2, r3 = st.columns(3)
+    r1, r2 = st.columns(2)
     with r1:
-        reference_position_clean = st.selectbox("Referencia poszt", FPI_REFERENCE_POSITION_OPTIONS_V112, index=_fpi_idx_v113(FPI_REFERENCE_POSITION_OPTIONS_V112, user_defaults_clean.get("reference_position", "Középpályás"), 4), key="clean_ref_position_v112")
-    with r2:
         week_type_clean = st.selectbox("Mi a hét célja?", FPI_COACH_WEEK_OPTIONS_V112, index=_fpi_idx_v113(FPI_COACH_WEEK_OPTIONS_V112, user_defaults_clean.get("coach_week_type", "Fenntartó hét"), 1), key="clean_week_type_v112")
-    with r3:
+    with r2:
         playmodel_profile_clean = st.selectbox("Játékmodell profil", FPI_PLAYMODEL_OPTIONS_V112, index=_fpi_idx_v113(FPI_PLAYMODEL_OPTIONS_V112, user_defaults_clean.get("playmodel_profile", "Kiegyensúlyozott"), 4), key="clean_playmodel_profile_v112")
-    ref_profile_clean = _fpi_build_reference_profile_v112(reference_age_clean, reference_level_clean, reference_position_clean, playmodel_profile_clean)["label"]
-    st.caption(f"Aktív referencia profil: {ref_profile_clean}")
+    ref_profile_clean = f"{reference_age_clean} / {reference_level_clean} / játékosonkénti poszt / {playmodel_profile_clean}"
+    st.caption(f"Aktív referencia: {ref_profile_clean}. A posztot az app játékosonként a Poszt/Position oszlopból veszi; ha nincs poszt, mezőnyátlaggal számol.")
     st.markdown('<div class="fpi-settings-panel"><b>Menthető alapbeállítás</b><br>Az alábbi gomb a belépési e-mailhez / azonosítóhoz menti a választókat, így a következő indításkor ezek töltődnek be.</div>', unsafe_allow_html=True)
     if st.button("💾 Alapbeállítás mentése ehhez a belépéshez", use_container_width=True, key="clean_save_defaults_v113"):
         ok_save, msg_save = _fpi_save_user_defaults_v113({
             "opponent": opponent_clean,
             "reference_age": reference_age_clean,
             "reference_level": reference_level_clean,
-            "reference_position": reference_position_clean,
             "coach_week_type": week_type_clean,
             "playmodel_profile": playmodel_profile_clean,
             "cycle_days": int(st.session_state.get("clean_cycle_days_v112", 7)),
@@ -8815,7 +8935,6 @@ def render_fpi_clean_workspace_v101() -> None:
         "reference_profile": ref_profile_clean,
         "reference_age": reference_age_clean,
         "reference_level": reference_level_clean,
-        "reference_position": reference_position_clean,
         "playmodel_profile": playmodel_profile_clean,
         "selected_playstyle": selected_playstyle_clean,
         "coach_week_type": week_type_clean,
@@ -9014,11 +9133,10 @@ with st.sidebar:
     st.header("Edzői kontextus / referencia V2")
     reference_age_v97 = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=0, key="app_ref_age_v112")
     reference_level_v97 = st.selectbox("Szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=1, key="app_ref_level_v112")
-    reference_position_v97 = st.selectbox("Referencia poszt", FPI_REFERENCE_POSITION_OPTIONS_V112, index=4, key="app_ref_position_v112")
     coach_week_type_v97 = st.selectbox("Mi a hét célja?", FPI_COACH_WEEK_OPTIONS_V112, index=1, key="app_week_type_v112")
     playmodel_profile_v97 = st.selectbox("Játékmodell profil", FPI_PLAYMODEL_OPTIONS_V112, index=4, key="app_playmodel_profile_v112")
-    ref_profile_v97 = _fpi_build_reference_profile_v112(reference_age_v97, reference_level_v97, reference_position_v97, playmodel_profile_v97)["label"]
-    st.caption(f"Aktív referencia profil: {ref_profile_v97}")
+    ref_profile_v97 = f"{reference_age_v97} / {reference_level_v97} / játékosonkénti poszt / {playmodel_profile_v97}"
+    st.caption(f"Aktív referencia: {ref_profile_v97}. Nincs globális referencia poszt; a poszt játékosonként kerül értelmezésre.")
 
     cycle_days_v97 = st.number_input("Hány napos a ciklus?", min_value=3, max_value=10, value=7, step=1, key="app_cycle_days_v112")
     n_train_v97 = st.number_input("Hány edzés lesz?", min_value=0, max_value=6, value=4, step=1, key="app_n_train_v112")
@@ -9042,7 +9160,6 @@ with st.sidebar:
         "reference_profile": ref_profile_v97,
         "reference_age": reference_age_v97,
         "reference_level": reference_level_v97,
-        "reference_position": reference_position_v97,
         "playmodel_profile": playmodel_profile_v97,
         "coach_week_type": coach_week_type_v97,
         "cycle_days": int(cycle_days_v97),
@@ -9269,7 +9386,7 @@ def render_methodology_tab() -> None:
 
     st.markdown("### 7. Benchmarkok és readiness")
     st.write(
-        "A benchmarkok jelenleg általános referenciaértékek. Későbbi verzióban korosztály, szint, poszt és "
+        "A benchmarkok korosztály, szint, játékmodell és játékosonkénti poszt alapján aktualizálódnak. A "
         "játékmodell szerint finomíthatók. A readiness és risk pontszámok döntéstámogatók, nem orvosi diagnózisok."
     )
 
@@ -12179,9 +12296,15 @@ with tab_risk:
     else:
         render_risk_cards(player_risk_df, limit=8)
         st.markdown("### Kockázati tábla")
-        st.dataframe(player_risk_df, use_container_width=True, hide_index=True)
-        fig = px.bar(player_risk_df.head(20), x="Játékos", y="Kockázati pontszám", color="Kockázati szint", title="Játékos risk score")
-        fig.update_layout(xaxis_title="Játékos", yaxis_title="Kockázati pontszám", xaxis_tickangle=-45, template="plotly_white")
+        risk_show_df = player_risk_df.copy()
+        if "Kockázati pontszám" in risk_show_df.columns:
+            risk_show_df["Értelmezés"] = pd.to_numeric(risk_show_df["Kockázati pontszám"], errors="coerce").apply(
+                lambda x: "Magas: azonnali edzői kontroll" if pd.notna(x) and x >= 70 else ("Közepes: figyelendő" if pd.notna(x) and x >= 40 else "Alacsony: rendben")
+            )
+        risk_cols_v116 = [c for c in ["Játékos", "Szerep", "Típus", "Játékperc", "Kockázati pontszám", "Kockázati szint", "Értelmezés", "Fő okok"] if c in risk_show_df.columns]
+        st.dataframe(risk_show_df[risk_cols_v116] if risk_cols_v116 else risk_show_df, use_container_width=True, hide_index=True)
+        fig = px.bar(player_risk_df.head(20), x="Játékos", y="Kockázati pontszám", title="Játékos risk score")
+        fig.update_layout(xaxis_title="Játékos", yaxis_title="Kockázati pontszám (0–100)", xaxis_tickangle=-45, template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
         st.download_button("⬇️ Játékos risk export CSV", data=player_risk_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"player_risk_{_safe_filename_week(selected_week)}.csv", mime="text/csv", use_container_width=True,
             key="download_button_unique_10",
