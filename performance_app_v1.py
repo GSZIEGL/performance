@@ -9839,6 +9839,91 @@ filtered = df[
     & (df["player_name"].isin(selected_players))
 ]
 
+
+# -----------------------------------------------------------------------------
+# V120 - Empty state + compact table renderer
+# -----------------------------------------------------------------------------
+def fpi_empty_state(title: str, body: str = "", icon: str = "ℹ️") -> None:
+    """Szép, kis helyigényű üres állapot a nagy üres fehér panelek helyett."""
+    st.markdown(
+        f"""
+        <div class="fpi-empty-state-v120">
+            <div class="fpi-empty-icon-v120">{html.escape(str(icon))}</div>
+            <div>
+                <div class="fpi-empty-title-v120">{html.escape(str(title))}</div>
+                <div class="fpi-empty-body-v120">{html.escape(str(body))}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def fpi_compact_table(df_in: pd.DataFrame, max_rows: int = 12) -> None:
+    """Streamlit dataframe helyett HTML table: nem hagy nagy üres komponenst és mindig olvasható."""
+    if df_in is None or not isinstance(df_in, pd.DataFrame) or df_in.empty:
+        fpi_empty_state("Nincs megjeleníthető adat", "A táblázat csak akkor jelenik meg, ha van értelmezhető sor.", "📊")
+        return
+    show_df = df_in.head(max_rows).copy()
+    # túl hosszú cellák rövidítése, hogy ne törje szét a UI-t
+    for c in show_df.columns:
+        show_df[c] = show_df[c].apply(lambda x: "" if pd.isna(x) else str(x)[:120])
+    st.markdown(
+        '<div class="fpi-table-wrap-v120">' + show_df.to_html(index=False, escape=True, classes="fpi-mini-table-v120") + '</div>',
+        unsafe_allow_html=True,
+    )
+
+st.markdown(
+    """
+    <style>
+    .fpi-empty-state-v120 {
+        display:flex;
+        align-items:center;
+        gap:14px;
+        padding:18px 20px;
+        margin:10px 0 14px 0;
+        border-radius:18px;
+        background:linear-gradient(135deg,#f8fafc,#eef6ff);
+        border:1px solid #cbd5e1;
+        box-shadow:0 8px 22px rgba(15,23,42,.06);
+        color:#0f172a !important;
+        min-height:72px;
+    }
+    .fpi-empty-state-v120 * { color:#0f172a !important; }
+    .fpi-empty-icon-v120 {
+        width:42px;height:42px;border-radius:999px;
+        display:flex;align-items:center;justify-content:center;
+        background:#dbeafe;border:1px solid #bfdbfe;
+        font-size:1.25rem;flex:0 0 auto;
+    }
+    .fpi-empty-title-v120 { font-weight:950;font-size:1.02rem;margin-bottom:3px; }
+    .fpi-empty-body-v120 { color:#475569 !important;font-size:.92rem;line-height:1.35; }
+    .fpi-table-wrap-v120 {
+        background:#ffffff;
+        border:1px solid #cbd5e1;
+        border-radius:18px;
+        overflow:hidden;
+        box-shadow:0 8px 22px rgba(15,23,42,.06);
+        margin:10px 0 14px 0;
+    }
+    table.fpi-mini-table-v120 {
+        width:100%;border-collapse:collapse;background:#ffffff;color:#0f172a;font-size:.92rem;
+    }
+    table.fpi-mini-table-v120 th {
+        background:#eaf3ff;color:#0f172a;font-weight:950;text-align:left;padding:10px 12px;border-bottom:1px solid #cbd5e1;
+    }
+    table.fpi-mini-table-v120 td {
+        color:#0f172a;padding:9px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top;
+    }
+    table.fpi-mini-table-v120 tr:nth-child(even) td { background:#f8fafc; }
+    /* Üres streamlit dataframe/plotly konténerek ne uralják a képet */
+    [data-testid="stDataFrame"]:empty,
+    .element-container:has([data-testid="stDataFrame"]:empty) { display:none !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # V9.4 - Hét és meccsnap kontextus ellenőrzése
 match_ctx_v94 = _fpi_selected_match_context_v94()
 week_context_df_v94 = _fpi_week_context_df_v94(df, match_ctx_v94.get("match_date"))
@@ -9851,7 +9936,9 @@ with st.expander("📅 Hét / meccsnap / feltöltött fájlok ellenőrzése", ex
         f"**Meccshét:** {match_ctx_v94.get('match_week')} | **Kiválasztott hét:** {selected_week}"
     )
     if week_context_df_v94 is not None and not week_context_df_v94.empty:
-        st.dataframe(week_context_df_v94, use_container_width=True, hide_index=True)
+        fpi_compact_table(week_context_df_v94, max_rows=8)
+    else:
+        fpi_empty_state("Nincs feltöltött fájlösszefoglaló", "A hétellenőrzéshez előbb tölts fel GPS vagy taktikai fájlt.", "📁")
     if week_warnings_v94:
         for w in week_warnings_v94:
             st.warning(w)
@@ -12429,9 +12516,7 @@ with tab_exec:
         st.metric("Hét", format_week_label(selected_week))
     with mode_col3:
         if not is_pro_mode():
-            st.empty()
-        else:
-            pass
+            st.caption("DEMO mód – Pro exportok korlátozva.")
 
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
@@ -12466,13 +12551,11 @@ with tab_exec:
     with right:
         st.markdown("### Játékos risk gyorsnézet")
         if player_risk_df is not None and not player_risk_df.empty:
-            show_cols = [c for c in ["Játékos", "Kockázati szint", "Risk score", "Fő ok"] if c in player_risk_df.columns]
-            if show_cols:
-                st.dataframe(player_risk_df[show_cols].head(8), use_container_width=True, hide_index=True)
-            else:
-                st.dataframe(player_risk_df.head(8), use_container_width=True, hide_index=True)
+            show_cols = [c for c in ["Játékos", "Kockázati szint", "Risk score", "Kockázati pontszám", "Fő ok", "Fő okok"] if c in player_risk_df.columns]
+            risk_view_v120 = player_risk_df[show_cols].head(8) if show_cols else player_risk_df.head(8)
+            fpi_compact_table(risk_view_v120, max_rows=8)
         else:
-            st.info("Nincs player risk adat.")
+            fpi_empty_state("Nincs játékos risk adat", "A risk gyorsnézet akkor jelenik meg, ha van elég heti játékos- és terhelésadat.", "🛡️")
 
     st.markdown("### Letölthető FPI riportok")
     st.caption("A régi vezetői PDF/Word/Excel/CSV gombok kikerültek. Itt csak a termékriportok maradnak: GPS-only, Executive Summary és Full Report.")
