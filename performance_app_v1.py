@@ -1170,6 +1170,241 @@ def _fpi_apply_v117_control_readability_patch() -> None:
 
 _fpi_apply_v117_control_readability_patch()
 
+# =========================================================
+# V119 - Nuclear light UI override: no black controls/tables
+# =========================================================
+def _fpi_apply_v119_all_light_readable_patch() -> None:
+    """Minden maradék fekete/sötét Streamlit, BaseWeb és inline panel világosítása.
+    Szándékosan a korábbi UI patchek után fut.
+    """
+    st.markdown(
+        """
+        <style>
+        :root {
+            --fpi-bg-main:#f6f9fc;
+            --fpi-surface:#ffffff;
+            --fpi-surface-2:#f1f5f9;
+            --fpi-surface-3:#eaf3ff;
+            --fpi-text:#0f172a;
+            --fpi-text-muted:#334155;
+            --fpi-border:#cbd5e1;
+            --fpi-accent:#0f766e;
+            --fpi-accent-2:#2563eb;
+        }
+
+        html, body, .stApp, [data-testid="stAppViewContainer"], .main {
+            background: linear-gradient(135deg, #f8fafc 0%, #edf6ff 48%, #eefbf5 100%) !important;
+            color: var(--fpi-text) !important;
+        }
+
+        /* Alapszöveg: mindenhol sötét, világos felületen */
+        .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+        .stApp p, .stApp label, .stApp span, .stApp div,
+        [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] * {
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            text-shadow: none !important;
+            opacity: 1 !important;
+        }
+
+        /* Minden régi sötét card/panel világos legyen */
+        .hero-box, .fpi-hero-wow, .fpi-dark-card, .intro-card, .feature-box,
+        .score-card, .priority-card, .insight-card, .export-panel, .premium-kpi,
+        .fpi-mode-card, .fpi-flow-step, .fpi-decision-card, .fpi-glass,
+        .fpi-clean-card, .fpi-summary-card, .fpi-action-card,
+        div[class*="dark"], div[class*="card"], div[class*="panel"] {
+            background: linear-gradient(135deg, #ffffff 0%, #f1f7ff 100%) !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            border-color: var(--fpi-border) !important;
+            box-shadow: 0 10px 28px rgba(15,23,42,.08) !important;
+        }
+        .hero-box *, .fpi-hero-wow *, .fpi-dark-card *, .intro-card *, .feature-box *,
+        .score-card *, .priority-card *, .insight-card *, .export-panel *, .premium-kpi *,
+        .fpi-mode-card *, .fpi-flow-step *, .fpi-decision-card *, .fpi-glass *,
+        .fpi-clean-card *, .fpi-summary-card *, .fpi-action-card * {
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            fill: var(--fpi-text) !important;
+        }
+
+        /* Inline style-ból érkező fekete/sötét hátterek felülírása */
+        div[style*="background:#0"], div[style*="background: #0"],
+        div[style*="background:#1"], div[style*="background: #1"],
+        div[style*="background:#2"], div[style*="background: #2"],
+        div[style*="background-color:#0"], div[style*="background-color: #0"],
+        div[style*="background-color:#1"], div[style*="background-color: #1"],
+        div[style*="background-color:#2"], div[style*="background-color: #2"],
+        div[style*="rgba(15,23,42"], div[style*="rgba(15, 23, 42"],
+        div[style*="rgba(17,24,39"], div[style*="rgba(17, 24, 39"],
+        div[style*="rgba(2,6,23"], div[style*="rgba(2, 6, 23"] {
+            background: linear-gradient(135deg, #ffffff 0%, #eef6ff 100%) !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            border-color: var(--fpi-border) !important;
+        }
+        div[style*="background:#0"] *, div[style*="background: #0"] *,
+        div[style*="background:#1"] *, div[style*="background: #1"] *,
+        div[style*="background:#2"] *, div[style*="background: #2"] *,
+        div[style*="background-color:#0"] *, div[style*="background-color: #0"] *,
+        div[style*="background-color:#1"] *, div[style*="background-color: #1"] *,
+        div[style*="background-color:#2"] *, div[style*="background-color: #2"] *,
+        div[style*="rgba(15,23,42"] *, div[style*="rgba(15, 23, 42"] *,
+        div[style*="rgba(17,24,39"] *, div[style*="rgba(17, 24, 39"] *,
+        div[style*="rgba(2,6,23"] *, div[style*="rgba(2, 6, 23"] * {
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            fill: var(--fpi-text) !important;
+        }
+
+        /* Selectbox, multiselect, dropdown, nyitott lista */
+        [data-baseweb="select"], [data-baseweb="select"] *,
+        [data-baseweb="popover"], [data-baseweb="popover"] *,
+        [data-baseweb="menu"], [data-baseweb="menu"] *,
+        [data-baseweb="option"], [data-baseweb="option"] *,
+        [role="listbox"], [role="listbox"] *,
+        [role="option"], [role="option"] *,
+        [role="combobox"], [role="combobox"] * {
+            background-color: #ffffff !important;
+            background-image: none !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            fill: var(--fpi-text) !important;
+            border-color: var(--fpi-border) !important;
+            opacity: 1 !important;
+        }
+        [data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"] {
+            border: 1px solid var(--fpi-border) !important;
+            box-shadow: 0 18px 40px rgba(15,23,42,.16) !important;
+            border-radius: 14px !important;
+        }
+        [role="option"]:hover, [role="option"][aria-selected="true"],
+        [data-baseweb="option"]:hover {
+            background-color: #dbeafe !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+        }
+
+        /* Inputok, dátum, szám, léptető */
+        input, textarea,
+        [data-baseweb="input"], [data-baseweb="input"] *,
+        [data-baseweb="textarea"], [data-baseweb="textarea"] *,
+        [data-testid="stTextInput"], [data-testid="stTextInput"] *,
+        [data-testid="stDateInput"], [data-testid="stDateInput"] *,
+        [data-testid="stNumberInput"], [data-testid="stNumberInput"] *,
+        [data-testid="stTimeInput"], [data-testid="stTimeInput"] * {
+            background-color: #ffffff !important;
+            background-image: none !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            fill: var(--fpi-text) !important;
+            border-color: var(--fpi-border) !important;
+            opacity: 1 !important;
+        }
+        [data-testid="stNumberInput"] button, [data-testid="stNumberInput"] button *,
+        button[aria-label*="Increment"], button[aria-label*="Increment"] *,
+        button[aria-label*="Decrement"], button[aria-label*="Decrement"] *,
+        button[aria-label*="Növel"], button[aria-label*="Növel"] *,
+        button[aria-label*="Csökk"], button[aria-label*="Csökk"] * {
+            background: #e2e8f0 !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            fill: var(--fpi-text) !important;
+            border: 1px solid var(--fpi-border) !important;
+        }
+
+        /* Gombok: sötét helyett szürke/kékes, olvasható betűvel */
+        .stButton > button, .stButton > button *,
+        button[data-testid^="baseButton"], button[data-testid^="baseButton"] *,
+        button[kind], button[kind] * {
+            background: linear-gradient(135deg, #e2e8f0, #dbeafe) !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            fill: var(--fpi-text) !important;
+            border: 1px solid #b6c8dc !important;
+            border-radius: 16px !important;
+            font-weight: 900 !important;
+            opacity: 1 !important;
+            box-shadow: 0 8px 18px rgba(15,23,42,.08) !important;
+        }
+        .stButton > button:hover, button[data-testid^="baseButton"]:hover, button[kind]:hover {
+            background: linear-gradient(135deg, #cbd5e1, #bfdbfe) !important;
+            color: var(--fpi-text) !important;
+        }
+        .stDownloadButton > button, .stDownloadButton > button * {
+            background: linear-gradient(135deg, #0f766e, #2563eb) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            fill: #ffffff !important;
+            border: 0 !important;
+        }
+
+        /* File uploader, Smart Mapper, Expander */
+        [data-testid="stFileUploader"], [data-testid="stFileUploader"] *,
+        [data-testid="stExpander"], [data-testid="stExpander"] *,
+        details[data-testid="stExpander"], details[data-testid="stExpander"] * {
+            background: #ffffff !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            fill: var(--fpi-text) !important;
+            border-color: var(--fpi-border) !important;
+            opacity: 1 !important;
+        }
+        [data-testid="stFileUploader"], [data-testid="stExpander"], details[data-testid="stExpander"] {
+            border: 1px solid var(--fpi-border) !important;
+            border-radius: 18px !important;
+            box-shadow: 0 8px 22px rgba(15,23,42,.07) !important;
+        }
+
+        /* Táblázatok: ne legyen fekete háttér */
+        [data-testid="stDataFrame"], [data-testid="stDataFrame"] *,
+        .stDataFrame, .stDataFrame *,
+        table, thead, tbody, tr, th, td,
+        .wrap-table table, .wrap-table th, .wrap-table td {
+            background-color: #ffffff !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            border-color: #dbe3ea !important;
+            opacity: 1 !important;
+        }
+        thead, th, .wrap-table th {
+            background-color: #e0f2fe !important;
+            color: #0f172a !important;
+            font-weight: 900 !important;
+        }
+        tbody tr:nth-child(even) td, .wrap-table tr:nth-child(even) td {
+            background-color: #f8fafc !important;
+        }
+
+        /* Alert, info, markdown code */
+        [data-testid="stAlert"], [data-testid="stAlert"] *,
+        pre, pre *, code, code * {
+            background: #f8fafc !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+            border-color: var(--fpi-border) !important;
+        }
+
+        /* Sidebar is legyen világos */
+        [data-testid="stSidebar"], [data-testid="stSidebar"] * {
+            background-color: #f8fafc !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+        }
+        [data-testid="stSidebar"] .stButton > button,
+        [data-testid="stSidebar"] .stButton > button * {
+            background: linear-gradient(135deg, #e2e8f0, #dbeafe) !important;
+            color: var(--fpi-text) !important;
+            -webkit-text-fill-color: var(--fpi-text) !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+_fpi_apply_v119_all_light_readable_patch()
+
+
 # -----------------------------------------------------------------------------
 # Oszlopmapping
 # -----------------------------------------------------------------------------
@@ -9122,6 +9357,7 @@ def render_fpi_clean_workspace_v101() -> None:
     _fpi_landing_css_v100()
     _fpi_mapper_contrast_css_v109()
     _fpi_apply_v118_final_light_controls_patch()
+    _fpi_apply_v119_all_light_readable_patch()
     user_defaults_clean = _fpi_load_user_defaults_v113()
 
     top1, top2 = st.columns([5, 1.2])
