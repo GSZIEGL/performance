@@ -8906,12 +8906,222 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
 
 
 
+
+# =========================================================
+# V118 - Final light control patch for Import / Mapper / Uploaders
+# =========================================================
+def _fpi_apply_v118_final_light_controls_patch() -> None:
+    """Utolsó UI felülírás: minden input, select, file uploader, expander és gomb világos/olvasható.
+    Ez a patch szándékosan a v109/v117 után fut, mert azokban volt még sötét gomb felülírás.
+    """
+    st.markdown(
+        """
+        <style>
+        /* ===== V118 global app surface ===== */
+        .stApp, [data-testid="stAppViewContainer"] {
+            background: linear-gradient(135deg, #f8fafc 0%, #eef6ff 48%, #ecfdf5 100%) !important;
+            color: #0f172a !important;
+        }
+        .block-container { color:#0f172a !important; }
+        .stMarkdown, .stMarkdown *, p, label, span, div { text-shadow:none !important; }
+
+        /* ===== Buttons: no more black buttons ===== */
+        .stButton > button,
+        .stButton > button *,
+        button[data-testid="baseButton-secondary"],
+        button[data-testid="baseButton-secondary"] *,
+        button[data-testid="baseButton-primary"],
+        button[data-testid="baseButton-primary"] *,
+        button[kind="secondary"],
+        button[kind="secondary"] *,
+        button[kind="primary"],
+        button[kind="primary"] * {
+            background: linear-gradient(135deg, #e0f2fe, #dcfce7) !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            fill: #0f172a !important;
+            border: 1px solid #93c5fd !important;
+            border-radius: 16px !important;
+            font-weight: 900 !important;
+            opacity: 1 !important;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, .08) !important;
+        }
+        .stButton > button:hover,
+        button[data-testid="baseButton-secondary"]:hover,
+        button[data-testid="baseButton-primary"]:hover {
+            background: linear-gradient(135deg, #bae6fd, #bbf7d0) !important;
+            color:#0f172a !important;
+            -webkit-text-fill-color:#0f172a !important;
+            border-color:#38bdf8 !important;
+        }
+
+        /* Download buttons can be stronger, but still readable */
+        .stDownloadButton > button,
+        .stDownloadButton > button * {
+            background: linear-gradient(135deg, #0f766e, #2563eb) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            fill: #ffffff !important;
+            border: 0 !important;
+            border-radius: 16px !important;
+            font-weight: 950 !important;
+            opacity: 1 !important;
+        }
+
+        /* ===== Selectbox / dropdown / multiselect / popover ===== */
+        div[data-baseweb="select"],
+        div[data-baseweb="select"] *,
+        div[data-baseweb="popover"],
+        div[data-baseweb="popover"] *,
+        div[data-baseweb="menu"],
+        div[data-baseweb="menu"] *,
+        ul[role="listbox"], ul[role="listbox"] *,
+        li[role="option"], li[role="option"] *,
+        div[role="option"], div[role="option"] * {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            fill: #0f172a !important;
+            opacity: 1 !important;
+            border-color: #cbd5e1 !important;
+        }
+        div[data-baseweb="popover"], div[data-baseweb="menu"] {
+            border: 1px solid #cbd5e1 !important;
+            box-shadow: 0 18px 40px rgba(15,23,42,.16) !important;
+        }
+        li[role="option"]:hover, div[role="option"]:hover,
+        li[role="option"][aria-selected="true"], div[role="option"][aria-selected="true"] {
+            background-color: #dbeafe !important;
+            color:#0f172a !important;
+            -webkit-text-fill-color:#0f172a !important;
+        }
+
+        /* ===== Text/date/number inputs and steppers ===== */
+        div[data-baseweb="input"], div[data-baseweb="input"] *,
+        [data-testid="stTextInput"], [data-testid="stTextInput"] *,
+        [data-testid="stDateInput"], [data-testid="stDateInput"] *,
+        [data-testid="stNumberInput"], [data-testid="stNumberInput"] *,
+        input, textarea {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            fill: #0f172a !important;
+            opacity: 1 !important;
+            border-color: #cbd5e1 !important;
+        }
+        [data-testid="stNumberInput"] button,
+        [data-testid="stNumberInput"] button *,
+        button[aria-label="Increment"], button[aria-label="Increment"] *,
+        button[aria-label="Decrement"], button[aria-label="Decrement"] *,
+        button[aria-label="Növelés"], button[aria-label="Növelés"] *,
+        button[aria-label="Csökkentés"], button[aria-label="Csökkentés"] * {
+            background: #e0f2fe !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            fill: #0f172a !important;
+            border-color: #93c5fd !important;
+        }
+
+        /* ===== File uploader: Smart Mapper + tactical PDF/Excel upload readability ===== */
+        [data-testid="stFileUploader"],
+        [data-testid="stFileUploader"] section,
+        [data-testid="stFileUploader"] div,
+        [data-testid="stFileUploader"] label,
+        [data-testid="stFileUploader"] span,
+        [data-testid="stFileUploader"] small,
+        [data-testid="stFileUploader"] p,
+        [data-testid="stFileUploader"] svg {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            fill: #0f172a !important;
+            border-color: #cbd5e1 !important;
+            opacity: 1 !important;
+        }
+        [data-testid="stFileUploader"] {
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 18px !important;
+            box-shadow: 0 8px 24px rgba(15,23,42,.07) !important;
+        }
+        [data-testid="stFileUploader"] button,
+        [data-testid="stFileUploader"] button * {
+            background: linear-gradient(135deg, #e0f2fe, #dcfce7) !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            fill: #0f172a !important;
+            border: 1px solid #93c5fd !important;
+        }
+        [data-testid="stFileUploaderDeleteBtn"],
+        [data-testid="stFileUploaderDeleteBtn"] *,
+        button[title*="Delete"], button[title*="Delete"] *,
+        button[aria-label*="Delete"], button[aria-label*="Delete"] *,
+        button[title*="Remove"], button[title*="Remove"] *,
+        button[aria-label*="Remove"], button[aria-label*="Remove"] * {
+            background: #fee2e2 !important;
+            color: #991b1b !important;
+            -webkit-text-fill-color: #991b1b !important;
+            fill: #991b1b !important;
+        }
+
+        /* ===== Expanders / Smart Mapper / uploaded files check ===== */
+        details[data-testid="stExpander"],
+        div[data-testid="stExpander"],
+        details[data-testid="stExpander"] *,
+        div[data-testid="stExpander"] * {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            fill: #0f172a !important;
+            border-color: #cbd5e1 !important;
+            opacity: 1 !important;
+        }
+        details[data-testid="stExpander"], div[data-testid="stExpander"] {
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 18px !important;
+            box-shadow: 0 8px 22px rgba(15,23,42,.07) !important;
+        }
+
+        /* ===== Alerts / status boxes ===== */
+        div[data-testid="stAlert"], div[data-testid="stAlert"] * {
+            background: #f8fafc !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            opacity: 1 !important;
+        }
+
+        /* ===== Hard override for old inline black panels/buttons ===== */
+        div[style*="background:#111827"], div[style*="background: #111827"],
+        div[style*="background:#0f172a"], div[style*="background: #0f172a"],
+        div[style*="background:#020617"], div[style*="background: #020617"],
+        div[style*="background:rgba(15,23,42"], div[style*="background: rgba(15,23,42"],
+        div[style*="background:rgba(17,24,39"], div[style*="background: rgba(17,24,39"] {
+            background: linear-gradient(135deg, #ffffff, #f0f9ff) !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            border-color: #dbeafe !important;
+        }
+        div[style*="background:#111827"] *, div[style*="background: #111827"] *,
+        div[style*="background:#0f172a"] *, div[style*="background: #0f172a"] *,
+        div[style*="background:#020617"] *, div[style*="background: #020617"] *,
+        div[style*="background:rgba(15,23,42"] *, div[style*="background: rgba(15,23,42"] *,
+        div[style*="background:rgba(17,24,39"] *, div[style*="background: rgba(17,24,39"] * {
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            fill: #0f172a !important;
+            opacity: 1 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def render_fpi_clean_workspace_v101() -> None:
     """Tiszta import / szűrő / export oldal.
     A régi teljes app továbbra is elérhető külön gombbal, de ez az oldal a klubdemóhoz és gyors használathoz letisztított flow.
     """
     _fpi_landing_css_v100()
     _fpi_mapper_contrast_css_v109()
+    _fpi_apply_v118_final_light_controls_patch()
     user_defaults_clean = _fpi_load_user_defaults_v113()
 
     top1, top2 = st.columns([5, 1.2])
