@@ -800,6 +800,187 @@ st.markdown(
 )
 
 
+
+
+# -----------------------------------------------------------------------------
+# V115 - Light premium UI + readability + no duplicate imports
+# -----------------------------------------------------------------------------
+def _fpi_apply_v115_light_ui_patch() -> None:
+    """Világos, prémium FPI arculat + erős kontrasztjavítás Streamlit elemekre."""
+    st.markdown(
+        """
+        <style>
+        :root {
+            --fpi-bg: #eef5f3;
+            --fpi-bg-2: #f8fbff;
+            --fpi-panel: #ffffff;
+            --fpi-ink: #0f172a;
+            --fpi-muted: #475569;
+            --fpi-line: #d8e3ea;
+            --fpi-green: #0f766e;
+            --fpi-blue: #2563eb;
+            --fpi-cyan: #0891b2;
+            --fpi-orange: #f97316;
+            --fpi-purple: #7c3aed;
+        }
+        .stApp {
+            background:
+                radial-gradient(circle at 8% 4%, rgba(20,184,166,.18), transparent 30%),
+                radial-gradient(circle at 88% 2%, rgba(37,99,235,.14), transparent 30%),
+                linear-gradient(135deg, #edf7f4 0%, #f8fbff 46%, #eef2ff 100%) !important;
+            color: var(--fpi-ink) !important;
+        }
+        .block-container { padding-top: 1.2rem; }
+        .stApp h1, .stApp h2, .stApp h3, .stApp h4,
+        .stApp p, .stApp label, .stApp span, .stApp div {
+            color: var(--fpi-ink) !important;
+            text-shadow: none !important;
+        }
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #ffffff 0%, #f1f8f6 100%) !important;
+            border-right: 1px solid var(--fpi-line) !important;
+        }
+        [data-testid="stSidebar"] * { color: var(--fpi-ink) !important; }
+        [data-testid="stSidebar"] .stButton > button,
+        [data-testid="stSidebar"] button {
+            background: linear-gradient(135deg, #0f766e, #2563eb) !important;
+            color:#ffffff !important;
+            border:0 !important;
+        }
+        [data-testid="stSidebar"] .stButton > button *,
+        [data-testid="stSidebar"] button * { color:#ffffff !important; }
+
+        /* Cards and hero: komoly, de nem fekete */
+        .hero-box, .fpi-hero-wow, .fpi-dark-card, .intro-card, .feature-box,
+        .score-card, .priority-card, .insight-card, .export-panel,
+        .premium-kpi, .fpi-mode-card, .fpi-flow-step, .fpi-decision-card {
+            background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(239,247,255,.96)) !important;
+            border: 1px solid var(--fpi-line) !important;
+            color: var(--fpi-ink) !important;
+            box-shadow: 0 14px 38px rgba(15,23,42,.10) !important;
+        }
+        .hero-title, .fpi-hero-wow h1, .fpi-landing-title,
+        .insight-title, .feature-title, .score-number, .score-label,
+        .premium-kpi-label, .premium-kpi-value, .premium-kpi-note,
+        .hero-sub, .feature-text, .mini-muted, .fpi-hero-wow p,
+        .fpi-mode-card h3, .fpi-mode-card p, .fpi-flow-step b, .fpi-flow-step div,
+        .fpi-decision-card b, .fpi-decision-card span {
+            color: var(--fpi-ink) !important;
+        }
+        .fpi-landing-hero {
+            background: linear-gradient(135deg, #ffffff 0%, #e0f2fe 55%, #ecfdf5 100%) !important;
+            border: 1px solid var(--fpi-line) !important;
+            box-shadow: 0 20px 54px rgba(15,23,42,.13) !important;
+        }
+        .fpi-landing-kicker { color: var(--fpi-green) !important; }
+        .fpi-landing-sub { color: var(--fpi-muted) !important; }
+        .section-chip, .fpi-chip-wow, .micro-pill {
+            background: #e0f2fe !important;
+            border: 1px solid #bae6fd !important;
+            color: #075985 !important;
+        }
+        .pill-critical { background:#fee2e2 !important; color:#991b1b !important; }
+        .pill-warning { background:#ffedd5 !important; color:#9a3412 !important; }
+        .pill-info { background:#dbeafe !important; color:#1e40af !important; }
+
+        /* Dropdown/readability hard fix */
+        [data-baseweb="select"], [data-baseweb="select"] *,
+        [data-baseweb="popover"], [data-baseweb="popover"] *,
+        [data-baseweb="menu"], [data-baseweb="menu"] *,
+        [role="listbox"], [role="listbox"] *,
+        [role="option"], [role="option"] * {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            opacity: 1 !important;
+        }
+        [role="option"]:hover, [role="option"][aria-selected="true"] {
+            background-color: #dbeafe !important;
+            color: #0f172a !important;
+        }
+        input, textarea, [data-baseweb="input"], [data-baseweb="input"] *,
+        [data-baseweb="textarea"], [data-baseweb="textarea"] * {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            border-color: #cbd5e1 !important;
+        }
+
+        /* Dashboard / metodología / intelligence olvashatóság */
+        .stInfo, .stInfo *, .stAlert, .stAlert * {
+            color: #0f172a !important;
+        }
+        div[data-testid="stMetric"], div[data-testid="stMetric"] * {
+            color: #0f172a !important;
+        }
+        .wrap-table th { background: #dbeafe !important; color: #0f172a !important; }
+        .wrap-table td, .wrap-table tr:nth-child(even) td {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            border-color: #dbeafe !important;
+        }
+        pre, pre *, code, code * { color:#0f172a !important; background:#f8fafc !important; }
+        div[style*="Heti vezetői összefoglaló"],
+        div[style*="Heti vezetői összefoglaló"] *,
+        div[style*="border-left:10px solid #2563eb"],
+        div[style*="border-left:10px solid #2563eb"] *,
+        div[style*="background:#0f172a"],
+        div[style*="background: #0f172a"],
+        div[style*="background:#111827"],
+        div[style*="background: #111827"],
+        div[style*="background:#020617"],
+        div[style*="background: #020617"] {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            border-color: #dbeafe !important;
+            opacity: 1 !important;
+        }
+        div[data-testid="stExpander"] {
+            background:#ffffff !important;
+            border:1px solid var(--fpi-line) !important;
+            border-radius:18px !important;
+        }
+        div[data-testid="stExpander"] * { color:#0f172a !important; }
+        [data-testid="stFileUploader"], [data-testid="stFileUploader"] section,
+        [data-testid="stFileUploader"] div {
+            background:#ffffff !important;
+            color:#0f172a !important;
+            border-color:#cbd5e1 !important;
+        }
+        [data-testid="stFileUploader"] * { color:#0f172a !important; fill:#0f172a !important; }
+        [data-testid="stFileUploader"] button, [data-testid="stFileUploader"] button * {
+            background:#2563eb !important;
+            color:#ffffff !important;
+            fill:#ffffff !important;
+        }
+        .stDownloadButton > button, .stButton > button {
+            border-radius: 15px !important;
+            font-weight: 900 !important;
+        }
+        .stDownloadButton > button {
+            background: linear-gradient(135deg,#0f766e,#14b8a6) !important;
+            color:#ffffff !important;
+            border:0 !important;
+        }
+        .stDownloadButton > button * { color:#ffffff !important; }
+        button[data-baseweb="tab"], button[data-baseweb="tab"] * {
+            color:#334155 !important;
+            background: transparent !important;
+        }
+        button[data-baseweb="tab"][aria-selected="true"], button[data-baseweb="tab"][aria-selected="true"] * {
+            color:#0f766e !important;
+            font-weight:950 !important;
+        }
+        div[data-baseweb="tab-list"] {
+            background: rgba(255,255,255,.88) !important;
+            border: 1px solid var(--fpi-line) !important;
+        }
+        div[data-baseweb="tab-border"] { background-color:#0f766e !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+_fpi_apply_v115_light_ui_patch()
+
 # -----------------------------------------------------------------------------
 # Oszlopmapping
 # -----------------------------------------------------------------------------
@@ -8681,6 +8862,7 @@ def render_fpi_clean_workspace_v101() -> None:
         }
 
     clean_tactical_context = _fpi_clean_tactical_import_v102(tactical_gps_context_clean)
+    st.session_state["fpi_clean_tactical_context_v115"] = clean_tactical_context
 
     st.markdown("### 4. Export")
     e1, e2, e3 = st.columns(3)
@@ -8731,42 +8913,32 @@ with st.sidebar:
     render_license_panel()
     st.divider()
 
-    st.header("Adatfeltöltés")
-    template_bytes = create_sample_input_template_bytes()
-    if template_bytes is not None:
-        st.download_button(
-            "⬇️ Minta Excel sablon letöltése",
-            data=template_bytes,
-            file_name="performance_input_sablon.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            key="download_performance_input_template",
-        )
+    st.info("Adatimport és mapping: használd a Tiszta import oldalt. Itt már csak elemzés és riportnézetek vannak.")
+    if st.button("↗ Import / export oldal", use_container_width=True, key="sidebar_go_clean_v115"):
+        _fpi_set_page_v100("clean")
 
-    use_demo_data = st.toggle("Minta riport mintaadatokkal", value=st.session_state.get("use_demo_data", uploaded is None if 'uploaded' in globals() else True))
-    uploaded = st.file_uploader("Saját GPS/terhelési Excel feltöltése", type=["xlsx", "xls"])
-    if uploaded is not None:
-        # Új fájl feltöltésekor ne maradjon bent a régi mapping vagy régi mapped dataframe.
-        try:
-            _bytes = uploaded.getvalue()
-            _sig = hashlib.md5(_bytes).hexdigest()
-        except Exception:
-            _sig = str(getattr(uploaded, "name", "uploaded"))
-        if st.session_state.get("active_upload_signature") != _sig:
-            for _k in ["mapped_df_override", "manual_mapping", "mapper_selected_sheet", "last_raw_df", "manual_keeper_players", "manual_keeper_players_no_pos", "keeper_manual_override", "has_goalkeepers_without_position"]:
-                st.session_state.pop(_k, None)
-            st.session_state["active_upload_signature"] = _sig
-    else:
-        st.session_state.pop("active_upload_signature", None)
-    st.caption("Demo módban saját adat is feltölthető, de limitált: 8 játékos / 3 hét / 5000 sor.")
-    st.divider()
+    st.markdown("**Adatforrás:** Import / export oldal")
+    st.caption("A teljes app nem jelenít meg külön feltöltőt és mappert, hogy ne duplikálja az import oldalt.")
+    use_demo_data = False
+    uploaded = None
+    if "clean_mapped_df_override_v105" not in st.session_state:
+        use_demo_data = st.toggle("Minta riport mintaadatokkal", value=True, key="full_demo_data_v115")
     st.markdown("**Fókusz:** vezetői riport, readiness, risk, edzői teendők.")
 
-if uploaded is None and not use_demo_data:
-    st.info("Tölts fel GPS/terhelési Excel fájlt, vagy kapcsold be a minta riportot.")
+# V115: a teljes app lehetőleg a Tiszta import oldalon már feldolgozott GPS adatot használja.
+# Így a Dashboard / Tactical Pro+ / többi fül nem duplikál importot és mappert.
+if "clean_mapped_df_override_v105" in st.session_state and isinstance(st.session_state["clean_mapped_df_override_v105"], pd.DataFrame) and not st.session_state["clean_mapped_df_override_v105"].empty:
+    raw_df = st.session_state["clean_mapped_df_override_v105"].copy()
+    selected_sheet = "Import oldal"
+    uploaded = None
+    use_demo_data = False
+    st.session_state["mapped_df_override"] = raw_df.copy()
+    mapping = st.session_state.get("clean_manual_mapping_v105", st.session_state.get("manual_mapping", {}))
+    missing_core = []
+elif uploaded is None and not use_demo_data:
+    st.info("Tölts fel GPS/terhelési Excel fájlt az Import / export oldalon, vagy kapcsold be a minta riportot.")
     st.stop()
-
-if use_demo_data and uploaded is None:
+elif use_demo_data and uploaded is None:
     raw_df = build_demo_performance_data()
     selected_sheet = "Mintaadatok"
 else:
@@ -11455,7 +11627,19 @@ with tab_tactical_pro:
         "priorities": coaching_priorities if 'coaching_priorities' in globals() else [],
         "periodization_type": periodization_type if 'periodization_type' in globals() else "n.a.",
     }
-    render_tactical_pro_module(tactical_gps_context)
+    st.subheader("🧠 Tactical Pro+")
+    st.caption("V115: a taktikai PDF/Excel import kizárólag az Import / export oldalon van. Itt már csak az ott betöltött kontextus összefoglalója látszik.")
+    clean_tctx_v115 = st.session_state.get("fpi_clean_tactical_context_v115")
+    if clean_tctx_v115:
+        level = clean_tctx_v115.get("analysis_level") or clean_tctx_v115.get("level_label") or "Tactical context aktív"
+        topics = clean_tctx_v115.get("topics") or clean_tctx_v115.get("opp_detected_topics") or []
+        st.success(f"Aktív Tactical Pro+ kontextus: {level}")
+        if topics:
+            st.markdown("**Felismerhető taktikai témák:** " + ", ".join([str(x) for x in topics[:10]]))
+        with st.expander("Tactical context technikai összefoglaló", expanded=False):
+            st.json({k: v for k, v in clean_tctx_v115.items() if k not in ["raw_text", "df", "own_team_df", "opp_team_df", "own_player_df", "opp_player_df"]})
+    else:
+        st.info("Nincs betöltött taktikai kontextus. Töltsd fel a Tactical Pro+ fájlokat az Import / export oldalon. GPS-only módban ez teljesen rendben van.")
 
 
 
@@ -11655,7 +11839,7 @@ with tab1:
             markers=True,
             title=f"Heti trend: {metric_name(chart_metric)}",
         )
-        fig.update_layout(xaxis_title="Hét", yaxis_title=metric_name(chart_metric), legend_title="Típus", template="plotly_dark")
+        fig.update_layout(xaxis_title="Hét", yaxis_title=metric_name(chart_metric), legend_title="Típus", template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Nincs elérhető trendmutató.")
@@ -11694,7 +11878,7 @@ with tab_premium:
     if readiness_components:
         comp_df = pd.DataFrame([{"Komponens": k, "Pont": round(v, 1)} for k, v in readiness_components.items()])
         fig = px.bar(comp_df, x="Komponens", y="Pont", range_y=[0, 100], title="Meccskészültség komponensek")
-        fig.update_layout(xaxis_title="", yaxis_title="Pont", template="plotly_dark")
+        fig.update_layout(xaxis_title="", yaxis_title="Pont", template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
     st.markdown("### Top 3 edzői teendő")
     render_coaching_priorities(coaching_priorities)
@@ -11706,7 +11890,7 @@ with tab_premium:
         if trend_metric_options:
             tm = st.selectbox("Vezetői trendmutató", trend_metric_options, format_func=metric_name)
             fig = px.line(weekly_fingerprints, x="week", y=tm, markers=True, title=f"Performance memória trend: {metric_name(tm)}")
-            fig.update_layout(xaxis_title="Hét", yaxis_title=metric_name(tm), template="plotly_dark")
+            fig.update_layout(xaxis_title="Hét", yaxis_title=metric_name(tm), template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
 
 
@@ -11997,7 +12181,7 @@ with tab_risk:
         st.markdown("### Kockázati tábla")
         st.dataframe(player_risk_df, use_container_width=True, hide_index=True)
         fig = px.bar(player_risk_df.head(20), x="Játékos", y="Kockázati pontszám", color="Kockázati szint", title="Játékos risk score")
-        fig.update_layout(xaxis_title="Játékos", yaxis_title="Kockázati pontszám", xaxis_tickangle=-45, template="plotly_dark")
+        fig.update_layout(xaxis_title="Játékos", yaxis_title="Kockázati pontszám", xaxis_tickangle=-45, template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
         st.download_button("⬇️ Játékos risk export CSV", data=player_risk_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"player_risk_{_safe_filename_week(selected_week)}.csv", mime="text/csv", use_container_width=True,
             key="download_button_unique_10",
@@ -12108,7 +12292,7 @@ with tab3:
             metric = st.selectbox("Játékos rangsor mutató", rank_options, format_func=metric_name, index=0)
             rank = pw_current.groupby("player_name", as_index=False)[metric].sum().sort_values(metric, ascending=False)
             fig = px.bar(rank.head(25), x="player_name", y=metric, title=f"Játékosrangsor: {metric_name(metric)}")
-            fig.update_layout(xaxis_title="Játékos", yaxis_title=metric_name(metric), xaxis_tickangle=-45, template="plotly_dark")
+            fig.update_layout(xaxis_title="Játékos", yaxis_title=metric_name(metric), xaxis_tickangle=-45, template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("### Játékos heti összesítő tábla")
