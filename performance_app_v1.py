@@ -6866,6 +6866,19 @@ def _fpi_match_context_label_v94() -> str:
     return f"Ellenfél: {opponent} | Meccsnap: {md_txt} | Meccshét: {mw}"
 
 
+def _fpi_demo_match_context_label_v122() -> str:
+    """Minta PDF-ekhez: konkrét, eladható meccskontextus N/A és adatminőségi figyelmeztetés nélkül."""
+    return "Mérkőzés: KTE U19 – Soroksár SC | Meccsnap: 2026.06.06. szombat | Meccshét: 2026-W23"
+
+
+def _fpi_demo_week_check_text_v122() -> str:
+    return "A riport egy mérkőzésre felkészítő mikrociklusra készült. A kiválasztott hét és a meccsnap összhangban van."
+
+
+def _fpi_pdf_match_context_line_v122(demo_label: str = "") -> str:
+    return _fpi_demo_match_context_label_v122() if demo_label else _fpi_match_context_label_v94()
+
+
 
 # =========================================================
 # V9.5 - KTE/Kecskemét saját csapat + GPS-only mikrociklus
@@ -7143,7 +7156,7 @@ def build_fpi_product_pdf_bytes(
     def add_cover():
         story.append(P("Football Performance Intelligence", title))
         story.append(P(f"{label_prefix}{report_names.get(report_type, 'Riport')} | Hét: {format_week_label(str(week))} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
-        story.append(P(_fpi_match_context_label_v94(), sub))
+        story.append(P(_fpi_pdf_match_context_line_v122(demo_label), sub))
         story.append(Spacer(1, 0.25*cm))
         kpis = [
             kpi("READINESS", f"{readiness}/100", score_to_label(readiness), "#166534" if readiness >= 75 else "#1E3A8A" if readiness >= 60 else "#991B1B"),
@@ -7158,11 +7171,16 @@ def build_fpi_product_pdf_bytes(
     def add_executive_page():
         story.append(section("1. Vezetői oldal – heti meccs- és edzésterv", "#DBEAFE"))
 
-        match_ctx = _fpi_selected_match_context_v94()
-        match_warnings = _fpi_match_week_warning_v94(df, week, match_ctx.get("match_date"))
+        if demo_label:
+            match_warnings = [_fpi_demo_week_check_text_v122()]
+            match_context_text = _fpi_demo_match_context_label_v122()
+        else:
+            match_ctx = _fpi_selected_match_context_v94()
+            match_warnings = _fpi_match_week_warning_v94(df, week, match_ctx.get("match_date"))
+            match_context_text = _fpi_match_context_label_v94()
         ctx_rows = [[P("Meccskontextus", head), P("Hétellenőrzés", head)]]
         ctx_rows.append([
-            P(_fpi_match_context_label_v94(), small),
+            P(match_context_text, small),
             P("<br/>".join([pdf_safe_text(x) for x in match_warnings[:3]]) if match_warnings else "Hét és meccsnap összhangban.", small),
         ])
         story.append(table(ctx_rows, [10.0*cm, 17.7*cm], header_bg="#0F766E", row_bgs=[colors.HexColor("#F0FDFA")]))
@@ -8283,7 +8301,7 @@ def build_fpi_gps_only_pdf_bytes(
     label_prefix = f"{demo_label} | " if demo_label else ""
     story.append(P("Football Performance Intelligence – GPS-only riport", title))
     story.append(P(f"{label_prefix}Hét: {format_week_label(str(week))} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
-    story.append(P(_fpi_match_context_label_v94(), sub))
+    story.append(P(_fpi_pdf_match_context_line_v122(demo_label), sub))
     story.append(P(f"Referencia profil: {_fpi_reference_profile_v97().get('label', 'Felnőtt NB2')} | Heti típus: {_fpi_periodization_label_v97(ctx)}", sub))
     story.append(Spacer(1, 0.25*cm))
     high_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Magas").sum()) if not risk_df.empty else 0
@@ -8412,7 +8430,7 @@ def build_fpi_gps_only_sample_pdf_bytes() -> Optional[bytes]:
         return None
     demo_df = add_position_group(demo_df)
     latest = _fpi_latest_week(demo_df)
-    return build_fpi_gps_only_pdf_bytes(demo_df, latest, "Pressing", demo_label="MINTA RIPORT / Demo FC U19 – GPS only")
+    return build_fpi_gps_only_pdf_bytes(demo_df, latest, "Magas presszing", demo_label="MINTA RIPORT / KTE U19 – GPS only")
 
 
 def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool = True) -> Optional[bytes]:
@@ -8424,7 +8442,7 @@ def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool
     latest = _fpi_latest_week(demo_df)
     tactical_ctx = _build_demo_tactical_context() if include_tactical else None
     label = "MINTA RIPORT / Demo FC U19 – GPS + Tactical" if include_tactical else "MINTA RIPORT / Demo FC U19 – GPS only"
-    return build_fpi_product_pdf_bytes(demo_df, latest, "Pressing", report_type=report_type, demo_label=label, tactical_context=tactical_ctx)
+    return build_fpi_product_pdf_bytes(demo_df, latest, "Magas presszing", report_type=report_type, demo_label=label, tactical_context=tactical_ctx)
 
 
 # =========================================================
