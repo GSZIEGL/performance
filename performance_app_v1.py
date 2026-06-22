@@ -7650,7 +7650,27 @@ def _build_demo_tactical_context() -> Dict[str, object]:
 FPI_REFERENCE_AGE_OPTIONS_V112 = ["Felnőtt", "U21", "U19", "U17", "U16", "U15", "U14", "U13"]
 FPI_REFERENCE_LEVEL_OPTIONS_V112 = ["NB I", "NB II", "NB III", "Akadémia", "Regionális", "Megye I", "Egyéb"]
 FPI_REFERENCE_POSITION_OPTIONS_V112 = ["Kapus", "Középhátvéd", "Szélső hátvéd", "Védekező középpályás", "Középpályás", "Támadó középpályás", "Szélső", "Csatár"]
-FPI_COACH_WEEK_OPTIONS_V112 = ["Regeneráló hét", "Fenntartó hét", "Terhelő hét", "Fejlesztő hét", "Élező hét", "Meccsre felkészítő hét"]
+FPI_COACH_WEEK_OPTIONS_V112 = [
+    "Regenerációs mikrociklus",
+    "Stabilizáló mikrociklus",
+    "Terhelésfokozó mikrociklus",
+    "Fejlesztő mikrociklus",
+    "Formaidőzítő mikrociklus",
+    "Mérkőzésre felkészítő mikrociklus",
+]
+FPI_COACH_WEEK_LABEL_MAP_V121 = {
+    "Regeneráló hét": "Regenerációs mikrociklus",
+    "Fenntartó hét": "Stabilizáló mikrociklus",
+    "Terhelő hét": "Terhelésfokozó mikrociklus",
+    "Fejlesztő hét": "Fejlesztő mikrociklus",
+    "Élező hét": "Formaidőzítő mikrociklus",
+    "Meccsre felkészítő hét": "Mérkőzésre felkészítő mikrociklus",
+    "Meccsre frissítő hét": "Formaidőzítő mikrociklus",
+}
+
+def _fpi_normalize_coach_week_label_v121(label: object) -> str:
+    s = str(label or "").strip()
+    return FPI_COACH_WEEK_LABEL_MAP_V121.get(s, s or "Edző által nem megadva")
 FPI_PLAYMODEL_OPTIONS_V112 = ["Dominancia", "Magas presszing", "Átmeneti játék", "Direkt játék", "Kiegyensúlyozott"]
 
 # V11.2 - Referencia motor V2
@@ -7835,7 +7855,7 @@ def _fpi_session_plan_v97() -> List[Dict[str, object]]:
     return _fpi_get_coach_context_v97().get("session_plan", []) or []
 
 def _fpi_periodization_label_v97(ctx: Dict[str, object]) -> str:
-    return _fpi_get_coach_context_v97().get("coach_week_type") or "Edző által nem megadva"
+    return _fpi_normalize_coach_week_label_v121(_fpi_get_coach_context_v97().get("coach_week_type") or "Edző által nem megadva")
 
 def _fpi_reference_ranges_for_metric_v97(metric: str) -> Tuple[str, str, float, float, float, float]:
     prof = _fpi_reference_profile_v97()
@@ -7869,13 +7889,13 @@ def _fpi_match_ratio_reference_df_v97(df: pd.DataFrame, week: str) -> pd.DataFra
             if weekly_pct is None or pd.isna(weekly_pct):
                 rr["Értékelés"] = "Nincs meccs referencia vagy nincs értelmezhető adat."
             elif status_w == "alacsony" and metric in ["hsr_distance", "sprint_distance", "sprints"]:
-                rr["Értékelés"] = f"A játékosposzt-súlyozott profilhoz képest alacsony lehet a heti sebesség/sprint inger. Profil: {ref_label}."
+                rr["Értékelés"] = "A heti sebességi/sprint inger a referenciazóna alatt van. Javasolt kontrollált sebességi expozíció."
             elif status_w == "magas":
-                rr["Értékelés"] = f"A játékosposzt-súlyozott profilhoz képest magas heti összterhelés; ellenőrizd a napokra bontást. Profil: {ref_label}."
+                rr["Értékelés"] = "A heti összterhelés a referenciazóna felett van. Érdemes ellenőrizni a napokra bontott terhelést és az egyéni kockázatot."
             elif status_w == "célzónában" and status_a == "célzónában":
-                rr["Értékelés"] = f"A heti összeg és az edzésátlag is a játékosposzt-súlyozott referenciazónában van. Profil: {ref_label}."
+                rr["Értékelés"] = "A heti összeg és az edzésátlag is a referenciazónában van. A terhelési szerkezet fenntartható."
             else:
-                rr["Értékelés"] = f"Heti: {status_w}, edzésátlag: {status_a}. Profil: {ref_label}."
+                rr["Értékelés"] = f"Heti érték: {status_w}. Edzésátlag: {status_a}."
         rows.append(rr)
     return pd.DataFrame(rows)
 
@@ -7905,16 +7925,19 @@ def _fpi_gps_only_md_plan_v97(ctx: Dict[str, object], readiness: int, priorities
 # =========================================================
 
 def _fpi_short_week_type_v99(label: object) -> str:
-    s = str(label or "").strip()
+    s = _fpi_normalize_coach_week_label_v121(label)
     mapping = {
         "Edző által nem megadva": "Nincs megadva",
+        "Regenerációs mikrociklus": "Regenerációs",
+        "Stabilizáló mikrociklus": "Stabilizáló",
+        "Terhelésfokozó mikrociklus": "Terhelésfokozó",
+        "Fejlesztő mikrociklus": "Fejlesztő",
+        "Formaidőzítő mikrociklus": "Formaidőzítő",
+        "Mérkőzésre felkészítő mikrociklus": "Meccsre készítő",
         "Tanuló hét": "Tanuló",
-        "Terhelő hét": "Terhelő",
-        "Meccsre frissítő hét": "Frissítő",
-        "Regeneráló hét": "Regeneráló",
         "Vegyes hét": "Vegyes",
     }
-    return mapping.get(s, s[:16] if len(s) > 16 else s)
+    return mapping.get(s, s[:18] if len(s) > 18 else s)
 
 def _fpi_week_sort_key_v99(w: object) -> Tuple[int, int, str]:
     s = str(w)
@@ -7986,7 +8009,89 @@ def _fpi_gps_trend_summary_v99(ctx: Dict[str, object], week: str) -> Dict[str, o
                     signals.append(f"{label}: {tr} trend az utolsó {len(totals)} hétben")
     return {"weeks": all_weeks, "signals": signals[:6], "totals": totals}
 
-def _fpi_gps_only_md_plan_v99(ctx: Dict[str, object], readiness: int, priorities: List[dict], week: str) -> List[Tuple[str, str, str]]:
+
+def _fpi_clean_profile_noise_v121(text: object) -> str:
+    """A PDF mikrociklus szövegeiből kiszedi a gépi referencia-profil zajt."""
+    s = str(text or "").strip()
+    s = re.sub(r"\s*Profil:\s*.*?(?=$|\.)", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+játékosposzt-súlyozott profilhoz képest", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+játékosposzt-súlyozott referenciazónában", " referenciazónában", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip(" .")
+    return s + "." if s else ""
+
+
+def _fpi_focus_from_kind_v121(md: object, kind: object, train_i: int, coach_week: str) -> str:
+    k = _norm_mapping_text(kind)
+    md_s = str(md or "")
+    if "pihen" in k:
+        return "Regeneráció"
+    if "meccs" in k:
+        return "Mérkőzés"
+    if "aktiv" in k or md_s == "MD-1":
+        return "Aktiválás"
+    if "regener" in k:
+        return "Regenerációs kontroll"
+    if "hsr" in k or "sebesseg" in k:
+        return "Sebességi terhelés"
+    if "sprint" in k:
+        return "Sprintinger"
+    if "terhel" in _norm_mapping_text(coach_week) and train_i == 0:
+        return "Terhelésépítés"
+    if "formaidozito" in _norm_mapping_text(coach_week) or "merkozesre" in _norm_mapping_text(coach_week):
+        return "Mérkőzésre hangolás" if train_i == 0 else "Minőségi intenzitás"
+    if "stabilizalo" in _norm_mapping_text(coach_week):
+        return "Terhelés stabilizálása" if train_i == 0 else "Kontrollált intenzitás"
+    if train_i == 0:
+        return "Terhelésépítés"
+    if train_i == 1:
+        return "Sebességi terhelés"
+    if train_i == 2:
+        return "Mérkőzésspecifikus terhelés"
+    return "Kontrollált edzésterhelés"
+
+
+def _fpi_status_and_recommendation_v121(md: object, focus: object, why: object, readiness: int, trend_txt: str) -> Tuple[str, str]:
+    raw = _fpi_clean_profile_noise_v121(why)
+    f = _norm_mapping_text(focus)
+    status = raw
+    rec = "A terhelést a játékosok egyéni állapotához és a heti célhoz igazítva érdemes adagolni."
+    if not status:
+        status = f"Readiness: {readiness}/100. Trend: {trend_txt}."
+    if "piheno" in f or "regener" in f:
+        status = "Tervezett regenerációs nap. Cél a frissesség visszaépítése és a neuromuszkuláris terhelés csökkentése."
+        rec = "Alacsony volumen, mobilitás, regenerációs munka és egyéni kezelés javasolt."
+    elif "aktiv" in f or str(md) == "MD-1":
+        status = f"Readiness: {readiness}/100. A cél a frissesség megtartása, nem új terhelés felépítése."
+        rec = "Rövid aktiváló edzés: reakció, gyors lábmunka, pontrúgás és alacsony összvolumen."
+    elif "sprint" in f:
+        rec = "Rövid, kontrollált sprint-expozíció javasolt hosszú pihenőkkel; kerülni kell a felesleges ismétlésszámot."
+    elif "sebesseg" in f or "hsr" in f:
+        rec = "Nagyobb területű játék vagy célzott sebességi blokk javasolt, kontrollált mennyiséggel."
+    elif "terhelesepites" in f or "volumen" in _norm_mapping_text(raw):
+        rec = "A volumen fokozatos emelése javasolt, de a magas kockázatú játékosoknál egyéni korrekcióval."
+    elif "merkoz" in f:
+        rec = "A gyakorlatok intenzitása legyen mérkőzésszerű, de az összterhelés maradjon kontrollált."
+    elif "minosegi" in f:
+        rec = "Kevés, jó minőségű intenzív inger javasolt; a fárasztó mennyiségi munka kerülendő."
+    if "alacsony" in _norm_mapping_text(raw) and ("hsr" in _norm_mapping_text(raw) or "sprint" in _norm_mapping_text(raw)):
+        rec = "Sebességi/sprint inger beépítése javasolt, de csak kontrollált adagban és megfelelő pihenőkkel."
+    if "magas" in _norm_mapping_text(raw) or "kockazat" in _norm_mapping_text(raw):
+        rec = "Csökkentett volumen vagy egyéni módosítás javasolt a veszélyeztetett játékosoknál."
+    return (_fpi_clean_sentence_v82(status, 170), _fpi_clean_sentence_v82(rec, 170))
+
+
+def _fpi_structured_md_rows_v121(rows: List[Tuple], readiness: int, trend_txt: str) -> List[Tuple[str, str, str, str]]:
+    out = []
+    for row in rows:
+        if len(row) >= 4:
+            md, focus, status, rec = row[:4]
+        else:
+            md, focus, why = row[:3]
+            status, rec = _fpi_status_and_recommendation_v121(md, focus, why, readiness, trend_txt)
+        out.append((str(md), str(focus), str(status), str(rec)))
+    return out
+
+def _fpi_gps_only_md_plan_v99(ctx: Dict[str, object], readiness: int, priorities: List[dict], week: str) -> List[Tuple[str, str, str, str]]:
     """GPS-only Mikrociklus AI Planner v2.
     Figyelembe veszi:
     - edzői hét típust
@@ -7995,7 +8100,7 @@ def _fpi_gps_only_md_plan_v99(ctx: Dict[str, object], readiness: int, priorities
     - előző 4 hét trendjét
     - readiness és játékosrisk jelzéseket
     """
-    coach_week = str(_fpi_get_coach_context_v97().get("coach_week_type") or "Edző által nem megadva")
+    coach_week = _fpi_normalize_coach_week_label_v121(_fpi_get_coach_context_v97().get("coach_week_type") or "Edző által nem megadva")
     coach_plan = _fpi_session_plan_v97()
     trend = _fpi_gps_trend_summary_v99(ctx, week)
     trend_txt = "; ".join(trend.get("signals", [])[:2]) if trend.get("signals") else "nincs erős 4 hetes trend"
@@ -8004,17 +8109,17 @@ def _fpi_gps_only_md_plan_v99(ctx: Dict[str, object], readiness: int, priorities
     # hét típus szerinti globális irány
     week_low = coach_week.lower()
     if "regener" in week_low:
-        default_focus = ("Regeneráló fókusz", f"Regeneráló hét: alacsonyabb volumen, kontrollált intenzitás. Trend: {trend_txt}.")
+        default_focus = ("Regenerációs kontroll", f"Alacsonyabb volumen, kontrollált intenzitás. Trend: {trend_txt}.")
     elif "fenntart" in week_low:
-        default_focus = ("Fenntartó fókusz", f"Fenntartó hét: a fő fizikai képességek expozíciója túlterhelés nélkül. Trend: {trend_txt}.")
+        default_focus = ("Terhelés stabilizálása", f"A fő fizikai képességek fenntartása túlterhelés nélkül. Trend: {trend_txt}.")
     elif "terhel" in week_low:
-        default_focus = ("Terhelő fókusz", f"Terhelő hét: volumen/load építés referenciazónákhoz igazítva. Trend: {trend_txt}.")
+        default_focus = ("Terhelésépítés", f"Volumen és load fokozatos építése a referenciazónákhoz igazítva. Trend: {trend_txt}.")
     elif "fejleszt" in week_low:
-        default_focus = ("Fejlesztő fókusz", f"Fejlesztő hét: célzott HSR/sprint/High Effort inger, de játékoskockázat kontrollal. Trend: {trend_txt}.")
+        default_focus = ("Célzott fejlesztő inger", f"Célzott HSR/sprint/High Effort inger játékoskockázat-kontrollal. Trend: {trend_txt}.")
     elif "elez" in week_low or "élez" in week_low:
-        default_focus = ("Élező fókusz", f"Élező hét: rövid, minőségi intenzitás, alacsony fárasztás. Trend: {trend_txt}.")
+        default_focus = ("Formaidőzítés", f"Rövid, minőségi intenzitás, alacsony fárasztás. Trend: {trend_txt}.")
     elif "felkeszit" in week_low or "felkész" in week_low or "friss" in week_low:
-        default_focus = ("Meccsre felkészítő fókusz", f"Meccsre felkészítő hét: frissesség megtartása, célzott sebességinger. Trend: {trend_txt}.")
+        default_focus = ("Mérkőzésre hangolás", f"Frissesség megtartása és célzott sebességinger. Trend: {trend_txt}.")
     else:
         default_focus = ("GPS-alapú fókusz", f"Readiness, referenciaarányok és trend alapján. Trend: {trend_txt}.")
 
@@ -8048,24 +8153,24 @@ def _fpi_gps_only_md_plan_v99(ctx: Dict[str, object], readiness: int, priorities
                     focus = note
                 rows.append((md, default_focus[0] if train_i == 0 else str(kind), focus))
                 train_i += 1
-        return rows[:8]
+        return _fpi_structured_md_rows_v121(rows[:8], readiness, trend_txt)
 
     # Ha nincs megadott edzésstruktúra, akkor v95 terv, de hét típus / trend szerint átfogalmazva
     if "regener" in week_low and readiness < 70:
-        return [
-            ("MD-4", "Regeneráció + alacsony volumen", f"Edzői regeneráló hét. {trend_txt}."),
-            ("MD-3", "Rövid minőségi sebességinger", "Csak expozíció, nem mennyiségi sprintmunka."),
-            ("MD-2", "Frissítés + egyéni risk kontroll", "Játékosmonitoring, HSR/sprint halmozás nélkül."),
+        return _fpi_structured_md_rows_v121([
+            ("MD-4", "Regenerációs kontroll", f"Alacsonyabb volumen és kontrollált intenzitás. Trend: {trend_txt}."),
+            ("MD-3", "Minőségi sebességinger", "Csak expozíció, nem mennyiségi sprintmunka."),
+            ("MD-2", "Frissítés + egyéni kontroll", "Játékosmonitoring, HSR/sprint halmozás nélkül."),
             ("MD-1", "Aktiváció", "Rövid döntési és mozgásgyorsasági inger."),
-        ]
+        ], readiness, trend_txt)
     if "tanul" in week_low:
-        return [
+        return _fpi_structured_md_rows_v121([
             ("MD-4", "Közepes volumen + tanulási blokk", f"Technikai/taktikai tanulás fizikai túlterhelés nélkül. {trend_txt}."),
             ("MD-3", "Kontrollált HSR/sprint expozíció", "A sebességinger megmarad, de nem ez a fő terhelési cél."),
             ("MD-2", "Alacsony-közepes intenzitás", "Tanulási ismétlések, frissesség megtartása."),
             ("MD-1", "Aktiváció", "Rövid, tiszta, frissítő inger."),
-        ]
-    return base
+        ], readiness, trend_txt)
+    return _fpi_structured_md_rows_v121(base, readiness, trend_txt)
 
 def _fpi_gps_only_conclusions_v99(ctx: Dict[str, object], priorities: List[dict], readiness: int, week: str, limit: int = 6) -> List[str]:
     out = _fpi_gps_only_conclusions_v95(ctx, priorities, readiness, week, limit=limit)
@@ -8074,7 +8179,7 @@ def _fpi_gps_only_conclusions_v99(ctx: Dict[str, object], priorities: List[dict]
         out.append("4 hetes trend: " + "; ".join(trend.get("signals", [])[:3]) + ".")
     coach_week = _fpi_get_coach_context_v97().get("coach_week_type")
     if coach_week and coach_week != "Edző által nem megadva":
-        out.append(f"Edzői hét típus: {coach_week}. A mikrociklus ezt a keretet veszi alapul, nem automatikusan nevezi el a hetet.")
+        out.append(f"Mikrociklus típusa: {_fpi_normalize_coach_week_label_v121(coach_week)}. A napi javaslatok ezt a szakmai keretet veszik alapul.")
     uniq, seen = [], set()
     for x in out:
         y = _fpi_clean_sentence_v82(x, 190)
@@ -8216,10 +8321,15 @@ def build_fpi_gps_only_pdf_bytes(
 
     story.append(PageBreak())
     story.append(section("3. GPS-alapú mikrociklus terv", "#EDE9FE"))
-    md_rows = [[P("Nap", head), P("Erőnléti cél", head), P("Miért pont ez?", head)]]
-    for d, fgoal, why in md_plan:
-        md_rows.append([P(d, small), P(fgoal, small), P(why, small)])
-    story.append(tbl(md_rows, [3.2*cm, 9.2*cm, 15.3*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
+    md_rows = [[P("Nap", head), P("Fókusz", head), P("Állapot", head), P("Edzői javaslat", head)]]
+    for row in md_plan:
+        if len(row) >= 4:
+            d, fgoal, status, recommendation = row[:4]
+        else:
+            d, fgoal, why = row[:3]
+            status, recommendation = _fpi_status_and_recommendation_v121(d, fgoal, why, readiness, "")
+        md_rows.append([P(d, small), P(fgoal, small), P(status, small), P(recommendation, small)])
+    story.append(tbl(md_rows, [2.5*cm, 6.0*cm, 9.2*cm, 10.0*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
     story.append(Spacer(1, 0.22*cm))
 
     trend_v99 = _fpi_gps_trend_summary_v99(ctx, str(week))
