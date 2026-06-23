@@ -8457,8 +8457,15 @@ def _fpi_set_page_v100(page: str) -> None:
         pass
 
 
+
+
+def _fpi_home_back_button_v123(key: str = "home_back_v123") -> None:
+    """Egységes vissza gomb a főoldalra."""
+    if st.button("← Főoldal", use_container_width=True, key=key):
+        _fpi_set_page_v100("landing")
+
 def _fpi_mapper_contrast_css_v109() -> None:
-    """Mapper / clean workspace kontraszt javítás."""
+    """Mapper / Import & Executive Export kontraszt javítás."""
     st.markdown(
         """
         <style>
@@ -8684,24 +8691,102 @@ def render_fpi_landing_page_v100() -> None:
     _fpi_landing_css_v100()
     st.markdown(
         """
-        <div class="fpi-landing-hero">
-            <div class="fpi-landing-kicker">FOOTBALL PERFORMANCE INTELLIGENCE</div>
-            <div class="fpi-landing-title">Egy döntési oldal a stábnak: GPS, readiness, risk és meccshét-tervezés.</div>
-            <div class="fpi-landing-sub">
-                Az FPI a GPS-adatokból nem csak dashboardot készít, hanem edzői döntéselőkészítést:
-                megmutatja, mi történt a héten, hol van kockázat, milyen mikrociklus illik a meccsnaphoz,
-                és mikor kell HSR, sprint, High Effort vagy regenerációs fókusz.
+        <style>
+        .fpi-wow-hero{
+            border-radius:34px;
+            padding:42px 44px;
+            background:
+                radial-gradient(circle at 8% 8%, rgba(34,197,94,.22), transparent 28%),
+                radial-gradient(circle at 92% 6%, rgba(37,99,235,.22), transparent 30%),
+                linear-gradient(135deg,#f8fafc 0%,#e0f2fe 46%,#dcfce7 100%);
+            border:1px solid #bfdbfe;
+            box-shadow:0 28px 80px rgba(15,23,42,.18);
+            margin:8px 0 22px 0;
+            color:#0f172a;
+        }
+        .fpi-wow-kicker{
+            display:inline-block;padding:7px 13px;border-radius:999px;
+            background:#0f172a;color:#ffffff;font-weight:950;font-size:.82rem;letter-spacing:.07em;
+            margin-bottom:16px;
+        }
+        .fpi-wow-title{
+            font-size:3.35rem;line-height:.98;font-weight:980;letter-spacing:-.06em;
+            color:#0f172a;margin:0 0 15px 0;max-width:1050px;
+        }
+        .fpi-wow-sub{
+            font-size:1.18rem;line-height:1.55;color:#334155;max-width:980px;margin-bottom:20px;
+        }
+        .fpi-before-after{
+            display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:22px;max-width:980px;
+        }
+        .fpi-ba-card{
+            border-radius:20px;padding:16px 18px;background:rgba(255,255,255,.78);
+            border:1px solid #dbeafe;box-shadow:0 10px 28px rgba(15,23,42,.08);
+            color:#0f172a;
+        }
+        .fpi-ba-card b{display:block;color:#0f172a;font-size:1.05rem;margin-bottom:6px;}
+        .fpi-ba-card span{color:#475569;font-weight:750;}
+        .fpi-main-cta-wrap{
+            border-radius:28px;padding:24px 26px;margin:20px 0;
+            background:#ffffff;border:1px solid #dbeafe;box-shadow:0 18px 46px rgba(15,23,42,.12);
+        }
+        .fpi-cta-head{font-size:1.4rem;font-weight:950;color:#0f172a;margin-bottom:6px;}
+        .fpi-cta-text{color:#475569;line-height:1.45;margin-bottom:14px;}
+        div[data-testid="stButton"] button[kind="primary"], .stButton > button {
+            border-radius:18px !important;font-weight:950 !important;min-height:48px !important;
+        }
+        .fpi-pill-line{margin-top:16px;}
+        .fpi-pill-line span{display:inline-block;margin:4px 6px 0 0;padding:7px 11px;border-radius:999px;background:#ffffff;border:1px solid #bfdbfe;color:#0f172a;font-weight:850;font-size:.86rem;}
+        .fpi-mode-card h3{font-weight:950;}
+        </style>
+        <div class="fpi-wow-hero">
+            <div class="fpi-wow-kicker">FOOTBALL PERFORMANCE INTELLIGENCE</div>
+            <div class="fpi-wow-title">GPS exportból 30 másodperc alatt vezetői riport és következő heti mikrociklus.</div>
+            <div class="fpi-wow-sub">
+                Az FPI nem egy újabb GPS-dashboard. A feltöltött adatokból automatikusan kiemeli a heti állapotképet,
+                a kockázatokat, a referencia-eltéréseket és az edzői teendőket. A Tactical Pro+ opcionális prémium réteg,
+                ha a GPS mellé taktikai PDF/Excel is rendelkezésre áll.
             </div>
-            <div class="fpi-decision-grid">
-                <div class="fpi-decision-card"><b>1. Heti döntési kép</b><span>Readiness, high/medium risk, periodizáció és azonnali stábüzenetek.</span></div>
-                <div class="fpi-decision-card"><b>2. GPS-only riport</b><span>Ha csak GPS van, akkor is külön, használható erőnléti riport és mikrociklus készül.</span></div>
-                <div class="fpi-decision-card"><b>3. Tactical Pro+</b><span>Ha van taktikai PDF/Excel, a rendszer összeköti a GPS-t a meccstervvel.</span></div>
-                <div class="fpi-decision-card"><b>4. Export csomag</b><span>Minta és éles PDF-ek vezetőedzőnek, erőnléti stábnak és teljes stábnak.</span></div>
+            <div class="fpi-before-after">
+                <div class="fpi-ba-card"><b>Régi működés</b><span>GPS rendszer → Excel → manuális elemzés → riport → döntés</span></div>
+                <div class="fpi-ba-card"><b>FPI működés</b><span>GPS rendszer → FPI → Executive PDF → döntés</span></div>
+            </div>
+            <div class="fpi-pill-line">
+                <span>GPS-only prémium riport</span><span>Readiness & risk</span><span>Poszt- és szintreferenciák</span><span>Mikrociklus javaslat</span><span>Tactical Pro+ opcionális</span>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    cta_left, cta_right = st.columns([2.2, 1])
+    with cta_left:
+        st.markdown(
+            """
+            <div class="fpi-main-cta-wrap">
+                <div class="fpi-cta-head">Fő munkafolyamat: Import & Executive Export</div>
+                <div class="fpi-cta-text">
+                    Ez a termék központja: GPS feltöltés, opcionális taktikai input, választók, ellenőrzés és PDF export.
+                    Klubdemóban és éles használatban is ezt érdemes mutatni elsőként.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("🚀 Megnyitás: Import & Executive Export", use_container_width=True, key="landing_go_to_clean_v123", type="primary"):
+            _fpi_set_page_v100("clean")
+    with cta_right:
+        st.markdown(
+            """
+            <div class="fpi-main-cta-wrap" style="min-height:156px;">
+                <div class="fpi-cta-head">Haladó elemző felület</div>
+                <div class="fpi-cta-text">Részletes dashboardok, trendek és diagnosztikai nézetek azoknak, akik mélyebbre mennének.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("⚙️ Haladó app", use_container_width=True, key="landing_go_to_full_app_v123"):
+            _fpi_set_page_v100("app")
 
     render_landing_login_panel_v103()
 
@@ -8711,8 +8796,8 @@ def render_fpi_landing_page_v100() -> None:
         st.markdown(
             """
             <div class="fpi-mode-card">
-                <h3>GPS-only mód</h3>
-                <p>Csak GPS Excelből is használható riport: terhelési arányok, trendek, játékos risk, HSR/sprint expozíció és edzői mikrociklus.</p>
+                <h3>GPS-only Executive</h3>
+                <p>Csak GPS exportból is elkészül a heti állapotkép, a kockázati lista, a referencia-összevetés és a következő heti mikrociklus javaslat.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -8721,8 +8806,8 @@ def render_fpi_landing_page_v100() -> None:
         st.markdown(
             """
             <div class="fpi-mode-card">
-                <h3>GPS + Tactical mód</h3>
-                <p>A GPS megmutatja, bírja-e a csapat a meccstervet; a taktikai input megmutatja, mire kell készülni.</p>
+                <h3>Edzői döntéstámogatás</h3>
+                <p>Nem nyers adatot ad, hanem rövid, vezetői üzeneteket: kikre kell figyelni, hol hiányzik inger, hol kell visszavenni.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -8731,8 +8816,8 @@ def render_fpi_landing_page_v100() -> None:
         st.markdown(
             """
             <div class="fpi-mode-card">
-                <h3>Stáb-kompatibilis export</h3>
-                <p>Rövid, döntésközpontú PDF-ek, nem nyers dashboardok. A cél: gyorsabban jobb heti döntést hozni.</p>
+                <h3>Tactical Pro+ opcionálisan</h3>
+                <p>Ha van taktikai PDF vagy Excel, a rendszer a meccsterv és az ellenfél kontextusát is beemeli a riportba.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -8749,57 +8834,24 @@ def render_fpi_landing_page_v100() -> None:
     s1, s2, s3 = st.columns(3)
     with s1:
         if sample_gps_only_pdf_bytes is not None:
-            st.download_button(
-                "⬇️ Minta GPS-only Report",
-                data=sample_gps_only_pdf_bytes,
-                file_name="fpi_minta_gps_only_report.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                key="landing_download_sample_gps_only_v100",
-            )
+            st.download_button("⬇️ Minta GPS-only Executive", data=sample_gps_only_pdf_bytes, file_name="fpi_minta_gps_only_executive.pdf", mime="application/pdf", use_container_width=True, key="landing_download_sample_gps_only_v123")
     with s2:
         if sample_exec_pdf_bytes is not None:
-            st.download_button(
-                "⬇️ Minta Executive Summary",
-                data=sample_exec_pdf_bytes,
-                file_name="fpi_minta_executive_summary.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                key="landing_download_sample_exec_v100",
-            )
+            st.download_button("⬇️ Minta Executive Summary", data=sample_exec_pdf_bytes, file_name="fpi_minta_executive_summary.pdf", mime="application/pdf", use_container_width=True, key="landing_download_sample_exec_v123")
     with s3:
         if sample_full_pdf_bytes is not None:
-            st.download_button(
-                "⬇️ Minta Full Report",
-                data=sample_full_pdf_bytes,
-                file_name="fpi_minta_full_report.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                key="landing_download_sample_full_v100",
-            )
+            st.download_button("⬇️ Minta Full Report", data=sample_full_pdf_bytes, file_name="fpi_minta_full_report.pdf", mime="application/pdf", use_container_width=True, key="landing_download_sample_full_v123")
 
     st.markdown("### Hogyan működik?")
     f1, f2, f3, f4 = st.columns(4)
     for col, title, desc in [
-        (f1, "1. Import", "GPS Excel, opcionálisan taktikai PDF/Excel."),
-        (f2, "2. Kontextus", "Meccsnap, ellenfél, korosztály/szint, edzésszám."),
-        (f3, "3. Elemzés", "Readiness, risk, trend, referencia és mikrociklus."),
-        (f4, "4. Export", "GPS-only, Executive Summary vagy Full Report PDF."),
+        (f1, "1. GPS export", "GPS Excel feltöltése vagy mintaadat használata."),
+        (f2, "2. Kontextus", "Meccsnap, ellenfél, korosztály, szint és hétprofil."),
+        (f3, "3. FPI motor", "Readiness, risk, referencia, játékmodell és mikrociklus."),
+        (f4, "4. PDF export", "GPS-only, Executive Summary vagy Full Report."),
     ]:
         with col:
             st.markdown(f'<div class="fpi-flow-step"><b>{title}</b><div>{desc}</div></div>', unsafe_allow_html=True)
-
-    st.markdown("")
-    cta1, cta2 = st.columns(2)
-    with cta1:
-        if st.button("🚀 Tovább az import / export oldalra", use_container_width=True, key="landing_go_to_clean_v113"):
-            _fpi_set_page_v100("clean")
-    with cta2:
-        if st.button("⚙️ Teljes app megnyitása", use_container_width=True, key="landing_go_to_full_app_v113"):
-            _fpi_set_page_v100("app")
-
-
-
 
 
 
@@ -8915,7 +8967,7 @@ def _fpi_safe_build_adaptive_plan_v104(gps_context: Dict[str, object], tactical_
     if "_fpi_build_adaptive_match_training_plan" in globals():
         return _fpi_build_adaptive_match_training_plan(gps_context or {}, tactical_ctx_for_plan or {})
     return {
-        "analysis_level": (tactical_ctx_for_plan or {}).get("analysis_level_label", "Clean workspace"),
+        "analysis_level": (tactical_ctx_for_plan or {}).get("analysis_level_label", "Import & Executive Export"),
         "plan_a": "GPS-only – erőnléti fókuszú mikrociklus",
         "risks": ["GPS-alapú terhelési és readiness kockázatok"],
         "md_plan": [],
@@ -8932,7 +8984,7 @@ def _fpi_safe_build_tactical_executive_context_v104(gps_context: Dict[str, objec
     opp = (tactical_ctx_for_plan or {}).get("opponent", {}) or {}
     pdfi = (tactical_ctx_for_plan or {}).get("pdf_insights", {}) or {}
     return {
-        "analysis_level": (tactical_ctx_for_plan or {}).get("analysis_level_label", "Clean workspace"),
+        "analysis_level": (tactical_ctx_for_plan or {}).get("analysis_level_label", "Import & Executive Export"),
         "plan_a": (plan or {}).get("plan_a", "GPS-only – erőnléti fókuszú mikrociklus"),
         "risks": (plan or {}).get("risks", []),
         "md_plan": (plan or {}).get("md_plan", []),
@@ -8953,7 +9005,7 @@ def _fpi_safe_build_tactical_executive_context_v104(gps_context: Dict[str, objec
 
 
 # =========================================================
-# V11.3 - Clean workspace section headers + saved user defaults
+# V11.3 - Import & Executive Export section headers + saved user defaults
 # =========================================================
 def _fpi_current_user_key_v113() -> str:
     """Belépési azonosítóhoz kötött, fájlnév-biztos beállításkulcs."""
@@ -9181,7 +9233,7 @@ def _fpi_safe_tactical_parse_player_excel_v107(df2: pd.DataFrame, mapping: Dict[
 
 
 def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[Dict[str, object]]:
-    """Tiszta oldalra áthozott taktikai import + mapping.
+    """Import / Exportra áthozott taktikai import + mapping.
     Nem rajzol teljes Tactical Pro dashboardot, csak az import/mapping és a context építés marad.
     """
     _fpi_section_header_v113("3. Import taktikai fájlok", "Opcionális PDF / Excel import saját csapatra és ellenfélre. GPS-only módban ez kihagyható.", "tactical")
@@ -9243,7 +9295,7 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
 
         merged_pdf_insights = _fpi_safe_merge_tactical_pdf_insights_v104(own_pdf_insights, opp_pdf_insights)
         tactical_ctx_for_plan = {
-            "analysis_level_label": "Clean workspace – GPS + opcionális taktikai input",
+            "analysis_level_label": "Import & Executive Export – GPS + opcionális taktikai input",
             "pdf_insights": merged_pdf_insights,
             "team_metrics": opp_team_metrics,
             "player_tables": opp_player_tables,
@@ -9479,8 +9531,8 @@ def _fpi_apply_v118_final_light_controls_patch() -> None:
     )
 
 def render_fpi_clean_workspace_v101() -> None:
-    """Tiszta import / szűrő / export oldal.
-    A régi teljes app továbbra is elérhető külön gombbal, de ez az oldal a klubdemóhoz és gyors használathoz letisztított flow.
+    """Import & Executive Export oldal.
+    A haladó app továbbra is elérhető külön gombbal, de klubdemóhoz és napi használathoz ez a fő munkafolyamat.
     """
     _fpi_landing_css_v100()
     _fpi_mapper_contrast_css_v109()
@@ -9494,19 +9546,19 @@ def render_fpi_clean_workspace_v101() -> None:
             """
             <div class="fpi-landing-hero" style="padding:26px 30px;">
                 <div class="fpi-landing-kicker">IMPORT / SZŰRŐK / EXPORT</div>
-                <div class="fpi-landing-title" style="font-size:2.25rem;">Tiszta munkafelület: GPS feltöltésből azonnal riport.</div>
+                <div class="fpi-landing-title" style="font-size:2.25rem;">Import & Executive Export: GPS feltöltésből azonnal riport.</div>
                 <div class="fpi-landing-sub">
-                    Itt csak a lényeg van: GPS import, Smart Mapper, taktikai PDF/Excel import, meccskontextus, korosztály/szint, hétválasztás és PDF export.
-                    A teljes, részletes dashboard külön oldalon marad.
+                    Ez a fő munkafolyamat: GPS import, Smart Mapper, opcionális taktikai PDF/Excel, meccskontextus, korosztály/szint, hétválasztás és PDF export.
+                    A részletes app haladó felhasználóknak külön elérhető.
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
     with top2:
-        if st.button("← Nyitóoldal", use_container_width=True, key="clean_back_landing_v101"):
+        if st.button("← Főoldal", use_container_width=True, key="clean_back_landing_v101"):
             _fpi_set_page_v100("landing")
-        if st.button("⚙️ Teljes app", use_container_width=True, key="clean_go_full_app_v101"):
+        if st.button("⚙️ Haladó app", use_container_width=True, key="clean_go_full_app_v101"):
             _fpi_set_page_v100("app")
 
     _fpi_section_header_v113("1. Import GPS", "GPS / terhelési Excel feltöltése, mintaadat vagy sablon letöltése.", "gps")
@@ -9571,7 +9623,7 @@ def render_fpi_clean_workspace_v101() -> None:
             render_mapping_score(mapping_clean)
             st.dataframe(enhanced_mapping_quality_df(raw_df_clean, mapping_clean), use_container_width=True, hide_index=True)
 
-            st.markdown("#### Gyors kézi mapping a tiszta oldalon")
+            st.markdown("#### Gyors kézi mapping a Import & Executive Export oldalon")
             st.caption("Ha egy mező rosszul lett felismerve, itt is átállíthatod. A teljes, részletes mapper továbbra is a Teljes appban érhető el.")
             cols_clean_map = [""] + sorted([str(c) for c in raw_df_clean.columns], key=lambda x: x.lower())
             editable_fields_clean = [
@@ -9602,12 +9654,12 @@ def render_fpi_clean_workspace_v101() -> None:
                     mapped_clean = derive_missing_columns(mapped_clean)
                     st.session_state["clean_mapped_df_override_v105"] = mapped_clean
                     st.session_state["clean_manual_mapping_v105"] = manual_clean
-                    st.success("Mapping alkalmazva a tiszta oldalon.")
+                    st.success("Mapping alkalmazva a Import & Executive Export oldalon.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Mapping alkalmazási hiba: {e}")
 
-            if st.button("Haladó mapping szerkesztése a teljes appban", key="clean_advanced_mapping_full_v102"):
+            if st.button("Haladó mapping szerkesztése a részletes appban", key="clean_advanced_mapping_full_v102"):
                 _fpi_set_page_v100("app")
 
     df_clean = add_position_group(df_clean)
@@ -9795,20 +9847,22 @@ render_fpi_hero()
 
 top_back_col, top_clean_col, top_title_col = st.columns([1, 1.2, 4.8])
 with top_back_col:
-    if st.button("← Nyitóoldal", use_container_width=True, key="back_to_landing_v100"):
+    if st.button("← Főoldal", use_container_width=True, key="back_to_landing_v100"):
         _fpi_set_page_v100("landing")
 with top_clean_col:
-    if st.button("↗ Tiszta oldal", use_container_width=True, key="full_to_clean_v101"):
+    if st.button("↗ Import / Export", use_container_width=True, key="full_to_clean_v101"):
         _fpi_set_page_v100("clean")
 with top_title_col:
-    st.caption("Teljes, részletes dashboard / Smart Mapper / Tactical Pro+ / haladó elemzések")
+    st.caption("Haladó elemző felület / részletes dashboardok / diagnosztika")
 
 with st.sidebar:
+    if st.button("← Főoldal", use_container_width=True, key="sidebar_home_v123"):
+        _fpi_set_page_v100("landing")
     render_license_panel()
     st.divider()
 
-    st.info("Adatimport és mapping: használd a Tiszta import oldalt. Itt már csak elemzés és riportnézetek vannak.")
-    if st.button("↗ Import / export oldal", use_container_width=True, key="sidebar_go_clean_v115"):
+    st.info("Adatimport és mapping: használd a Import & Executive Export oldalt. Itt már csak elemzés és riportnézetek vannak.")
+    if st.button("↗ Import & Executive Export", use_container_width=True, key="sidebar_go_clean_v115"):
         _fpi_set_page_v100("clean")
 
     st.markdown("**Adatforrás:** Import / export oldal")
@@ -9819,7 +9873,7 @@ with st.sidebar:
         use_demo_data = st.toggle("Minta riport mintaadatokkal", value=True, key="full_demo_data_v115")
     st.markdown("**Fókusz:** vezetői riport, readiness, risk, edzői teendők.")
 
-# V115: a teljes app lehetőleg a Tiszta import oldalon már feldolgozott GPS adatot használja.
+# V115: a teljes app lehetőleg a Import & Executive Export oldalon már feldolgozott GPS adatot használja.
 # Így a Dashboard / Tactical Pro+ / többi fül nem duplikál importot és mappert.
 if "clean_mapped_df_override_v105" in st.session_state and isinstance(st.session_state["clean_mapped_df_override_v105"], pd.DataFrame) and not st.session_state["clean_mapped_df_override_v105"].empty:
     raw_df = st.session_state["clean_mapped_df_override_v105"].copy()
