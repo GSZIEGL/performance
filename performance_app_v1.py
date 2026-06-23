@@ -3002,14 +3002,30 @@ def week_label_short(week_value: object) -> str:
 def render_fpi_hero() -> None:
     st.markdown(
         """
+        <style>
+        .fpi-hero-wow{
+            background:linear-gradient(135deg,#f8fafc 0%,#e0f2fe 55%,#ecfdf5 100%) !important;
+            color:#0f172a !important;
+            border:1px solid #bfdbfe !important;
+            box-shadow:0 22px 60px rgba(15,23,42,.14) !important;
+        }
+        .fpi-hero-wow h1{color:#0f172a !important;}
+        .fpi-hero-wow p{color:#334155 !important;}
+        .fpi-hero-wow *{color:#0f172a !important;}
+        .fpi-chip-wow{background:#ffffff !important;border:1px solid #bfdbfe !important;color:#0f172a !important;}
+        .fpi-top-nav-card{background:#ffffff;border:1px solid #dbeafe;border-radius:22px;padding:14px 16px;margin:8px 0 14px 0;box-shadow:0 10px 28px rgba(15,23,42,.08);}
+        .fpi-top-nav-card b{color:#0f172a;}
+        .fpi-top-nav-card span{color:#475569;}
+        </style>
         <div class="fpi-hero-wow">
           <h1>⚽ Football Performance Intelligence</h1>
-          <p>GPS-terhelésből vezetői döntéstámogatás, edzői prioritások és exportálható performance riportok.</p>
+          <p>GPS adatokból és opcionális taktikai PDF/Excel inputból vezetői döntéstámogatás, edzői prioritások és exportálható performance riportok.</p>
           <div class="fpi-chip-row">
             <span class="fpi-chip-wow">⚡ Readiness</span>
             <span class="fpi-chip-wow">🎯 Coaching priorities</span>
             <span class="fpi-chip-wow">🧠 Smart mapper</span>
             <span class="fpi-chip-wow">📄 Executive export</span>
+            <span class="fpi-chip-wow">🧩 Tactical Pro+ opcionális</span>
           </div>
         </div>
         """,
@@ -8465,7 +8481,7 @@ def _fpi_home_back_button_v123(key: str = "home_back_v123") -> None:
         _fpi_set_page_v100("landing")
 
 def _fpi_mapper_contrast_css_v109() -> None:
-    """Mapper / Import & Executive Export kontraszt javítás."""
+    """Mapper / Import / Executive Export kontraszt javítás."""
     st.markdown(
         """
         <style>
@@ -8748,8 +8764,8 @@ def render_fpi_landing_page_v100() -> None:
                 és a következő mikrociklus edzői javaslatait.
             </div>
             <div class="fpi-before-after">
-                <div class="fpi-ba-card"><b>Régi működés</b><span>GPS rendszer → Excel → manuális elemzés → riport → döntés</span></div>
-                <div class="fpi-ba-card"><b>FPI működés</b><span>GPS + taktikai input → FPI → Executive PDF → döntés</span></div>
+                <div class="fpi-ba-card"><b>A legtöbb rendszer működése</b><span>GPS / adatexport → Excel → manuális elemzés → riport → döntés</span></div>
+                <div class="fpi-ba-card"><b>FPI működés</b><span>GPS + opcionális taktikai input → FPI → Executive PDF → döntés</span></div>
             </div>
             <div class="fpi-pill-line">
                 <span>GPS-only prémium riport</span><span>Opcionális taktikai PDF/Excel</span><span>Readiness & risk</span><span>Poszt- és szintreferenciák</span><span>Mikrociklus javaslat</span>
@@ -8967,7 +8983,7 @@ def _fpi_safe_build_adaptive_plan_v104(gps_context: Dict[str, object], tactical_
     if "_fpi_build_adaptive_match_training_plan" in globals():
         return _fpi_build_adaptive_match_training_plan(gps_context or {}, tactical_ctx_for_plan or {})
     return {
-        "analysis_level": (tactical_ctx_for_plan or {}).get("analysis_level_label", "Import & Executive Export"),
+        "analysis_level": (tactical_ctx_for_plan or {}).get("analysis_level_label", "Import / Executive Export"),
         "plan_a": "GPS-only – erőnléti fókuszú mikrociklus",
         "risks": ["GPS-alapú terhelési és readiness kockázatok"],
         "md_plan": [],
@@ -8984,7 +9000,7 @@ def _fpi_safe_build_tactical_executive_context_v104(gps_context: Dict[str, objec
     opp = (tactical_ctx_for_plan or {}).get("opponent", {}) or {}
     pdfi = (tactical_ctx_for_plan or {}).get("pdf_insights", {}) or {}
     return {
-        "analysis_level": (tactical_ctx_for_plan or {}).get("analysis_level_label", "Import & Executive Export"),
+        "analysis_level": (tactical_ctx_for_plan or {}).get("analysis_level_label", "Import / Executive Export"),
         "plan_a": (plan or {}).get("plan_a", "GPS-only – erőnléti fókuszú mikrociklus"),
         "risks": (plan or {}).get("risks", []),
         "md_plan": (plan or {}).get("md_plan", []),
@@ -9005,7 +9021,7 @@ def _fpi_safe_build_tactical_executive_context_v104(gps_context: Dict[str, objec
 
 
 # =========================================================
-# V11.3 - Import & Executive Export section headers + saved user defaults
+# V11.3 - Import / Executive Export section headers + saved user defaults
 # =========================================================
 def _fpi_current_user_key_v113() -> str:
     """Belépési azonosítóhoz kötött, fájlnév-biztos beállításkulcs."""
@@ -9295,7 +9311,7 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
 
         merged_pdf_insights = _fpi_safe_merge_tactical_pdf_insights_v104(own_pdf_insights, opp_pdf_insights)
         tactical_ctx_for_plan = {
-            "analysis_level_label": "Import & Executive Export – GPS + opcionális taktikai input",
+            "analysis_level_label": "Import / Executive Export – GPS + opcionális taktikai input",
             "pdf_insights": merged_pdf_insights,
             "team_metrics": opp_team_metrics,
             "player_tables": opp_player_tables,
@@ -9531,7 +9547,7 @@ def _fpi_apply_v118_final_light_controls_patch() -> None:
     )
 
 def render_fpi_clean_workspace_v101() -> None:
-    """Import & Executive Export oldal.
+    """Import / Executive Export oldal.
     A haladó app továbbra is elérhető külön gombbal, de klubdemóhoz és napi használathoz ez a fő munkafolyamat.
     """
     _fpi_landing_css_v100()
@@ -9623,7 +9639,7 @@ def render_fpi_clean_workspace_v101() -> None:
             render_mapping_score(mapping_clean)
             st.dataframe(enhanced_mapping_quality_df(raw_df_clean, mapping_clean), use_container_width=True, hide_index=True)
 
-            st.markdown("#### Gyors kézi mapping a Import & Executive Export oldalon")
+            st.markdown("#### Gyors kézi mapping a Import / Executive Export oldalon")
             st.caption("Ha egy mező rosszul lett felismerve, itt is átállíthatod. A teljes, részletes mapper továbbra is a Teljes appban érhető el.")
             cols_clean_map = [""] + sorted([str(c) for c in raw_df_clean.columns], key=lambda x: x.lower())
             editable_fields_clean = [
@@ -9654,7 +9670,7 @@ def render_fpi_clean_workspace_v101() -> None:
                     mapped_clean = derive_missing_columns(mapped_clean)
                     st.session_state["clean_mapped_df_override_v105"] = mapped_clean
                     st.session_state["clean_manual_mapping_v105"] = manual_clean
-                    st.success("Mapping alkalmazva a Import & Executive Export oldalon.")
+                    st.success("Mapping alkalmazva a Import / Executive Export oldalon.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Mapping alkalmazási hiba: {e}")
@@ -9855,25 +9871,27 @@ with top_clean_col:
 with top_title_col:
     st.caption("Haladó elemző felület / részletes dashboardok / diagnosztika")
 
-with st.sidebar:
-    if st.button("← Főoldal", use_container_width=True, key="sidebar_home_v123"):
-        _fpi_set_page_v100("landing")
-    render_license_panel()
-    st.divider()
+# V12.5: a haladó appban nincs külön bal oldali belépési/import panel.
+# A fő munkafolyamat továbbra is az Import / Executive Export oldal.
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"]{display:none !important;}
+    .block-container{padding-left:2rem !important;padding-right:2rem !important;}
+    </style>
+    <div class="fpi-top-nav-card">
+        <b>Haladó elemző felület</b><br>
+        <span>Az import, mapping és export fő helye az Import / Executive Export oldal. Itt a részletes elemzések, metodika, kockázat és mikrociklus nézetek látszanak.</span>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+use_demo_data = False
+uploaded = None
+if "clean_mapped_df_override_v105" not in st.session_state:
+    use_demo_data = st.toggle("Minta riport mintaadatokkal", value=True, key="full_demo_data_v115")
 
-    st.info("Adatimport és mapping: használd a Import & Executive Export oldalt. Itt már csak elemzés és riportnézetek vannak.")
-    if st.button("↗ Import & Executive Export", use_container_width=True, key="sidebar_go_clean_v115"):
-        _fpi_set_page_v100("clean")
-
-    st.markdown("**Adatforrás:** Import / export oldal")
-    st.caption("A teljes app nem jelenít meg külön feltöltőt és mappert, hogy ne duplikálja az import oldalt.")
-    use_demo_data = False
-    uploaded = None
-    if "clean_mapped_df_override_v105" not in st.session_state:
-        use_demo_data = st.toggle("Minta riport mintaadatokkal", value=True, key="full_demo_data_v115")
-    st.markdown("**Fókusz:** vezetői riport, readiness, risk, edzői teendők.")
-
-# V115: a teljes app lehetőleg a Import & Executive Export oldalon már feldolgozott GPS adatot használja.
+# V115: a teljes app lehetőleg a Import / Executive Export oldalon már feldolgozott GPS adatot használja.
 # Így a Dashboard / Tactical Pro+ / többi fül nem duplikál importot és mappert.
 if "clean_mapped_df_override_v105" in st.session_state and isinstance(st.session_state["clean_mapped_df_override_v105"], pd.DataFrame) and not st.session_state["clean_mapped_df_override_v105"].empty:
     raw_df = st.session_state["clean_mapped_df_override_v105"].copy()
@@ -9893,7 +9911,7 @@ else:
     sheets = read_excel_all(uploaded)
     sheets = prepare_uploaded_sheets(sheets)
     sheet_names = list(sheets.keys())
-    with st.sidebar:
+    with st.expander("📄 Munkalap kiválasztása", expanded=False):
         selected_sheet = st.selectbox("Melyik munkalapot használjuk?", sheet_names, index=0)
     if st.session_state.get("mapper_selected_sheet") != selected_sheet:
         st.session_state.pop("mapped_df_override", None)
@@ -9937,12 +9955,12 @@ if not weeks or not players:
     render_emergency_mapper(raw_df, mapping if "mapping" in globals() else {}, missing_core if "missing_core" in globals() else [])
     st.stop()
 
-with st.sidebar:
+with st.expander("🧭 Hétfelismerés / diagnosztika", expanded=False):
     if st.session_state.get("week_rescue_applied"):
         with st.expander("Hétfelismerés diagnosztika V6.2", expanded=False):
             st.json(st.session_state.get("week_rescue_applied"))
 
-with st.sidebar:
+with st.expander("⚙️ Meccskontextus és edzői beállítások", expanded=False):
     st.header("Meccskontextus")
     today_v94 = pd.Timestamp.today().date()
     opponent_v94 = st.text_input("Ellenfél neve", value=st.session_state.get("fpi_match_opponent_v94", ""))
@@ -10196,8 +10214,9 @@ forward_summary_text = (
 
 
 def _fpi_benchmark_browser_df_v124(age: str, level: str, position: str, playmodel: str, metric_filter: str = "Összes mutató") -> pd.DataFrame:
-    """Benchmark böngésző táblázat a Metodika oldalhoz."""
-    prof = _fpi_build_reference_profile_v112(age, level, position, playmodel)
+    """Benchmark böngésző táblázat a Metodika oldalhoz.
+    V12.5: mindig ad vissza értelmezhető sort; a szűrők nem üríthetik ki véletlenül a táblát.
+    """
     metric_names = {
         "total_distance": "Össztáv",
         "training_load": "Load / terhelési pont",
@@ -10206,10 +10225,24 @@ def _fpi_benchmark_browser_df_v124(age: str, level: str, position: str, playmode
         "sprints": "Sprint darabszám",
         "high_efforts": "High Efforts",
     }
+    metric_alias = {v: k for k, v in metric_names.items()}
+    # Régebbi címkék / esetleges elgépelések kezelése
+    metric_alias.update({
+        "Load": "training_load",
+        "Terhelési pont": "training_load",
+        "HSR": "hsr_distance",
+        "Sprint": "sprint_distance",
+        "High efforts": "high_efforts",
+    })
+    prof = _fpi_build_reference_profile_v112(age, level, position, playmodel)
+    ranges = prof.get("ranges", {}) or {}
+    wanted_metric = None if metric_filter in [None, "", "Összes mutató"] else metric_alias.get(str(metric_filter), None)
     rows = []
-    for metric, rng in prof.get("ranges", {}).items():
-        label = metric_names.get(metric, metric)
-        if metric_filter != "Összes mutató" and label != metric_filter:
+    for metric, label in metric_names.items():
+        if wanted_metric and metric != wanted_metric:
+            continue
+        rng = ranges.get(metric) or FPI_REFERENCE_BASE_RANGES_V112.get(metric)
+        if not rng:
             continue
         weekly_label, avg_label, low, high, avg_low, avg_high = rng
         rows.append({
@@ -10225,7 +10258,53 @@ def _fpi_benchmark_browser_df_v124(age: str, level: str, position: str, playmode
             "Edzésátlag alsó %": avg_low,
             "Edzésátlag felső %": avg_high,
         })
+    if not rows:
+        # Biztonsági fallback: ha a szűrőcímke nem található, mutassuk az összes mutatót.
+        for metric, label in metric_names.items():
+            rng = ranges.get(metric) or FPI_REFERENCE_BASE_RANGES_V112.get(metric)
+            if not rng:
+                continue
+            weekly_label, avg_label, low, high, avg_low, avg_high = rng
+            rows.append({
+                "Mutató": label, "Korosztály": age, "Bajnoki szint": level, "Poszt": position, "Játékmodell": playmodel,
+                "Heti célzóna": weekly_label, "Edzésátlag célzóna": avg_label,
+                "Heti alsó %": low, "Heti felső %": high, "Edzésátlag alsó %": avg_low, "Edzésátlag felső %": avg_high,
+            })
     return pd.DataFrame(rows)
+
+
+def _fpi_render_benchmark_browser_table_v125(df: pd.DataFrame) -> None:
+    """Olvasható benchmark táblázat dataframe mellett/helyett."""
+    if df is None or df.empty:
+        st.warning("Ehhez a szűréshez nincs megjeleníthető benchmark. Válassz másik mutatót vagy profilt.")
+        return
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    # Extra, biztosan látható kompakt HTML táblázat, ha a Streamlit táblázat stílusa furcsán viselkedne.
+    rows_html = []
+    for _, r in df.iterrows():
+        rows_html.append(
+            f"<tr><td>{html.escape(str(r.get('Mutató','')))}</td>"
+            f"<td>{html.escape(str(r.get('Heti célzóna','')))}</td>"
+            f"<td>{html.escape(str(r.get('Edzésátlag célzóna','')))}</td>"
+            f"<td>{html.escape(str(r.get('Korosztály','')))} / {html.escape(str(r.get('Bajnoki szint','')))} / {html.escape(str(r.get('Poszt','')))} / {html.escape(str(r.get('Játékmodell','')))}</td></tr>"
+        )
+    st.markdown(
+        """
+        <style>
+        .fpi-benchmark-table{width:100%;border-collapse:separate;border-spacing:0;margin-top:12px;background:#ffffff;border:1px solid #dbeafe;border-radius:16px;overflow:hidden;}
+        .fpi-benchmark-table th{background:#e0f2fe;color:#0f172a;padding:10px 12px;text-align:left;font-weight:950;border-bottom:1px solid #bfdbfe;}
+        .fpi-benchmark-table td{background:#ffffff;color:#0f172a;padding:10px 12px;border-bottom:1px solid #e5e7eb;}
+        .fpi-benchmark-table tr:last-child td{border-bottom:none;}
+        </style>
+        <table class="fpi-benchmark-table">
+            <thead><tr><th>Mutató</th><th>Heti célzóna</th><th>Edzésátlag célzóna</th><th>Aktív profil</th></tr></thead>
+            <tbody>
+        """ + "".join(rows_html) + """
+            </tbody>
+        </table>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_methodology_tab() -> None:
@@ -10371,7 +10450,7 @@ def render_methodology_tab() -> None:
             bench_playmodel_v124,
             bench_metric_v124,
         )
-        st.dataframe(benchmark_df_v124, use_container_width=True, hide_index=True)
+        _fpi_render_benchmark_browser_table_v125(benchmark_df_v124)
         st.info("Értelmezés: ha például a HSR heti célzóna 150–250%, akkor a hét teljes HSR terhelése ideálisan az adott profil meccsreferenciájának kb. 1,5–2,5-szerese.")
 
     st.markdown("### 8. Mikrociklus motor")
