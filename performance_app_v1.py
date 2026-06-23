@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V112_REFERENCE_ENGINE_V2_MICROCYCLE_V2_2026_06_19"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V124_LANDING_BENCHMARK_BROWSER_2026_06_23"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -8706,7 +8706,7 @@ def render_fpi_landing_page_v100() -> None:
         }
         .fpi-wow-kicker{
             display:inline-block;padding:7px 13px;border-radius:999px;
-            background:#0f172a;color:#ffffff;font-weight:950;font-size:.82rem;letter-spacing:.07em;
+            background:linear-gradient(135deg,#ffffff,#ecfdf5);color:#123d66;font-weight:950;font-size:.82rem;letter-spacing:.07em;border:1px solid #93c5fd;box-shadow:0 8px 18px rgba(15,23,42,.08);
             margin-bottom:16px;
         }
         .fpi-wow-title{
@@ -8740,19 +8740,19 @@ def render_fpi_landing_page_v100() -> None:
         .fpi-mode-card h3{font-weight:950;}
         </style>
         <div class="fpi-wow-hero">
-            <div class="fpi-wow-kicker">FOOTBALL PERFORMANCE INTELLIGENCE</div>
-            <div class="fpi-wow-title">GPS exportból 30 másodperc alatt vezetői riport és következő heti mikrociklus.</div>
+            <div class="fpi-wow-kicker">⚽ FOOTBALL PERFORMANCE INTELLIGENCE</div>
+            <div class="fpi-wow-title">GPS + opcionális taktikai adatokból 30 másodperc alatt vezetői riport.</div>
             <div class="fpi-wow-sub">
-                Az FPI nem egy újabb GPS-dashboard. A feltöltött adatokból automatikusan kiemeli a heti állapotképet,
-                a kockázatokat, a referencia-eltéréseket és az edzői teendőket. A Tactical Pro+ opcionális prémium réteg,
-                ha a GPS mellé taktikai PDF/Excel is rendelkezésre áll.
+                Az FPI nem adatokat listáz, hanem döntési javaslatot ad. A GPS adatokból és opcionálisan taktikai PDF/Excel anyagokból
+                automatikusan elkészíti a heti állapotképet, a kockázati listát, a benchmark-összevetést
+                és a következő mikrociklus edzői javaslatait.
             </div>
             <div class="fpi-before-after">
                 <div class="fpi-ba-card"><b>Régi működés</b><span>GPS rendszer → Excel → manuális elemzés → riport → döntés</span></div>
-                <div class="fpi-ba-card"><b>FPI működés</b><span>GPS rendszer → FPI → Executive PDF → döntés</span></div>
+                <div class="fpi-ba-card"><b>FPI működés</b><span>GPS + taktikai input → FPI → Executive PDF → döntés</span></div>
             </div>
             <div class="fpi-pill-line">
-                <span>GPS-only prémium riport</span><span>Readiness & risk</span><span>Poszt- és szintreferenciák</span><span>Mikrociklus javaslat</span><span>Tactical Pro+ opcionális</span>
+                <span>GPS-only prémium riport</span><span>Opcionális taktikai PDF/Excel</span><span>Readiness & risk</span><span>Poszt- és szintreferenciák</span><span>Mikrociklus javaslat</span>
             </div>
         </div>
         """,
@@ -8764,16 +8764,16 @@ def render_fpi_landing_page_v100() -> None:
         st.markdown(
             """
             <div class="fpi-main-cta-wrap">
-                <div class="fpi-cta-head">Fő munkafolyamat: Import & Executive Export</div>
+                <div class="fpi-cta-head">Fő munkafolyamat: Vezetői riport készítése</div>
                 <div class="fpi-cta-text">
-                    Ez a termék központja: GPS feltöltés, opcionális taktikai input, választók, ellenőrzés és PDF export.
+                    Ez a termék központja: GPS adatok, opcionális taktikai PDF/Excel input, választók, ellenőrzés és PDF export.
                     Klubdemóban és éles használatban is ezt érdemes mutatni elsőként.
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        if st.button("🚀 Megnyitás: Import & Executive Export", use_container_width=True, key="landing_go_to_clean_v123", type="primary"):
+        if st.button("⚡ Vezetői riport készítése", use_container_width=True, key="landing_go_to_clean_v124", type="primary"): 
             _fpi_set_page_v100("clean")
     with cta_right:
         st.markdown(
@@ -8785,7 +8785,7 @@ def render_fpi_landing_page_v100() -> None:
             """,
             unsafe_allow_html=True,
         )
-        if st.button("⚙️ Haladó app", use_container_width=True, key="landing_go_to_full_app_v123"):
+        if st.button("🔍 Haladó elemző felület", use_container_width=True, key="landing_go_to_full_app_v124"): 
             _fpi_set_page_v100("app")
 
     render_landing_login_panel_v103()
@@ -8796,7 +8796,7 @@ def render_fpi_landing_page_v100() -> None:
         st.markdown(
             """
             <div class="fpi-mode-card">
-                <h3>GPS-only Executive</h3>
+                <h3>GPS + opcionális taktika</h3>
                 <p>Csak GPS exportból is elkészül a heti állapotkép, a kockázati lista, a referencia-összevetés és a következő heti mikrociklus javaslat.</p>
             </div>
             """,
@@ -9545,8 +9545,8 @@ def render_fpi_clean_workspace_v101() -> None:
         st.markdown(
             """
             <div class="fpi-landing-hero" style="padding:26px 30px;">
-                <div class="fpi-landing-kicker">IMPORT / SZŰRŐK / EXPORT</div>
-                <div class="fpi-landing-title" style="font-size:2.25rem;">Import & Executive Export: GPS feltöltésből azonnal riport.</div>
+                <div class="fpi-landing-kicker">IMPORT / ELEMZÉS / EXECUTIVE EXPORT</div>
+                <div class="fpi-landing-title" style="font-size:2.25rem;">Vezetői riport készítése: GPS + opcionális taktikai inputból azonnal export.</div>
                 <div class="fpi-landing-sub">
                     Ez a fő munkafolyamat: GPS import, Smart Mapper, opcionális taktikai PDF/Excel, meccskontextus, korosztály/szint, hétválasztás és PDF export.
                     A részletes app haladó felhasználóknak külön elérhető.
@@ -10193,6 +10193,41 @@ forward_summary_text = (
 )
 
 
+
+
+def _fpi_benchmark_browser_df_v124(age: str, level: str, position: str, playmodel: str, metric_filter: str = "Összes mutató") -> pd.DataFrame:
+    """Benchmark böngésző táblázat a Metodika oldalhoz."""
+    prof = _fpi_build_reference_profile_v112(age, level, position, playmodel)
+    metric_names = {
+        "total_distance": "Össztáv",
+        "training_load": "Load / terhelési pont",
+        "hsr_distance": "HSR / nagysebességű futás",
+        "sprint_distance": "Sprint táv",
+        "sprints": "Sprint darabszám",
+        "high_efforts": "High Efforts",
+    }
+    rows = []
+    for metric, rng in prof.get("ranges", {}).items():
+        label = metric_names.get(metric, metric)
+        if metric_filter != "Összes mutató" and label != metric_filter:
+            continue
+        weekly_label, avg_label, low, high, avg_low, avg_high = rng
+        rows.append({
+            "Mutató": label,
+            "Korosztály": age,
+            "Bajnoki szint": level,
+            "Poszt": position,
+            "Játékmodell": playmodel,
+            "Heti célzóna": weekly_label,
+            "Edzésátlag célzóna": avg_label,
+            "Heti alsó %": low,
+            "Heti felső %": high,
+            "Edzésátlag alsó %": avg_low,
+            "Edzésátlag felső %": avg_high,
+        })
+    return pd.DataFrame(rows)
+
+
 def render_methodology_tab() -> None:
     """FPI V6.3 metodikai oldal – transzparens számítási és értelmezési logika."""
     st.markdown("## 📚 FPI metodika")
@@ -10302,9 +10337,42 @@ def render_methodology_tab() -> None:
 
     st.markdown("### 7. Benchmarkok és readiness")
     st.write(
-        "A benchmarkok korosztály, szint, játékmodell és játékosonkénti poszt alapján aktualizálódnak. A "
-        "játékmodell szerint finomíthatók. A readiness és risk pontszámok döntéstámogatók, nem orvosi diagnózisok."
+        "A benchmarkok korosztály, bajnoki szint, játékmodell és játékosonkénti poszt alapján aktualizálódnak. "
+        "A readiness és risk pontszámok döntéstámogatók, nem orvosi diagnózisok."
     )
+
+    with st.expander("🔎 Benchmark böngésző – szűrés mutató, korosztály, bajnoki szint és poszt szerint", expanded=False):
+        st.caption("A célzónák azt mutatják, hogy a heti edzésösszeg és az egy edzésre jutó átlag hány százaléka az adott profil meccsreferenciájának.")
+        bc1, bc2, bc3, bc4, bc5 = st.columns([1, 1, 1, 1, 1.2])
+        metric_options_v124 = [
+            "Összes mutató",
+            "Össztáv",
+            "Load / terhelési pont",
+            "HSR / nagysebességű futás",
+            "Sprint táv",
+            "Sprint darabszám",
+            "High Efforts",
+        ]
+        with bc1:
+            bench_metric_v124 = st.selectbox("Mutató", metric_options_v124, index=0, key="method_benchmark_metric_v124")
+        with bc2:
+            bench_age_v124 = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=0, key="method_benchmark_age_v124")
+        with bc3:
+            bench_level_v124 = st.selectbox("Bajnoki szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=1, key="method_benchmark_level_v124")
+        with bc4:
+            bench_position_v124 = st.selectbox("Poszt", FPI_REFERENCE_POSITION_OPTIONS_V112, index=4, key="method_benchmark_position_v124")
+        with bc5:
+            bench_playmodel_v124 = st.selectbox("Játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=4, key="method_benchmark_playmodel_v124")
+
+        benchmark_df_v124 = _fpi_benchmark_browser_df_v124(
+            bench_age_v124,
+            bench_level_v124,
+            bench_position_v124,
+            bench_playmodel_v124,
+            bench_metric_v124,
+        )
+        st.dataframe(benchmark_df_v124, use_container_width=True, hide_index=True)
+        st.info("Értelmezés: ha például a HSR heti célzóna 150–250%, akkor a hét teljes HSR terhelése ideálisan az adott profil meccsreferenciájának kb. 1,5–2,5-szerese.")
 
     st.markdown("### 8. Mikrociklus motor")
     st.write(
