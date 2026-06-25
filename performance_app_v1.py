@@ -4821,11 +4821,7 @@ def build_premium_pdf_bytes(
             return 0
         return int((insights_df["Súlyosság"].astype(str).str.upper() == label).sum())
 
-    high_risk_count = 0
-    medium_risk_count = 0
-    if risk_df is not None and not risk_df.empty and "Kockázati szint" in risk_df.columns:
-        high_risk_count = int((risk_df["Kockázati szint"].astype(str).str.lower() == "magas").sum())
-        medium_risk_count = int((risk_df["Kockázati szint"].astype(str).str.lower() == "közepes").sum())
+    high_risk_count, medium_risk_count = _fpi_count_risk_levels_v126(risk_df)
 
     critical_count = severity_count("KRITIKUS")
     warning_count = severity_count("FIGYELMEZTETÉS")
@@ -6124,10 +6120,38 @@ def _fpi_norm_risk_level_v126(x: object) -> str:
 
 
 def _fpi_count_risk_levels_v126(risk_df: pd.DataFrame) -> Tuple[int, int]:
+    """Játékosszintű risk darabszám.
+
+    V12.7 javítás: nem sorokat számolunk, hanem egyedi játékosokat.
+    Ha egy játékos több sorban szerepel, a legmagasabb kockázati szintje számít.
+    Így nem fordulhat elő, hogy a PDF 5 közepes risket ír, miközben valójában
+    csak 1 játékos közepes kockázatú.
+    """
     if risk_df is None or risk_df.empty or "Kockázati szint" not in risk_df.columns:
         return 0, 0
-    levels = risk_df["Kockázati szint"].apply(_fpi_norm_risk_level_v126)
-    return int((levels == "Magas").sum()), int((levels == "Közepes").sum())
+
+    tmp = risk_df.copy()
+    tmp["_risk_norm"] = tmp["Kockázati szint"].apply(_fpi_norm_risk_level_v126)
+    tmp["_risk_rank"] = tmp["_risk_norm"].map({"Magas": 3, "Közepes": 2, "Alacsony": 1}).fillna(1).astype(int)
+
+    # Lehetséges játékosnév-oszlopok több exportverzióból.
+    player_col = None
+    for c in ["Játékos", "Játékos neve", "player_name", "Player", "Név", "Nev", "Name"]:
+        if c in tmp.columns:
+            player_col = c
+            break
+
+    if player_col:
+        tmp["_player_key"] = tmp[player_col].astype(str).str.strip().replace({"": np.nan, "nan": np.nan, "None": np.nan})
+        known = tmp[tmp["_player_key"].notna()].copy()
+        unknown = tmp[tmp["_player_key"].isna()].copy()
+        if not known.empty:
+            idx = known.groupby("_player_key")["_risk_rank"].idxmax()
+            tmp = pd.concat([known.loc[idx], unknown], ignore_index=True)
+
+    high = int((tmp["_risk_norm"] == "Magas").sum())
+    med = int((tmp["_risk_norm"] == "Közepes").sum())
+    return high, med
 
 
 def _fpi_pdf_week_type_label_v126(ctx: Dict[str, object], demo_label: str = "") -> str:
@@ -7583,8 +7607,9 @@ def build_fpi_product_pdf_bytes(
         add_executive_page()
         story.append(PageBreak()); add_fitness_page()
         story.append(PageBreak()); add_micro_page()
-        if tactical_context:
-            story.append(PageBreak()); add_tactical_executive_page()
+        # V12.7: a Full Reportból kivesszük az integrált taktikai összegzés oldalt.
+        # A vezetői oldal már tartalmazza a legfontosabb taktikai/GPS döntési információkat,
+        # így a riport rövidebb, kevésbé ismétlődő és könnyebben átadható.
     elif report_type == "fitness":
         add_fitness_page()
     elif report_type == "microcycle":
@@ -10158,8 +10183,7 @@ weekly_summary_text += (
     f"\nPeriodizációs besorolás: {periodization_type}"
 )
 player_risk_df = calculate_player_risk(analysis_base_df, selected_week)
-high_risk_count = int((player_risk_df["Kockázati szint"] == "Magas").sum()) if not player_risk_df.empty else 0
-medium_risk_count = int((player_risk_df["Kockázati szint"] == "Közepes").sum()) if not player_risk_df.empty else 0
+high_risk_count, medium_risk_count = _fpi_count_risk_levels_v126(player_risk_df)
 week_status_info = week_completeness_summary(analysis_base_df, selected_week)
 past_week_review_df, past_week_review_text = build_past_week_review(
     analysis_base_df,
