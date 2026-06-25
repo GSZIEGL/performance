@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V124_LANDING_BENCHMARK_BROWSER_2026_06_23"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V126_PDF_APP_POLISH_2026_06_25"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -806,7 +806,7 @@ st.markdown(
 # V115 - Light premium UI + readability + no duplicate imports
 # -----------------------------------------------------------------------------
 def _fpi_apply_v115_light_ui_patch() -> None:
-    """Világos, prémium FPI arculat + erős kontrasztjavítás Streamlit elemekre."""
+    """Világos, prémium Football Performance Intelligence (FPI) arculat + erős kontrasztjavítás Streamlit elemekre."""
     st.markdown(
         """
         <style>
@@ -6109,6 +6109,58 @@ def _fpi_readiness_short_v82(score: int) -> str:
         return "figyelendő, terheléskontroll szükséges"
     return "magas kockázat, óvatos mikrociklus"
 
+
+
+def _fpi_norm_risk_level_v126(x: object) -> str:
+    s = unicodedata.normalize("NFKD", str(x or "").strip().lower())
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    if "magas" in s or "high" in s:
+        return "Magas"
+    if "kozep" in s or "medium" in s:
+        return "Közepes"
+    if "alacsony" in s or "low" in s:
+        return "Alacsony"
+    return str(x or "").strip() or "Alacsony"
+
+
+def _fpi_count_risk_levels_v126(risk_df: pd.DataFrame) -> Tuple[int, int]:
+    if risk_df is None or risk_df.empty or "Kockázati szint" not in risk_df.columns:
+        return 0, 0
+    levels = risk_df["Kockázati szint"].apply(_fpi_norm_risk_level_v126)
+    return int((levels == "Magas").sum()), int((levels == "Közepes").sum())
+
+
+def _fpi_pdf_week_type_label_v126(ctx: Dict[str, object], demo_label: str = "") -> str:
+    raw = str(ctx.get("periodization_type", "") or "").strip()
+    raw = _fpi_normalize_coach_week_label_v121(raw) if "_fpi_normalize_coach_week_label_v121" in globals() else raw
+    bad = {"", "n.a.", "na", "none", "nincs elég adat", "nincs eleg adat", "nan"}
+    if raw.lower() in bad:
+        return "Mérkőzésre felkészítő mikrociklus" if demo_label else "Stabilizáló mikrociklus"
+    return raw
+
+
+def _fpi_week_type_interpretation_v126(label: str) -> str:
+    l = str(label or "").lower()
+    if "regener" in l:
+        return "A hét elsődleges célja a frissesség visszaépítése és a terhelési kockázat csökkentése."
+    if "stabil" in l:
+        return "A hét célja a terhelési szint megtartása, kontrollált sebességi és intenzitási ingerekkel."
+    if "terhelésfokoz" in l or "terhelesfokoz" in l:
+        return "A hét célja a fokozatos terhelésépítés, külön kontrollal a sprint és HSR ingerekre."
+    if "fejleszt" in l:
+        return "A hét célja célzott fizikai fejlesztés, de a readiness és játékoskockázat folyamatos kontrollja mellett."
+    if "formaid" in l:
+        return "A hét célja a meccs előtti frissítés: alacsonyabb volumen, rövid és minőségi intenzív ingerek."
+    if "mérkőzés" in l or "merkozes" in l:
+        return "A hét célja a mérkőzésre optimalizált mikrociklus: terhelésépítés, sebességi inger, majd frissítés."
+    return "A hét típusa a terhelési trend, readiness és játékosszintű kockázatok alapján értelmezendő."
+
+
+def _fpi_short_counts_sentence_v126(high_risk: int, med_risk: int) -> str:
+    if high_risk or med_risk:
+        return f"Játékoskockázat: {high_risk} magas, {med_risk} közepes."
+    return "Játékoskockázat: nincs kiemelt magas vagy közepes jelzés."
+
 def _fpi_top_tactical_messages_v82(tactical_context: Optional[Dict[str, object]], limit: int = 3, gps_context: Optional[Dict[str, object]] = None, readiness: Optional[int] = None, priorities: Optional[List[dict]] = None, week: Optional[str] = None) -> List[str]:
     if not _fpi_has_tactical_signal_v95(tactical_context):
         if gps_context is not None:
@@ -6152,27 +6204,31 @@ def _fpi_top_fitness_messages_v82(ctx: Dict[str, object], priorities: List[dict]
         out.append(f"Readiness {readiness}/100 – {_fpi_readiness_short_v82(readiness)}.")
     return [_fpi_clean_sentence_v82(x, 170) for x in list(dict.fromkeys(out))[:limit]]
 
-def _fpi_compact_player_risk_rows_v82(risk_df: pd.DataFrame, max_rows: int = 4) -> List[List[str]]:
+def _fpi_compact_player_risk_rows_v82(risk_df: pd.DataFrame, max_rows: int = 12) -> List[List[str]]:
     rows = [["Játékos", "Szint", "Miért fontos?"]]
     if risk_df is None or risk_df.empty:
         rows.append(["Nincs kiemelt", "Alacsony", "Nincs azonnali beavatkozási jelzés."])
         return rows
-    # vezetői szinten csak a magas/közepes érdekes; ha nincs, röviden jelezzük a legalacsonyabbakat
     df = risk_df.copy()
     level_col = "Kockázati szint" if "Kockázati szint" in df.columns else None
     reason_col = "Fő okok" if "Fő okok" in df.columns else "Fő ok" if "Fő ok" in df.columns else None
     player_col = "Játékos" if "Játékos" in df.columns else "player_name" if "player_name" in df.columns else df.columns[0]
     if level_col:
-        high = df[df[level_col].astype(str).str.lower().str.contains("magas|high|közepes|medium", regex=True, na=False)]
-        if not high.empty:
-            df = high
+        df["_risk_norm_v126"] = df[level_col].apply(_fpi_norm_risk_level_v126)
+        focus = df[df["_risk_norm_v126"].isin(["Magas", "Közepes"])]
+        if not focus.empty:
+            order = {"Magas": 0, "Közepes": 1, "Alacsony": 2}
+            focus = focus.assign(_risk_order=focus["_risk_norm_v126"].map(order).fillna(9))
+            df = focus.sort_values(["_risk_order"])
     for _, r in df.head(max_rows).iterrows():
+        level = _fpi_norm_risk_level_v126(r.get(level_col, "Alacsony") if level_col else "Figyelendő")
         rows.append([
-            _fpi_clean_sentence_v82(r.get(player_col, ""), 45),
-            _fpi_clean_sentence_v82(r.get(level_col, "Alacsony") if level_col else "Figyelendő", 35),
-            _fpi_clean_sentence_v82(r.get(reason_col, "Monitoring.") if reason_col else "Monitoring.", 120),
+            _fpi_clean_sentence_v82(r.get(player_col, ""), 42),
+            _fpi_clean_sentence_v82(level, 30),
+            _fpi_clean_sentence_v82(r.get(reason_col, "Monitoring.") if reason_col else "Monitoring.", 105),
         ])
     return rows
+
 
 def _fpi_md_plan_rows_v82(tactical_context: Optional[Dict[str, object]], gps_context: Optional[Dict[str, object]] = None, readiness: Optional[int] = None, priorities: Optional[List[dict]] = None, week: Optional[str] = None) -> List[Tuple[str, str, str]]:
     # output: nap, erőnléti cél, taktikai/GPS cél
@@ -7104,8 +7160,8 @@ def build_fpi_product_pdf_bytes(
     player_actions = ctx["player_actions_df"] if isinstance(ctx.get("player_actions_df"), pd.DataFrame) else pd.DataFrame()
     next_df = ctx["next_df"] if isinstance(ctx.get("next_df"), pd.DataFrame) else pd.DataFrame()
     current_df = ctx["current_df"] if isinstance(ctx.get("current_df"), pd.DataFrame) else pd.DataFrame()
-    high_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Magas").sum()) if not risk_df.empty else 0
-    med_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Közepes").sum()) if not risk_df.empty else 0
+    high_risk, med_risk = _fpi_count_risk_levels_v126(risk_df)
+    week_type_label_v126 = _fpi_pdf_week_type_label_v126(ctx, demo_label)
 
     font_name, font_bold = _register_pdf_font()
     buffer = io.BytesIO()
@@ -7115,7 +7171,7 @@ def build_fpi_product_pdf_bytes(
     sub = ParagraphStyle("FPI58Sub", parent=styles["Normal"], fontName=font_name, fontSize=8.8, leading=11, textColor=colors.HexColor("#334155"))
     h2 = ParagraphStyle("FPI58H2", parent=styles["Heading2"], fontName=font_bold, fontSize=11.2, leading=14, textColor=colors.HexColor("#0F172A"))
     body = ParagraphStyle("FPI58Body", parent=styles["Normal"], fontName=font_name, fontSize=8.0, leading=10.2, textColor=colors.HexColor("#111827"))
-    small = ParagraphStyle("FPI58Small", parent=styles["Normal"], fontName=font_name, fontSize=7.0, leading=8.6, textColor=colors.HexColor("#111827"))
+    small = ParagraphStyle("FPI58Small", parent=styles["Normal"], fontName=font_name, fontSize=6.6, leading=7.9, textColor=colors.HexColor("#111827"))
     head = ParagraphStyle("FPI58Head", parent=styles["Normal"], fontName=font_bold, fontSize=7.2, leading=8.8, alignment=1, textColor=colors.white)
     white_big = ParagraphStyle("FPI58WhiteBig", parent=styles["Normal"], fontName=font_bold, fontSize=16, leading=18, alignment=1, textColor=colors.white)
     white_small = ParagraphStyle("FPI58WhiteSmall", parent=styles["Normal"], fontName=font_name, fontSize=7.0, leading=8.5, alignment=1, textColor=colors.white)
@@ -7171,7 +7227,7 @@ def build_fpi_product_pdf_bytes(
 
     def add_cover():
         story.append(P("Football Performance Intelligence", title))
-        story.append(P(f"{label_prefix}{report_names.get(report_type, 'Riport')} | Hét: {format_week_label(str(week))} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
+        story.append(P(f"{label_prefix}{report_names.get(report_type, 'Riport')} | Hét: {format_week_label(str(week))} | Heti típus: {week_type_label_v126} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
         story.append(P(_fpi_pdf_match_context_line_v122(demo_label), sub))
         story.append(Spacer(1, 0.25*cm))
         kpis = [
@@ -7207,7 +7263,7 @@ def build_fpi_product_pdf_bytes(
         fitness_msgs = _fpi_top_fitness_messages_v82(ctx, priorities, readiness, 5 if not has_tactical_signal else 3)
         tactical_msgs = _fpi_top_tactical_messages_v82(tactical_context, 5 if not has_tactical_signal else 3, gps_context=ctx, readiness=readiness, priorities=priorities, week=week)
         md_rows_simple = _fpi_md_plan_rows_v82(tactical_context, gps_context=ctx, readiness=readiness, priorities=priorities, week=week)
-        risk_rows_simple = _fpi_compact_player_risk_rows_v82(risk_df, 4)
+        risk_rows_simple = _fpi_compact_player_risk_rows_v82(risk_df, 12)
 
         # 1) felső, nagyon gyors döntési sáv
         fast_rows = [[P("Állapot", head), P("Meccsterv", head), P("Fő döntés", head)]]
@@ -7438,22 +7494,11 @@ def build_fpi_product_pdf_bytes(
 
     def add_tactical_executive_page():
         def _pdf_tactical_key_numbers_summary(metrics: Dict[str, float]) -> str:
-            """PDF-safe local helper. Avoids NameError if the UI helper is defined later or not available."""
             if not metrics:
                 return "Nincs értelmezhető taktikai csapat KPI."
             label_map = {
-                "possession_pct": "Labdabirtoklás",
-                "shots": "Lövések",
-                "xg": "xG",
-                "entries_box": "Box entries",
-                "key_passes": "Kulcspasszok",
-                "corners": "Szögletek",
-                "ppda": "PPDA",
-                "pressing_success_pct": "Pressing %",
-                "counterattacks": "Kontrák",
-                "recoveries": "Labdaszerzések",
-                "lost_balls": "Labdavesztések",
-                "crosses": "Beadások",
+                "possession_pct": "Labdabirtoklás", "shots": "Lövések", "xg": "xG", "entries_box": "Box entries",
+                "pressing_success_pct": "Pressing %", "counterattacks": "Kontrák", "crosses": "Beadások", "corners": "Szögletek",
             }
             parts = []
             for k, lab in label_map.items():
@@ -7461,109 +7506,49 @@ def build_fpi_product_pdf_bytes(
                 if v not in [None, 0, 0.0, ""]:
                     try:
                         fv = float(v)
-                        if k in ["possession_pct", "pressing_success_pct", "passes_accurate_pct"] and fv <= 1:
-                            fv = fv * 100
-                            parts.append(f"{lab}: {fv:.1f}%")
-                        else:
-                            parts.append(f"{lab}: {fv:.1f}")
+                        if k in ["possession_pct", "pressing_success_pct"] and fv <= 1:
+                            fv *= 100
+                        parts.append(f"{lab}: {fv:.1f}{'%' if k in ['possession_pct','pressing_success_pct'] else ''}")
                     except Exception:
                         parts.append(f"{lab}: {v}")
-            return " | ".join(parts[:8]) if parts else "Nincs kiemelkedő taktikai KPI."
+            return " | ".join(parts[:6]) if parts else "Nincs kiemelkedő taktikai KPI."
 
-        story.append(section("Integrált vezetői konklúzió – GPS + Tactical", "#E0F2FE"))
+        story.append(section("Integrált taktikai összegzés – GPS + Tactical", "#E0F2FE"))
         if not tactical_context:
-            story.append(Paragraph(pdf_safe_text(
-                "Ehhez a riporthoz nem volt taktikai PDF/Excel feltöltve. A vezetői értékelés GPS-only módban készült. "
-                "Taktikai anyag feltöltése esetén ezen az oldalon megjelenik a saját csapat és ellenfél összevetése, "
-                "a felismert taktikai témák, a Match Plan és az MD-terv taktikai indoklása."
-            ), body))
+            story.append(Paragraph(pdf_safe_text("Ehhez a riporthoz nem volt taktikai PDF/Excel feltöltve, ezért a vezetői értékelés GPS-only módban készült."), body))
             return
 
-        status_rows = [
-            [P("Elemzési szint", head), P(str(tactical_context.get("analysis_level", "n.a.")), small)],
-            [P("Saját anyag", head), P(f"PDF: {'igen' if tactical_context.get('has_own_pdf') else 'nem'} ({tactical_context.get('own_pdf_pages', 0)} oldal) | Team Excel: {'igen' if tactical_context.get('has_own_team_excel') else 'nem'} | Player Excel: {'igen' if tactical_context.get('has_own_player_excel') else 'nem'}", small)],
-            [P("Ellenfél anyag", head), P(f"PDF: {'igen' if tactical_context.get('has_opp_pdf') else 'nem'} ({tactical_context.get('opp_pdf_pages', 0)} oldal) | Team Excel: {'igen' if tactical_context.get('has_opp_team_excel') else 'nem'} | Player Excel: {'igen' if tactical_context.get('has_opp_player_excel') else 'nem'}", small)],
-            [P("Plan A", head), P(str(tactical_context.get("plan_a", "n.a.")), small)],
-        ]
-        story.append(table(status_rows, [6.0*cm, 21.7*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
-        story.append(Spacer(1, 0.20*cm))
-
-        story.append(section("Egy fedél alatti konklúzió", "#DBEAFE"))
-        concl_rows = [[P("Elem", head), P("Konklúzió", head)]]
-        for k, v in _integrated_conclusion_rows(tactical_context):
-            concl_rows.append([P(k, small), P(v, small)])
-        story.append(table(concl_rows, [5.4*cm, 22.3*cm], header_bg="#1E40AF", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
-        story.append(Spacer(1, 0.20*cm))
+        plan_a = str(tactical_context.get("plan_a", "KIE – kiegyensúlyozott"))
+        risks = tactical_context.get("risks", []) or []
+        status = f"Saját PDF: {'igen' if tactical_context.get('has_own_pdf') else 'nem'} | Ellenfél PDF: {'igen' if tactical_context.get('has_opp_pdf') else 'nem'} | Taktikai Excel: {'igen' if (tactical_context.get('has_own_team_excel') or tactical_context.get('has_opp_team_excel')) else 'nem'}"
+        rows = [[P("Terület", head), P("Vezetői üzenet", head)]]
+        rows.append([P("Input státusz", small), P(status, small)])
+        rows.append([P("Meccsterv irány", small), P(plan_a, small)])
+        rows.append([P("Fő kockázat", small), P("; ".join(str(x) for x in risks[:3]) if risks else "Nincs erős taktikai kockázati jelzés.", small)])
+        rows.append([P("Saját KPI", small), P(_pdf_tactical_key_numbers_summary(tactical_context.get("own_team_metrics", {}) or {}), small)])
+        rows.append([P("Ellenfél KPI", small), P(_pdf_tactical_key_numbers_summary(tactical_context.get("opp_team_metrics", {}) or {}), small)])
+        story.append(table(rows, [5.2*cm, 22.5*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
+        story.append(Spacer(1, 0.16*cm))
 
         if tactical_context.get("tactical_findings"):
-            story.append(section("Taktikai PDF + Excel alapján képzett következtetések", "#FEF3C7"))
-            f_rows = [[P("Téma", head), P("Bizonyíték", head), P("Edzői következtetés", head)]]
-            pdf_findings = [f for f in (tactical_context.get("tactical_findings") or []) if str(f.get("Téma", "")).lower().startswith("pdf")]
-            other_findings = [f for f in (tactical_context.get("tactical_findings") or []) if f not in pdf_findings]
-            for f in (pdf_findings + other_findings)[:8]:
-                f_rows.append([P(str(f.get("Téma", "")), small), P(str(f.get("Bizonyíték", "")), small), P(str(f.get("Edzői következtetés", "")), small)])
-            story.append(table(f_rows, [6.0*cm, 9.2*cm, 12.5*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"), colors.white]))
-            story.append(Spacer(1, 0.20*cm))
-
-        if tactical_context.get("pdf_provider_lines"):
-            story.append(section("PDF-ből konkrétan kinyert adatok", "#E0F2FE"))
-            p_rows = [[P("#", head), P("Kinyert PDF adat", head)]]
-            for i, line in enumerate((tactical_context.get("pdf_provider_lines") or [])[:10], 1):
-                p_rows.append([P(str(i), small), P(str(line), small)])
-            story.append(table(p_rows, [1.0*cm, 26.7*cm], header_bg="#0369A1", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
-            story.append(Spacer(1, 0.20*cm))
-
-        story.append(section("Mit jelent ez magyarul?", "#DCFCE7"))
-        expl_rows = [[P("Rövid értelmezés", head)]]
-        for line in _tactical_plain_hungarian_explanation(tactical_context):
-            expl_rows.append([P(line, small)])
-        story.append(table(expl_rows, [27.7*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
-        story.append(Spacer(1, 0.20*cm))
-
-        story.append(Paragraph(pdf_safe_text("Taktikai kódok röviden: KIE = kiegyensúlyozott, POZ = pozíciós támadás, BAT = középső blokk + átmenet, PRS = presszing + átmenet. A teljes paletta az app Metodika/Tactical felületén látható."), small))
-        story.append(Spacer(1, 0.20*cm))
-
-        story.append(section("Fő taktikai kockázatok / fókuszok", "#FEE2E2"))
-        risk_rows = [[P("#", head), P("Kockázat / fókusz", head)]]
-        for i, r in enumerate((tactical_context.get("risks") or [])[:6], 1):
-            risk_rows.append([P(str(i), small), P(str(r), small)])
-        if len(risk_rows) == 1:
-            risk_rows.append([P("1", small), P("Nincs taktikai input; GPS-alapú monitoring.", small)])
-        story.append(table(risk_rows, [1.2*cm, 26.5*cm], header_bg="#7F1D1D", row_bgs=[colors.HexColor("#FEF2F2"), colors.white]))
-        story.append(Spacer(1, 0.20*cm))
-
-        story.append(section("Saját vs ellenfél – PDF témák és KPI-k", "#DCFCE7"))
-        def _topic_names(rows, uploaded=False):
-            out = []
-            for r in rows[:5]:
-                out.append(str(r.get("Téma", r.get("label", ""))))
-            if out:
-                return ", ".join([x for x in out if x])
-            if uploaded:
-                lines = tactical_context.get("pdf_provider_lines", []) if "tactical_context" in locals() else []
-                if lines:
-                    return "; ".join([str(x) for x in lines[:3]])
-                return "PDF státusz bizonytalan: nincs kinyert oldal/szöveg. Ellenőrizd, hogy a PDF ténylegesen fel van-e töltve a Tactical Pro+ PDF mezőbe."
-            return "n.a."
-        rows = [
-            [P("Oldal", head), P("Felismert PDF témák", head), P("Csapat KPI-k", head)],
-            [P("Saját", small), P(_topic_names(tactical_context.get("own_topics", []) or [], tactical_context.get("has_own_pdf")), small), P(_pdf_tactical_key_numbers_summary(tactical_context.get("own_team_metrics", {}) or {}), small)],
-            [P("Ellenfél", small), P(_topic_names(tactical_context.get("opp_topics", []) or [], tactical_context.get("has_opp_pdf")), small), P(_pdf_tactical_key_numbers_summary(tactical_context.get("opp_team_metrics", {}) or {}), small)],
-        ]
-        story.append(table(rows, [3.0*cm, 12.5*cm, 12.2*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
-        story.append(Spacer(1, 0.20*cm))
+            story.append(section("Top taktikai következtetések", "#FEF3C7"))
+            f_rows = [[P("Téma", head), P("Bizonyíték", head), P("Edzői következtetés", head), P("Prioritás", head)]]
+            for f in (tactical_context.get("tactical_findings") or [])[:6]:
+                f_rows.append([P(str(f.get("Téma", "")), small), P(str(f.get("Bizonyíték", "")), small), P(str(f.get("Edzői következtetés", "")), small), P(str(f.get("Prioritás", "")), small)])
+            story.append(table(f_rows, [5.2*cm, 8.2*cm, 10.2*cm, 4.1*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"), colors.white]))
+            story.append(Spacer(1, 0.16*cm))
 
         if tactical_context.get("md_plan"):
-            story.append(section("Integrált mikrociklus – erőnléti + taktikai cél", "#EDE9FE"))
+            story.append(section("Integrált mikrociklus – rövid MD-terv", "#EDE9FE"))
             md_rows = [[P("Nap", head), P("Erőnléti cél", head), P("Taktikai cél", head), P("Indoklás", head)]]
-            for a, b, c, d in _combined_md_rows(tactical_context):
+            for a, b, c, d in _combined_md_rows(tactical_context)[:4]:
                 md_rows.append([P(a, small), P(b, small), P(c, small), P(d, small)])
             story.append(table(md_rows, [3.0*cm, 7.5*cm, 8.0*cm, 9.2*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
 
     def add_methodology_page():
-        story.append(section("Módszertani összefoglaló – hogyan számol az FPI?", "#DBEAFE"))
+        story.append(section("Módszertani összefoglaló – hogyan számol a Football Performance Intelligence?", "#DBEAFE"))
         intro = (
-            "Az FPI döntéstámogató rendszer: a GPS-exportokból egységesíti a heti terhelési képet, "
+            "A Football Performance Intelligence (FPI) döntéstámogató rendszer: a GPS-exportokból egységesíti a heti terhelési képet, "
             "kiemeli a kockázatokat és edzői/erőnléti javaslatokat ad. Nem helyettesíti a szakmai stábot; "
             "a végső döntés mindig edzői, erőnléti és orvosi kontroll mellett történik."
         )
@@ -7571,7 +7556,7 @@ def build_fpi_product_pdf_bytes(
         story.append(Spacer(1, 0.20*cm))
 
         meth_rows = [
-            [P("Terület", head), P("FPI metodika", head)],
+            [P("Terület", head), P("Football Performance Intelligence metodika", head)],
             [P("Adatimport", small), P("A Data/Adat lap elsődleges. A segédlapokat az app igyekszik kizárni. A Smart Mapper magyar és angol GPS oszlopneveket is kezel.", small)],
             [P("Dátum és hét", small), P("A Week Rescue Engine a dátumot időponttal vagy extra szöveggel együtt is értelmezi, majd ISO hétre csoportosít. Rövid dátumtartományból képződő irreálisan sok hét esetén védelmi újraértelmezést alkalmaz.", small)],
             [P("Kapusok", small), P("Ha van Poszt/Position oszlop, a kapusok automatikusan felismerhetők. Ha nincs, az app kézi kapusválasztást kér. A kapusok sprint/HSR értelmezése csökkentett súlyú.", small)],
@@ -7600,7 +7585,6 @@ def build_fpi_product_pdf_bytes(
         story.append(PageBreak()); add_micro_page()
         if tactical_context:
             story.append(PageBreak()); add_tactical_executive_page()
-        story.append(PageBreak()); add_methodology_page()
     elif report_type == "fitness":
         add_fitness_page()
     elif report_type == "microcycle":
@@ -7616,7 +7600,7 @@ def build_fpi_product_pdf_bytes(
 def _build_demo_tactical_context() -> Dict[str, object]:
     return {
         "version": "DEMO_TACTICAL_CONTEXT_V1",
-        "analysis_level": "Level 4 – Full Intelligence DEMO",
+        "analysis_level": "Full Intelligence DEMO",
         "has_own_pdf": True,
         "has_opp_pdf": True,
         "has_own_team_excel": True,
@@ -8247,7 +8231,7 @@ def build_fpi_gps_only_pdf_bytes(
     risk_df = ctx.get("risk_df") if isinstance(ctx.get("risk_df"), pd.DataFrame) else pd.DataFrame()
     weekly = ctx.get("weekly") if isinstance(ctx.get("weekly"), pd.DataFrame) else pd.DataFrame()
     player_week = ctx.get("player_week") if isinstance(ctx.get("player_week"), pd.DataFrame) else pd.DataFrame()
-    periodization_type = _fpi_periodization_label_v97(ctx)
+    periodization_type = _fpi_pdf_week_type_label_v126(ctx, demo_label)
     conclusions = _fpi_gps_only_conclusions_v99(ctx, priorities, readiness, str(week), limit=6)
     md_plan = _fpi_gps_only_md_plan_v99(ctx, readiness, priorities, str(week))
     ratio_df = _fpi_match_ratio_reference_df_v97(df, str(week))
@@ -8318,13 +8302,13 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(P("Football Performance Intelligence – GPS-only riport", title))
     story.append(P(f"{label_prefix}Hét: {format_week_label(str(week))} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
     story.append(P(_fpi_pdf_match_context_line_v122(demo_label), sub))
-    story.append(P(f"Referencia profil: {_fpi_reference_profile_v97().get('label', 'Felnőtt NB2')} | Heti típus: {_fpi_periodization_label_v97(ctx)}", sub))
+    story.append(P(f"Referencia profil: {_fpi_reference_profile_v97().get('label', 'Felnőtt NB2')} | Heti típus: {periodization_type}", sub))
+    story.append(P("Heti cél: " + _fpi_week_type_interpretation_v126(periodization_type), sub))
     story.append(Spacer(1, 0.25*cm))
-    high_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Magas").sum()) if not risk_df.empty else 0
-    med_risk = int((risk_df.get("Kockázati szint", pd.Series(dtype=str)).astype(str) == "Közepes").sum()) if not risk_df.empty else 0
+    high_risk, med_risk = _fpi_count_risk_levels_v126(risk_df)
     story.append(Table([[
         kpi("READINESS", f"{readiness}/100", score_to_label(readiness), "#166534" if readiness >= 75 else "#1E3A8A" if readiness >= 60 else "#991B1B"),
-        kpi("PERIODIZÁCIÓ", _fpi_short_week_type_v99(periodization_type), "edzői hét típus", "#0F172A"),
+        kpi("HETI TÍPUS", _fpi_short_week_type_v99(periodization_type), "mikrociklus profil", "#0F172A"),
         kpi("HIGH RISK", f"{high_risk} fő", "egyéni kontroll", "#7F1D1D" if high_risk else "#166534"),
         kpi("MEDIUM RISK", f"{med_risk} fő", "figyelendő", "#92400E" if med_risk else "#166534"),
         kpi("FORRÁS", "GPS only", "nincs taktikai input", "#0369A1"),
@@ -8333,7 +8317,8 @@ def build_fpi_gps_only_pdf_bytes(
 
     story.append(section("1. GPS-only vezetői konklúziók", "#DBEAFE"))
     c_rows = [[P("#", head), P("Konklúzió", head)]]
-    for i, c in enumerate(conclusions, 1):
+    c_rows.append([P("1", small), P(f"Heti típus: {periodization_type}. {_fpi_week_type_interpretation_v126(periodization_type)}", small)])
+    for i, c in enumerate(conclusions, 2):
         c_rows.append([P(str(i), small), P(c, small)])
     story.append(tbl(c_rows, [1.0*cm, 26.7*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
     story.append(Spacer(1, 0.22*cm))
@@ -8457,7 +8442,7 @@ def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool
     demo_df = add_position_group(demo_df)
     latest = _fpi_latest_week(demo_df)
     tactical_ctx = _build_demo_tactical_context() if include_tactical else None
-    label = "MINTA RIPORT / Demo FC U19 – GPS + Tactical" if include_tactical else "MINTA RIPORT / Demo FC U19 – GPS only"
+    label = "MINTA RIPORT / KTE U19 – GPS + Tactical" if include_tactical else "MINTA RIPORT / KTE U19 – GPS only"
     return build_fpi_product_pdf_bytes(demo_df, latest, "Magas presszing", report_type=report_type, demo_label=label, tactical_context=tactical_ctx)
 
 
@@ -8759,13 +8744,13 @@ def render_fpi_landing_page_v100() -> None:
             <div class="fpi-wow-kicker">⚽ FOOTBALL PERFORMANCE INTELLIGENCE</div>
             <div class="fpi-wow-title">GPS + opcionális taktikai adatokból 30 másodperc alatt vezetői riport.</div>
             <div class="fpi-wow-sub">
-                Az FPI nem adatokat listáz, hanem döntési javaslatot ad. A GPS adatokból és opcionálisan taktikai PDF/Excel anyagokból
+                A Football Performance Intelligence (FPI) nem adatokat listáz, hanem döntési javaslatot ad. A GPS adatokból és opcionálisan taktikai PDF/Excel anyagokból
                 automatikusan elkészíti a heti állapotképet, a kockázati listát, a benchmark-összevetést
                 és a következő mikrociklus edzői javaslatait.
             </div>
             <div class="fpi-before-after">
                 <div class="fpi-ba-card"><b>A legtöbb rendszer működése</b><span>GPS / adatexport → Excel → manuális elemzés → riport → döntés</span></div>
-                <div class="fpi-ba-card"><b>FPI működés</b><span>GPS + opcionális taktikai input → FPI → Executive PDF → döntés</span></div>
+                <div class="fpi-ba-card"><b>Football Performance Intelligence működés</b><span>GPS + opcionális taktikai input → Football Performance Intelligence → Executive PDF → döntés</span></div>
             </div>
             <div class="fpi-pill-line">
                 <span>GPS-only prémium riport</span><span>Opcionális taktikai PDF/Excel</span><span>Readiness & risk</span><span>Poszt- és szintreferenciák</span><span>Mikrociklus javaslat</span>
@@ -8863,7 +8848,7 @@ def render_fpi_landing_page_v100() -> None:
     for col, title, desc in [
         (f1, "1. GPS export", "GPS Excel feltöltése vagy mintaadat használata."),
         (f2, "2. Kontextus", "Meccsnap, ellenfél, korosztály, szint és hétprofil."),
-        (f3, "3. FPI motor", "Readiness, risk, referencia, játékmodell és mikrociklus."),
+        (f3, "3. Football Performance Intelligence motor", "Readiness, risk, referencia, játékmodell és mikrociklus."),
         (f4, "4. PDF export", "GPS-only, Executive Summary vagy Full Report."),
     ]:
         with col:
@@ -10309,13 +10294,13 @@ def _fpi_render_benchmark_browser_table_v125(df: pd.DataFrame) -> None:
 
 def render_methodology_tab() -> None:
     """FPI V6.3 metodikai oldal – transzparens számítási és értelmezési logika."""
-    st.markdown("## 📚 FPI metodika")
+    st.markdown("## 📚 Football Performance Intelligence (FPI) metodika")
     st.markdown(
         """
         <div class="fpi-summary-card">
             <h3>Football Performance Intelligence – módszertani áttekintés</h3>
             <p>
-            Az FPI döntéstámogató rendszer. Célja, hogy a GPS-exportokból gyorsan értelmezhető,
+            A Football Performance Intelligence (FPI) döntéstámogató rendszer. Célja, hogy a GPS-exportokból gyorsan értelmezhető,
             edzői és erőnléti döntéseket támogató riportot készítsen. Nem helyettesíti a szakmai stábot,
             hanem rendszerezi az adatokat, kiemeli az eltéréseket és javaslatokat ad.
             </p>
@@ -10404,7 +10389,7 @@ def render_methodology_tab() -> None:
     st.write(
         "Az edzés és a meccs összehasonlítása nem pusztán nyers csapatösszeg alapján történik, "
         "mert edzésen 18–22 játékos, meccsen pedig 13–16 játékos is szerepelhet eltérő percekkel. "
-        "Az FPI ezért figyelembe veszi a résztvevők számát, az időtartamot és az egy főre jutó terhelést."
+        "A Football Performance Intelligence (FPI) ezért figyelembe veszi a résztvevők számát, az időtartamot és az egy főre jutó terhelést."
     )
 
     st.markdown("### 6. Sebességzónák és High Efforts")
@@ -10462,7 +10447,7 @@ def render_methodology_tab() -> None:
 
     st.markdown("### 9. Korlátok")
     st.error(
-        "Az FPI nem helyettesíti a vezetőedzőt, erőnléti edzőt, orvosi stábot vagy a klub szakmai döntéseit. "
+        "A Football Performance Intelligence (FPI) nem helyettesíti a vezetőedzőt, erőnléti edzőt, orvosi stábot vagy a klub szakmai döntéseit. "
         "Az app adatminőségtől függ: hibás GPS-export, rossz mapping vagy hiányzó játékpercek esetén az értelmezést "
         "szakmai kontrollal kell kezelni."
     )
@@ -12886,7 +12871,7 @@ with tab_exec:
         else:
             fpi_empty_state("Nincs játékos risk adat", "A risk gyorsnézet akkor jelenik meg, ha van elég heti játékos- és terhelésadat.", "🛡️")
 
-    st.markdown("### Letölthető FPI riportok")
+    st.markdown("### Letölthető Football Performance Intelligence riportok")
     st.caption("A régi vezetői PDF/Word/Excel/CSV gombok kikerültek. Itt csak a termékriportok maradnak: GPS-only, Executive Summary és Full Report.")
     safe_week_main = _safe_filename_week(selected_week)
 
@@ -12902,7 +12887,7 @@ with tab_exec:
         )
 
 
-    st.markdown("### FPI riportok – éles export")
+    st.markdown("### Football Performance Intelligence riportok – éles export")
     st.caption("Három kimenet: GPS-only Report, Executive Summary és Full Report.")
     live_report_base = analysis_base_df.copy()
     lr1, lr2, lr3 = st.columns(3)
@@ -13138,7 +13123,7 @@ with tab_export:
     # -------------------------------------------------------------------------
     # V6.1 - Product Report Pack visszaemelve az Export fülre is
     # -------------------------------------------------------------------------
-    st.markdown("### FPI riportok – minta PDF-ek")
+    st.markdown("### Football Performance Intelligence riportok – minta PDF-ek")
     st.caption("Két riport: Executive Summary és Full Report. A minta ugyanazt a struktúrát használja, mint az éles export.")
     if 'build_fpi_sample_pdf_bytes' in globals():
         try:
@@ -13160,7 +13145,7 @@ with tab_export:
         if sample_exec_pdf_bytes_export is None and sample_full_pdf_bytes_export is None and sample_gps_only_pdf_bytes_export is None:
             st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
 
-    st.markdown("### FPI riportok – éles PDF-ek")
+    st.markdown("### Football Performance Intelligence riportok – éles PDF-ek")
     st.caption("Az aktuális feltöltött adatokból: Executive Summary + Full Report.")
     if 'build_fpi_product_pdf_bytes' in globals():
         live_report_base_export = analysis_base_df.copy() if 'analysis_base_df' in globals() else df.copy()
