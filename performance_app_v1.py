@@ -10317,17 +10317,35 @@ def _fpi_render_benchmark_browser_table_v125(df: pd.DataFrame) -> None:
 
 
 def render_methodology_tab() -> None:
-    """FPI V6.3 metodikai oldal – transzparens számítási és értelmezési logika."""
-    st.markdown("## 📚 Football Performance Intelligence (FPI) metodika")
+    """Football Performance Intelligence metodikai oldal – transzparens, de nem túlzottan képletszintű kommunikáció."""
+    st.markdown("## 📚 Football Performance Intelligence metodika")
     st.markdown(
         """
         <div class="fpi-summary-card">
-            <h3>Football Performance Intelligence – módszertani áttekintés</h3>
+            <h3>Mit csinál a Football Performance Intelligence?</h3>
             <p>
-            A Football Performance Intelligence (FPI) döntéstámogató rendszer. Célja, hogy a GPS-exportokból gyorsan értelmezhető,
-            edzői és erőnléti döntéseket támogató riportot készítsen. Nem helyettesíti a szakmai stábot,
-            hanem rendszerezi az adatokat, kiemeli az eltéréseket és javaslatokat ad.
+            A <b>Football Performance Intelligence</b> döntéstámogató rendszer. A GPS-adatokból és opcionálisan
+            feltöltött taktikai PDF/Excel anyagokból olyan vezetői információkat készít, amelyek segítik
+            az edzői, erőnléti és teljesítménydiagnosztikai döntéseket.
             </p>
+            <p>
+            A metodika <b>nemzetközi sporttudományi szakirodalomra, gyakorlati teljesítménydiagnosztikai tapasztalatokra,
+            saját adatokra és saját fejlesztésű elemzési logikára</b> épül. A rendszer nem orvosi diagnózist és nem
+            automatikus döntést ad, hanem adatvezérelt szakmai támogatást.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="fpi-action-card">
+            <b>Fontos értelmezés:</b><br>
+            A Football Performance Intelligence által számított pontszámok és kockázati szintek becslések,
+            amelyek több terhelési és teljesítménymutató együttes értelmezésén alapulnak. Az eredményeket
+            az edzői megfigyelésekkel, orvosi információkkal, wellness/RPE adatokkal és klubspecifikus
+            kontextussal együtt érdemes értelmezni.
         </div>
         """,
         unsafe_allow_html=True,
@@ -10338,9 +10356,9 @@ def render_methodology_tab() -> None:
         st.markdown(
             """
             <div class="fpi-kpi-panel">
-                <div class="label">Smart Mapper</div>
-                <div class="value">Aktív</div>
-                <div class="note">Magyar és angol GPS exportok oszlopfelismerése.</div>
+                <div class="label">Adatforrás</div>
+                <div class="value">GPS+</div>
+                <div class="note">GPS export az alap; taktikai PDF/Excel opcionálisan beépíthető.</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -10349,9 +10367,9 @@ def render_methodology_tab() -> None:
         st.markdown(
             """
             <div class="fpi-kpi-panel">
-                <div class="label">Week Rescue Engine</div>
-                <div class="value">Aktív</div>
-                <div class="note">Robusztus dátum- és hétfelismerés időponttal vagy extra szöveggel is.</div>
+                <div class="label">Értelmezési logika</div>
+                <div class="value">4 hét</div>
+                <div class="note">A friss heti adatokat saját előzményhez és referenciazónákhoz viszonyítja.</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -10360,73 +10378,100 @@ def render_methodology_tab() -> None:
         st.markdown(
             """
             <div class="fpi-kpi-panel">
-                <div class="label">Keeper + Minutes Logic</div>
-                <div class="value">Aktív</div>
-                <div class="note">Kapusok, játékpercek, per90 és edzés-meccs normalizálás kezelése.</div>
+                <div class="label">Kimenet</div>
+                <div class="value">Döntés</div>
+                <div class="note">Readiness, risk, benchmark és mikrociklus-javaslat.</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
     st.markdown("### 1. Adatimport és Smart Mapper")
+    st.write(
+        "A rendszer a feltöltött GPS exportból automatikusan próbálja felismerni a fontos oszlopokat. "
+        "Magyar és angol mezőneveket is kezel, például: játékosnév, dátum, edzés/meccs típus, össztáv, "
+        "Load, HSR, sprint, gyorsulás, lassítás, High Efforts, játékperc és poszt."
+    )
     st.info(
-        "Az app a Data/Adat lapot preferálja, a segédlapokat igyekszik kizárni az összesített adatból. "
-        "A Smart Mapper magyar és angol oszlopneveket is kezel, például: Játékos neve / Player, "
-        "Kezdési idő / Start Time, Teljes táv / Total Distance, High Efforts."
+        "A Smart Mapper célja, hogy különböző GPS-rendszerek exportjaiból is egységes Football Performance Intelligence adatszerkezet készüljön."
     )
 
-    st.markdown("### 2. Dátum- és hétfelismerés")
+    st.markdown("### 2. Dátum-, hét- és meccskörnyezet felismerése")
     st.write(
-        "A rendszer a dátumoszlopot robusztusan értelmezi. Támogatott példák: "
-        "`2025-07-16`, `2025-07-16 09:38:13`, `16.07.2025`, `Training - 2025-07-16 17:00`. "
-        "A csoportosítás ISO hét alapján történik, például `2025-W29`."
+        "A Football Performance Intelligence ISO hét alapján csoportosítja az adatokat, és figyeli, hogy a feltöltött fájl "
+        "mely heteket tartalmazza. A meccsnap, meccshét és kiválasztott hét összevetése segít kiszűrni, ha véletlenül "
+        "másik hét vagy több hét adatai keverednek a riportba."
     )
-    st.info(
-        "V9.4: az app bekéri a meccsnapot és az ellenfelet, majd összeveti a mai héttel, "
-        "a meccshéttel és a feltöltött fájlok heteivel. Így látható, ha előző heti, aktuális heti vagy másik heti adatok keverednek."
+    st.write(
+        "A rendszer kezeli a normál dátumokat, dátum+idő mezőket, valamint több exportban előforduló szöveges dátumformákat is."
+    )
+
+    st.markdown("### 3. Readiness Score – mit vesz figyelembe?")
+    st.write(
+        "A Readiness Score a csapat vagy játékos aktuális terhelési állapotának becslése. Nem egyetlen mérőszám, hanem "
+        "több rövid és középtávú terhelési jel együttes értelmezése."
+    )
+    st.markdown(
+        """
+        <div class="fpi-clean-card">
+        <b>A readiness értelmezésében szerepet kaphat:</b><br>
+        • heti Load és annak változása az előző hetekhez képest<br>
+        • elmúlt 3–7 nap terhelési képe<br>
+        • 4 hetes terhelési trendek<br>
+        • HSR / nagysebességű futás<br>
+        • sprinttáv és sprintdarabszám<br>
+        • High Efforts, gyorsulások és lassítások<br>
+        • edzés–meccs arány és meccs előtti frissítés/taper logika<br>
+        • játékmodellhez való illeszkedés<br>
+        • pulzus vagy HRV, ha a fájlban rendelkezésre áll
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("A readiness nem orvosi állapotjelző, hanem terhelési mintázatokból képzett döntéstámogató jelzés.")
+
+    st.markdown("### 4. Player Risk Score – mit jelent a kockázati besorolás?")
+    st.write(
+        "A Player Risk Score a túlterhelés, alulterhelés vagy hirtelen terhelésváltozás korai felismerését támogatja. "
+        "A rendszer elsősorban a játékos saját előző heteivel hasonlítja össze az aktuális hetet, ezért nem csak abszolút számokat néz."
+    )
+    st.markdown(
+        """
+        <div class="fpi-clean-card">
+        <b>A kockázati értékelés fő bemenetei:</b><br>
+        • heti Load változás saját 4 hetes átlaghoz képest<br>
+        • sprinttáv és maximális sebesség expozíció<br>
+        • High Efforts, gyorsulás és lassítás jellegű neuromuszkuláris terhelés<br>
+        • játékperc / exposure változás<br>
+        • max sebesség trendje saját korábbi csúcshoz képest<br>
+        • kapus vagy mezőnyjátékos szerep szerinti eltérő súlyozás<br>
+        • alacsony terhelés utáni hirtelen terhelésnövekedés lehetősége
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
     st.warning(
-        "Ha rövid, néhány napos dátumtartományból irreálisan sok hét keletkezne, a Week Rescue Engine "
-        "védelmi logikája újraértelmezi a heteket, és diagnosztikát ad az oldalsávban."
+        "A kockázati szint nem sérülés-előrejelzés. A cél az, hogy a szakmai stáb időben észrevegye a szokatlan terhelési mintákat."
     )
 
-    st.markdown("### 3. Kapuskezelés")
+    st.markdown("### 5. Benchmark Engine – hogyan választ referenciát?")
     st.write(
-        "Ha van Poszt/Position oszlop, az app automatikusan keresi a kapusokat "
-        "(`GK`, `Goalkeeper`, `Kapus`, `KAPUS`). Ha nincs posztoszlop, az oldalsávban kézzel lehet megadni, "
-        "hogy vannak-e kapusok, és ki(k) azok."
+        "A benchmarkrendszer nem egyetlen általános átlaghoz hasonlít. A referenciaértékek a kiválasztott profil alapján "
+        "aktualizálódnak: korosztály, bajnoki szint, poszt és játékmodell szerint. Ha van posztadat, a rendszer játékosonként "
+        "súlyoz; ha nincs, mezőnyjátékos fallbacket használ."
     )
-    st.write(
-        "A kapusok nem ugyanazzal a logikával értékelendők, mint a mezőnyjátékosok. "
-        "A sprint- és HSR-alapú mutatók csökkentett súllyal szerepelnek, míg a teljes terhelés, "
-        "High Efforts és Training Load értelmezése megmarad."
-    )
-
-    st.markdown("### 4. Játékpercek és per90 normalizálás")
-    st.write(
-        "A rendszer figyelembe veszi, hogy egy meccsen nem minden játékos 90 percet játszik. "
-        "A 14 pályára lépő játékos terhelése nem `14×90 perc`. Ahol elérhető az időtartam/játékperc, "
-        "az app per90 és csapatperc alapú normalizálást is használ."
-    )
-
-    st.markdown("### 5. Edzés–meccs összevetés")
-    st.write(
-        "Az edzés és a meccs összehasonlítása nem pusztán nyers csapatösszeg alapján történik, "
-        "mert edzésen 18–22 játékos, meccsen pedig 13–16 játékos is szerepelhet eltérő percekkel. "
-        "A Football Performance Intelligence (FPI) ezért figyelembe veszi a résztvevők számát, az időtartamot és az egy főre jutó terhelést."
-    )
-
-    st.markdown("### 6. Sebességzónák és High Efforts")
-    st.write(
-        "A 4-es és 5-ös sebességzónát az app külön kezeli, de összevont `4+5` export esetén is használható. "
-        "Ha a High Efforts mező külön szerepel az exportban, azt használja; ha nem, gyorsulás/lassítás jellegű "
-        "mutatókból becsült nagy intenzitású terhelést képez."
-    )
-
-    st.markdown("### 7. Benchmarkok és readiness")
-    st.write(
-        "A benchmarkok korosztály, bajnoki szint, játékmodell és játékosonkénti poszt alapján aktualizálódnak. "
-        "A readiness és risk pontszámok döntéstámogatók, nem orvosi diagnózisok."
+    st.markdown(
+        """
+        <div class="fpi-clean-card">
+        <b>A referenciazónák fő dimenziói:</b><br>
+        • korosztály: Felnőtt, U21, U19, U17, U16, U15, U14, U13<br>
+        • szint: NB I, NB II, NB III, Akadémia, Regionális, Megye I, Egyéb<br>
+        • poszt: kapus, hátvéd, középpályás, szélső, csatár és ezek bontásai<br>
+        • játékmodell: dominancia, magas presszing, átmeneti játék, direkt játék, kiegyensúlyozott<br>
+        • mutató: össztáv, Load, HSR, sprinttáv, sprintdarabszám, High Efforts
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     with st.expander("🔎 Benchmark böngésző – szűrés mutató, korosztály, bajnoki szint és poszt szerint", expanded=False):
@@ -10442,15 +10487,15 @@ def render_methodology_tab() -> None:
             "High Efforts",
         ]
         with bc1:
-            bench_metric_v124 = st.selectbox("Mutató", metric_options_v124, index=0, key="method_benchmark_metric_v124")
+            bench_metric_v124 = st.selectbox("Mutató", metric_options_v124, index=0, key="method_benchmark_metric_v128")
         with bc2:
-            bench_age_v124 = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=0, key="method_benchmark_age_v124")
+            bench_age_v124 = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=0, key="method_benchmark_age_v128")
         with bc3:
-            bench_level_v124 = st.selectbox("Bajnoki szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=1, key="method_benchmark_level_v124")
+            bench_level_v124 = st.selectbox("Bajnoki szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=1, key="method_benchmark_level_v128")
         with bc4:
-            bench_position_v124 = st.selectbox("Poszt", FPI_REFERENCE_POSITION_OPTIONS_V112, index=4, key="method_benchmark_position_v124")
+            bench_position_v124 = st.selectbox("Poszt", FPI_REFERENCE_POSITION_OPTIONS_V112, index=4, key="method_benchmark_position_v128")
         with bc5:
-            bench_playmodel_v124 = st.selectbox("Játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=4, key="method_benchmark_playmodel_v124")
+            bench_playmodel_v124 = st.selectbox("Játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=4, key="method_benchmark_playmodel_v128")
 
         benchmark_df_v124 = _fpi_benchmark_browser_df_v124(
             bench_age_v124,
@@ -10460,20 +10505,47 @@ def render_methodology_tab() -> None:
             bench_metric_v124,
         )
         _fpi_render_benchmark_browser_table_v125(benchmark_df_v124)
-        st.info("Értelmezés: ha például a HSR heti célzóna 150–250%, akkor a hét teljes HSR terhelése ideálisan az adott profil meccsreferenciájának kb. 1,5–2,5-szerese.")
+        st.info("Példa: ha a HSR heti célzóna 150–250%, akkor a teljes heti nagysebességű futás célja az adott profil meccsreferenciájának kb. 1,5–2,5-szerese.")
 
-    st.markdown("### 8. Mikrociklus motor")
+    st.markdown("### 6. Mikrociklus Motor – hogyan készül a javaslat?")
     st.write(
-        "A mikrociklus modul három szintet kezel: múlt hét értékelése, aktuális hét eddig feltöltött napjai, "
-        "és jövő heti MD-bontású javaslat. A javaslatok a heti volumenből, HSR/sprint terhelésből, High Effortsből, "
-        "játékosszintű eltérésekből és kockázati jelzésekből épülnek."
+        "A mikrociklus javaslat a kiválasztott hét állapotából, a heti célból, a meccsnapból, a pihenőnapokból, "
+        "az edzésszámból, a readinessből, a risk jelzésekből és a benchmarkeltérésekből épül."
+    )
+    st.markdown(
+        """
+        <div class="fpi-clean-card">
+        <b>A mikrociklus tervezésében figyelembe vett fő elemek:</b><br>
+        • aktuális heti volumen és Load<br>
+        • HSR és sprintinger hiánya vagy többlete<br>
+        • High Efforts és neuromuszkuláris terhelés<br>
+        • játékosonkénti kockázati jelzések<br>
+        • heti típus: regenerációs, stabilizáló, terhelésfokozó, fejlesztő, formaidőzítő, mérkőzésre felkészítő<br>
+        • meccsnap és MD-struktúra<br>
+        • játékmodell és opcionális taktikai prioritások
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    st.markdown("### 9. Korlátok")
+    st.markdown("### 7. Kapuskezelés és posztsúlyozás")
+    st.write(
+        "A kapusokat a rendszer nem ugyanazzal a sebesség- és sprintlogikával értékeli, mint a mezőnyjátékosokat. "
+        "Kapusoknál a teljes Load, High Efforts, játékperc/exposure és neuromuszkuláris jellegű változások nagyobb hangsúlyt kapnak, "
+        "míg a HSR/sprint elvárás csökkentett súllyal szerepel."
+    )
+
+    st.markdown("### 8. Taktikai integráció")
+    st.write(
+        "Ha taktikai PDF vagy Excel is rendelkezésre áll, a Football Performance Intelligence nem csak GPS-only módon működik. "
+        "A taktikai inputból ellenfélprofil, játékmodell, kiemelt veszélyek, taktikai prioritások és meccsterv-jellegű szempontok "
+        "kerülhetnek be az összegzésbe és a mikrociklus javaslatba."
+    )
+
+    st.markdown("### 9. Mit nem állít a rendszer?")
     st.error(
-        "A Football Performance Intelligence (FPI) nem helyettesíti a vezetőedzőt, erőnléti edzőt, orvosi stábot vagy a klub szakmai döntéseit. "
-        "Az app adatminőségtől függ: hibás GPS-export, rossz mapping vagy hiányzó játékpercek esetén az értelmezést "
-        "szakmai kontrollal kell kezelni."
+        "A Football Performance Intelligence nem állítja, hogy egy pontszám önmagában megmondja a sérülést, a teljesítményt vagy a mérkőzés kimenetelét. "
+        "A rendszer célja az, hogy a szakmai stáb gyorsabban lássa a fontos eltéréseket, trendeket és döntési pontokat."
     )
 
     st.markdown("### 10. Technikai státusz")
@@ -10483,9 +10555,11 @@ def render_methodology_tab() -> None:
         "Week Rescue Engine": "aktív",
         "Keeper Logic": "aktív",
         "Minutes Normalization": "aktív",
-        "Microcycle Engine": "aktív",
-        "Benchmark Engine": "aktív",
-        "Tactical Pro+": "aktív",
+        "Readiness Engine": "trend + terhelés + sebességi expozíció + játékmodell",
+        "Risk Engine": "saját 4 hetes előzmény + aktuális heti eltérés",
+        "Benchmark Engine": "korosztály + szint + poszt + játékmodell",
+        "Microcycle Engine": "readiness + benchmark + risk + MD-struktúra",
+        "Tactical Pro+": "opcionális inputként aktív",
     })
 
 
