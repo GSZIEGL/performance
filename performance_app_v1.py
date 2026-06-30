@@ -10542,13 +10542,58 @@ def render_methodology_tab() -> None:
         "kerülhetnek be az összegzésbe és a mikrociklus javaslatba."
     )
 
-    st.markdown("### 9. Mit nem állít a rendszer?")
+
+    st.markdown("### 9. Tactical Framework - 7 dimenzióból 9 stratégiai profil")
+    st.write(
+        "A Tactical Pro+ nem csak kulcsszavakat keres. A taktikai inputokat egy egységes Football Performance Intelligence "
+        "keretrendszerbe rendezi: 7 taktikai dimenzióból képez csapatprofilt, majd ezt 9 stratégiai profilhoz viszonyítja. "
+        "A cél nem kész meccsterv helyettesítése, hanem az edzői döntés gyorsítása és strukturálása."
+    )
+    st.markdown(
+        """
+        <div class="fpi-clean-card">
+        <b>A 7 taktikai dimenzió:</b><br>
+        1. Letámadás<br>
+        2. Labdakihozatal<br>
+        3. Átmenetek<br>
+        4. Támadó játék<br>
+        5. Pontrúgások<br>
+        6. Labdabirtoklás<br>
+        7. Lövésprofil
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("A dimenziók 0-10 skálán értelmezhetők. Nem abszolút scouting-minősítés, hanem döntéstámogató profil.")
+    st.markdown(
+        """
+        <div class="fpi-clean-card">
+        <b>A két fő taktikai tengely:</b><br>
+        • Játékstílus: Direkt -> Vegyes -> Kiegyensúlyozott -> Kontroll -> Agresszív<br>
+        • Blokkmagasság: Mély -> Alacsony-közép -> Közép -> Közép-magas -> Magas
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    try:
+        st.dataframe(
+            pd.DataFrame(_fpi_global_strategy_palette_rows_v129(), columns=["Kód", "Stratégia", "Játékstílus", "Blokkmagasság", "Jelentés"]),
+            use_container_width=True,
+            hide_index=True,
+        )
+    except Exception:
+        pass
+    st.info(
+        "A rendszer nem feltétlenül csak egy címkét használ. A gyakorlatban elsődleges profil, alternatív profil és meccsspecifikus fókuszok is készülhetnek. Például: BAT elsődleges, POZ/KIE alternatív megoldással, rest defense és átmeneti fókuszokkal."
+    )
+
+    st.markdown("### 10. Mit nem állít a rendszer?")
     st.error(
         "A Football Performance Intelligence nem állítja, hogy egy pontszám önmagában megmondja a sérülést, a teljesítményt vagy a mérkőzés kimenetelét. "
         "A rendszer célja az, hogy a szakmai stáb gyorsabban lássa a fontos eltéréseket, trendeket és döntési pontokat."
     )
 
-    st.markdown("### 10. Technikai státusz")
+    st.markdown("### 11. Technikai státusz")
     st.json({
         "FPI_VERSION": FPI_IMPORT_ENGINE_VERSION,
         "Smart Mapper": "aktív",
@@ -10559,6 +10604,7 @@ def render_methodology_tab() -> None:
         "Risk Engine": "saját 4 hetes előzmény + aktuális heti eltérés",
         "Benchmark Engine": "korosztály + szint + poszt + játékmodell",
         "Microcycle Engine": "readiness + benchmark + risk + MD-struktúra",
+        "Tactical Framework": "7 dimenzió -> 9 stratégiai profil -> meccsspecifikus fókusz",
         "Tactical Pro+": "opcionális inputként aktív",
     })
 
@@ -12381,6 +12427,239 @@ def _fpi_build_excel_driven_tactical_findings_v79(
     return findings[:10]
 
 
+
+# =========================================================
+# V129 - Tactical Framework: 7 dimenzió -> 9 stratégiai profil
+# =========================================================
+FPI_TACTICAL_DIMENSIONS_V129 = [
+    ("pressing", "Letámadás"),
+    ("build_up", "Labdakihozatal"),
+    ("transitions", "Átmenetek"),
+    ("attacking_play", "Támadó játék"),
+    ("set_pieces", "Pontrúgások"),
+    ("possession", "Labdabirtoklás"),
+    ("shot_profile", "Lövésprofil"),
+]
+
+FPI_STRATEGY_PALETTE_V129 = [
+    {"code": "KON", "name": "Kontra mély blokkból", "style": "Direkt", "block": "Mély", "description": "Mélyebb védekezésből gyors, direkt támadásindítás."},
+    {"code": "GAT", "name": "Gyors átmenet", "style": "Direkt", "block": "Közép", "description": "Labdaszerzés után gyors előrejáték, kevés passzból veszély."},
+    {"code": "BAT", "name": "Középső blokk + átmenet", "style": "Vegyes", "block": "Közép", "description": "Középső zónás védekezés, majd gyors átmeneti támadás."},
+    {"code": "KIE", "name": "Kiegyensúlyozott", "style": "Kiegyensúlyozott", "block": "Közép", "description": "Stabil, kockázatkerülőbb alapjáték, kontrollált intenzitással."},
+    {"code": "PRS", "name": "Presszing + átmenet", "style": "Direkt/Presszing", "block": "Közép-magas", "description": "Aktív letámadás, labdaszerzés után gyors támadásvezetés."},
+    {"code": "MLT", "name": "Magas letámadás", "style": "Agresszív", "block": "Magas", "description": "Magas blokkból agresszív nyomás és korai labdaszerzés."},
+    {"code": "DOM", "name": "Dominancia", "style": "Kontroll", "block": "Magas", "description": "Labdabirtoklásra és területi fölényre épülő meccskontroll."},
+    {"code": "POZ", "name": "Pozíciós támadás", "style": "Kontroll", "block": "Közép-magas", "description": "Türelmes építkezés, félterületek és szélesség használata."},
+    {"code": "LAB", "name": "Labdatartás mélyebben", "style": "Kontroll", "block": "Alacsony-közép", "description": "Biztonságosabb labdatartás mélyebb szerkezetből."},
+]
+
+
+def _fpi_global_strategy_palette_rows_v129() -> List[Tuple[str, str, str, str, str]]:
+    """Globális stratégiai paletta a Metodika és Tactical Pro+ nézethez."""
+    return [(x["code"], x["name"], x["style"], x["block"], x["description"]) for x in FPI_STRATEGY_PALETTE_V129]
+
+
+def _fpi_clamp_v129(x: float, lo: float = 0.0, hi: float = 10.0) -> float:
+    try:
+        return float(max(lo, min(hi, x)))
+    except Exception:
+        return lo
+
+
+def _fpi_topic_present_v129(blocks: Dict[str, object], pdf_topics: List[object], *keys: str) -> bool:
+    keys_l = {str(k).lower() for k in keys}
+    for k in keys:
+        if blocks.get(k):
+            return True
+    for item in pdf_topics or []:
+        if isinstance(item, dict):
+            joined = " ".join(str(item.get(c, "")) for c in ["Téma", "Tema", "label", "topic", "Szöveg", "Megjegyzés"]).lower()
+        else:
+            joined = str(item).lower()
+        if any(k.replace("_", " ") in joined or k in joined for k in keys_l):
+            return True
+    return False
+
+
+def _fpi_tactical_dimension_scores_v129(
+    blocks: Dict[str, object],
+    pdf_topics: List[object],
+    own_team_metrics: Dict[str, object],
+    opp_team_metrics: Dict[str, object],
+) -> Dict[str, float]:
+    """7 dimenziós taktikai profil 0-10 skálán.
+    A cél nem egzakt scouting, hanem strukturált, összehasonlítható döntési jel.
+    """
+    own_pos = _fpi_normalized_tactical_metric_v79("possession_pct", _fpi_metric_value_v79(own_team_metrics, "possession_pct")) or 50
+    opp_pos = _fpi_normalized_tactical_metric_v79("possession_pct", _fpi_metric_value_v79(opp_team_metrics, "possession_pct")) or 50
+    own_ppda = _fpi_normalized_tactical_metric_v79("ppda", _fpi_metric_value_v79(own_team_metrics, "ppda")) or None
+    opp_ppda = _fpi_normalized_tactical_metric_v79("ppda", _fpi_metric_value_v79(opp_team_metrics, "ppda")) or None
+    own_shots = _fpi_metric_value_v79(own_team_metrics, "shots") or 0
+    opp_shots = _fpi_metric_value_v79(opp_team_metrics, "shots") or 0
+    own_xg = _fpi_normalized_tactical_metric_v79("xg", _fpi_metric_value_v79(own_team_metrics, "xg")) or 0
+    opp_xg = _fpi_normalized_tactical_metric_v79("xg", _fpi_metric_value_v79(opp_team_metrics, "xg")) or 0
+    own_corners = _fpi_metric_value_v79(own_team_metrics, "corners") or 0
+    opp_corners = _fpi_metric_value_v79(opp_team_metrics, "corners") or 0
+    own_counters = _fpi_metric_value_v79(own_team_metrics, "counterattacks") or 0
+    opp_counters = _fpi_metric_value_v79(opp_team_metrics, "counterattacks") or 0
+    own_crosses = _fpi_metric_value_v79(own_team_metrics, "crosses") or 0
+    opp_crosses = _fpi_metric_value_v79(opp_team_metrics, "crosses") or 0
+
+    pressing = 4.5
+    if _fpi_topic_present_v129(blocks, pdf_topics, "pressing"):
+        pressing += 2.0
+    if opp_ppda and opp_ppda < 9:
+        pressing += 1.7
+    if own_ppda and own_ppda < 9:
+        pressing += 0.8
+
+    build_up = 4.8
+    if _fpi_topic_present_v129(blocks, pdf_topics, "build_up", "possession", "central_play"):
+        build_up += 1.7
+    if own_pos >= 55 or opp_pos >= 55:
+        build_up += 1.1
+    if _fpi_topic_present_v129(blocks, pdf_topics, "direct_play"):
+        build_up -= 0.8
+
+    transitions = 4.5
+    if _fpi_topic_present_v129(blocks, pdf_topics, "transition_attack", "transition_defense"):
+        transitions += 2.0
+    if own_counters + opp_counters >= 6:
+        transitions += 1.6
+
+    attacking_play = 4.8
+    if _fpi_topic_present_v129(blocks, pdf_topics, "chance_creation", "wide_play", "central_play"):
+        attacking_play += 1.6
+    if max(own_shots, opp_shots) >= 12 or max(own_xg, opp_xg) >= 1.4:
+        attacking_play += 1.2
+    if own_crosses + opp_crosses >= 22:
+        attacking_play += 0.6
+
+    set_pieces = 4.2
+    if _fpi_topic_present_v129(blocks, pdf_topics, "set_pieces"):
+        set_pieces += 2.2
+    if own_corners + opp_corners >= 8:
+        set_pieces += 1.3
+
+    possession = 4.8 + (max(own_pos, opp_pos) - 50) / 7.0
+    if _fpi_topic_present_v129(blocks, pdf_topics, "possession", "build_up"):
+        possession += 1.0
+    if _fpi_topic_present_v129(blocks, pdf_topics, "direct_play"):
+        possession -= 1.0
+
+    shot_profile = 4.5
+    if _fpi_topic_present_v129(blocks, pdf_topics, "chance_creation"):
+        shot_profile += 1.2
+    if max(own_shots, opp_shots) >= 10:
+        shot_profile += 1.0
+    if max(own_xg, opp_xg) >= 1.2:
+        shot_profile += 1.0
+
+    return {
+        "pressing": round(_fpi_clamp_v129(pressing), 1),
+        "build_up": round(_fpi_clamp_v129(build_up), 1),
+        "transitions": round(_fpi_clamp_v129(transitions), 1),
+        "attacking_play": round(_fpi_clamp_v129(attacking_play), 1),
+        "set_pieces": round(_fpi_clamp_v129(set_pieces), 1),
+        "possession": round(_fpi_clamp_v129(possession), 1),
+        "shot_profile": round(_fpi_clamp_v129(shot_profile), 1),
+    }
+
+
+def _fpi_select_tactical_strategy_v129(
+    readiness: int,
+    blocks: Dict[str, object],
+    pdf_topics: List[object],
+    own_team_metrics: Dict[str, object],
+    opp_team_metrics: Dict[str, object],
+) -> Dict[str, object]:
+    """9 stratégiai profil + meccsspecifikus differenciálás.
+    Nem csak egy kódot ad: elsődleges profil, másodlagos profil, arány, dimenziók és fókuszok is készülnek.
+    """
+    dims = _fpi_tactical_dimension_scores_v129(blocks, pdf_topics, own_team_metrics, opp_team_metrics)
+    own_pos = _fpi_normalized_tactical_metric_v79("possession_pct", _fpi_metric_value_v79(own_team_metrics, "possession_pct")) or 50
+    opp_pos = _fpi_normalized_tactical_metric_v79("possession_pct", _fpi_metric_value_v79(opp_team_metrics, "possession_pct")) or 50
+    opp_ppda = _fpi_normalized_tactical_metric_v79("ppda", _fpi_metric_value_v79(opp_team_metrics, "ppda")) or None
+    opp_counters = _fpi_metric_value_v79(opp_team_metrics, "counterattacks") or 0
+    opp_corners = _fpi_metric_value_v79(opp_team_metrics, "corners") or 0
+    own_xg = _fpi_normalized_tactical_metric_v79("xg", _fpi_metric_value_v79(own_team_metrics, "xg")) or 0
+    opp_xg = _fpi_normalized_tactical_metric_v79("xg", _fpi_metric_value_v79(opp_team_metrics, "xg")) or 0
+
+    # Pontozás a 9 palettára. Egy meccs több profilhoz is közel lehet, ezért top2-t adunk vissza.
+    scores = {x["code"]: 0.0 for x in FPI_STRATEGY_PALETTE_V129}
+    scores["KIE"] += 4.0
+    scores["BAT"] += dims["transitions"] * 0.8 + dims["attacking_play"] * 0.25
+    scores["GAT"] += dims["transitions"] * 0.9 + (2.0 if _fpi_topic_present_v129(blocks, pdf_topics, "direct_play") else 0.0)
+    scores["KON"] += dims["transitions"] * 0.5 + (2.0 if readiness < 55 else 0.0)
+    scores["PRS"] += dims["pressing"] * 0.95 + dims["transitions"] * 0.35
+    scores["MLT"] += dims["pressing"] * 1.15 + (1.5 if opp_ppda and opp_ppda < 8 else 0.0)
+    scores["DOM"] += dims["possession"] * 0.9 + dims["build_up"] * 0.55 + (1.2 if max(own_pos, opp_pos) >= 56 else 0.0)
+    scores["POZ"] += dims["build_up"] * 0.85 + dims["attacking_play"] * 0.55 + (1.0 if _fpi_topic_present_v129(blocks, pdf_topics, "central_play", "wide_play") else 0.0)
+    scores["LAB"] += dims["possession"] * 0.5 + (1.5 if readiness < 60 else 0.0)
+
+    if opp_counters > 0 or _fpi_topic_present_v129(blocks, pdf_topics, "transition_attack"):
+        scores["BAT"] += 2.2
+        scores["GAT"] += 1.4
+    if _fpi_topic_present_v129(blocks, pdf_topics, "set_pieces") or opp_corners > 0:
+        scores["KIE"] += 0.6
+    if own_xg and opp_xg and own_xg > opp_xg * 1.10 and readiness >= 65:
+        scores["POZ"] += 1.2
+        scores["DOM"] += 1.0
+    if readiness < 55:
+        scores["BAT"] += 1.0
+        scores["KON"] += 1.0
+        scores["MLT"] -= 2.0
+        scores["PRS"] -= 1.0
+
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    primary_code, primary_score = ranked[0]
+    secondary_code, secondary_score = ranked[1]
+    code_to_row = {x["code"]: x for x in FPI_STRATEGY_PALETTE_V129}
+    total = max(primary_score + secondary_score, 0.1)
+    primary_pct = int(round(primary_score / total * 100))
+    secondary_pct = 100 - primary_pct
+
+    detail_parts = []
+    if primary_code in ["BAT", "GAT", "KON"]:
+        if opp_counters > 0 or _fpi_topic_present_v129(blocks, pdf_topics, "transition_attack"):
+            detail_parts.append("átmenetek és rest defense biztosítás")
+        if _fpi_topic_present_v129(blocks, pdf_topics, "wide_play"):
+            detail_parts.append("oldali védekezési kontroll")
+    if primary_code in ["PRS", "MLT"]:
+        detail_parts.append("presszingtrigger és mögöttes biztosítás")
+    if primary_code in ["DOM", "POZ", "LAB"]:
+        detail_parts.append("labdakihozatal és türelmes progresszió")
+    if _fpi_topic_present_v129(blocks, pdf_topics, "set_pieces") or opp_corners > 0:
+        detail_parts.append("pontrúgások és második labdák")
+    if not detail_parts:
+        detail_parts.append("stabil szerkezet és kontrollált kockázat")
+
+    primary = code_to_row[primary_code]
+    secondary = code_to_row[secondary_code]
+    recommendation = f"{primary_code} – {primary['name']}, " + "; ".join(detail_parts[:2])
+    b_plan = f"{secondary_code} – {secondary['name']}"
+    return {
+        "primary_code": primary_code,
+        "primary_name": primary["name"],
+        "secondary_code": secondary_code,
+        "secondary_name": secondary["name"],
+        "primary_pct": primary_pct,
+        "secondary_pct": secondary_pct,
+        "recommendation": recommendation,
+        "plan_b": b_plan,
+        "dimensions": dims,
+        "scores": {k: round(v, 2) for k, v in scores.items()},
+        "detail_focus": detail_parts[:4],
+    }
+
+
+def _fpi_strategy_framework_to_rows_v129(framework: Dict[str, object]) -> List[Dict[str, object]]:
+    dims = framework.get("dimensions", {}) if isinstance(framework, dict) else {}
+    out = []
+    for key, label in FPI_TACTICAL_DIMENSIONS_V129:
+        out.append({"Dimenzió": label, "Érték (0-10)": dims.get(key, "n.a.")})
+    return out
+
 def _fpi_build_adaptive_match_training_plan(gps_context: Dict[str, object], tactical: Dict[str, object]) -> Dict[str, object]:
     readiness = int(gps_context.get("readiness_score", 70) or 70)
     priorities = gps_context.get("priorities", []) or []
@@ -12427,8 +12706,7 @@ def _fpi_build_adaptive_match_training_plan(gps_context: Dict[str, object], tact
     if not risks:
         risks.append("GPS-alapú terhelési és readiness kockázatok")
 
-    # Plan A: Excel + PDF + GPS együtt
-    plan_a = "KIE – Kiegyensúlyozott"
+    # Plan A: Excel + PDF + GPS együtt - V129 taktikai keretrendszerrel
     opp_pos = _fpi_normalized_tactical_metric_v79("possession_pct", _fpi_metric_value_v79(opp_team_metrics, "possession_pct"))
     own_pos = _fpi_normalized_tactical_metric_v79("possession_pct", _fpi_metric_value_v79(own_team_metrics, "possession_pct"))
     opp_ppda = _fpi_normalized_tactical_metric_v79("ppda", _fpi_metric_value_v79(opp_team_metrics, "ppda"))
@@ -12438,18 +12716,12 @@ def _fpi_build_adaptive_match_training_plan(gps_context: Dict[str, object], tact
     opp_xg = _fpi_normalized_tactical_metric_v79("xg", _fpi_metric_value_v79(opp_team_metrics, "xg"))
     own_xg = _fpi_normalized_tactical_metric_v79("xg", _fpi_metric_value_v79(own_team_metrics, "xg"))
 
-    if readiness < 55:
-        plan_a = "BAT – középső blokk + átmenet, alacsonyabb kockázattal"
-    elif opp_pos and own_pos and opp_pos > own_pos + 5:
-        plan_a = "BAT – középső blokk + gyors átmenet"
-    elif opp_counters > 0 or blocks.get("transition_attack"):
-        plan_a = "BAT – középső blokk + rest defense biztosítás"
-    elif opp_ppda and own_ppda and opp_ppda < own_ppda * 0.85:
-        plan_a = "POZ/KIE – presszingkijátszás + türelmes labdakihozatal"
-    elif own_xg and opp_xg and own_xg > opp_xg * 1.10 and readiness >= 65:
-        plan_a = "KIE/POZ – kontrollált támadóbb alapirány"
-    elif blocks.get("pressing") and readiness >= 70:
-        plan_a = "PRS – presszing + átmenet, kontrolláltan"
+    strategy_framework = _fpi_select_tactical_strategy_v129(
+        readiness, blocks, pdf_topics, own_team_metrics, opp_team_metrics
+    )
+    plan_a = strategy_framework.get("recommendation", "KIE – Kiegyensúlyozott")
+    if strategy_framework.get("plan_b"):
+        risks.append(f"B terv / alternatív profil: {strategy_framework.get('plan_b')} ({strategy_framework.get('secondary_pct')}%).")
 
     md_plan = [
         ("MD+1/MD-5", "Regeneráció / alacsony intenzitás", "Előző terhelés visszarendezése."),
@@ -12493,6 +12765,8 @@ def _fpi_build_adaptive_match_training_plan(gps_context: Dict[str, object], tact
         "player_focus": player_focus[:6],
         "tactical_findings": tactical_findings[:10],
         "team_comparison": _fpi_tactical_compare_team_metrics_v79(own_team_metrics, opp_team_metrics),
+        "strategy_framework": strategy_framework if 'strategy_framework' in locals() else {},
+        "plan_b": (strategy_framework.get("plan_b") if 'strategy_framework' in locals() and isinstance(strategy_framework, dict) else ""),
     }
 
 
@@ -12781,6 +13055,25 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
         st.dataframe(pd.DataFrame(_strategy_palette_pdf_rows(), columns=["Kód", "Stratégia", "Egyszerű jelentés"]), use_container_width=True, hide_index=True)
     except Exception:
         pass
+
+
+    if executive_ctx.get("strategy_framework"):
+        sfw = executive_ctx.get("strategy_framework") or {}
+        st.markdown("### 0. Tactical Framework - 7 dimenzió és stratégiai profil")
+        cfw1, cfw2, cfw3 = st.columns(3)
+        with cfw1:
+            st.metric("Elsődleges profil", f"{sfw.get('primary_code', '')} - {sfw.get('primary_name', '')}", f"{sfw.get('primary_pct', '')}%")
+        with cfw2:
+            st.metric("Alternatív profil", f"{sfw.get('secondary_code', '')} - {sfw.get('secondary_name', '')}", f"{sfw.get('secondary_pct', '')}%")
+        with cfw3:
+            st.metric("Javasolt alapirány", str(executive_ctx.get("plan_a", ""))[:42])
+        try:
+            st.dataframe(pd.DataFrame(_fpi_strategy_framework_to_rows_v129(sfw)), use_container_width=True, hide_index=True)
+        except Exception:
+            pass
+        focus = sfw.get("detail_focus") or []
+        if focus:
+            st.markdown("**Meccsspecifikus differenciálás:** " + "; ".join(str(x) for x in focus))
 
     st.markdown("### 1. Match Plan AI – javasolt meccsterv")
     st.markdown(f"**Plan A:** {plan['plan_a']}")
