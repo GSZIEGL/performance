@@ -1170,6 +1170,60 @@ def _fpi_apply_v117_control_readability_patch() -> None:
 
 _fpi_apply_v117_control_readability_patch()
 
+
+# =========================================================
+# V131 - Methodology static table readability fix
+# =========================================================
+def _fpi_apply_v131_methodology_table_css() -> None:
+    st.markdown(
+        """
+        <style>
+        .fpi-method-table-wrap {
+            width: 100%;
+            overflow-x: auto;
+            margin: 10px 0 18px 0;
+            border-radius: 18px;
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            box-shadow: 0 10px 28px rgba(15,23,42,.08);
+        }
+        .fpi-method-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: auto;
+            background: #ffffff;
+            color: #0f172a;
+        }
+        .fpi-method-table th {
+            background: #e0f2fe;
+            color: #0f172a;
+            text-align: left;
+            font-weight: 900;
+            padding: 12px 14px;
+            border-bottom: 1px solid #cbd5e1;
+            white-space: nowrap;
+        }
+        .fpi-method-table td {
+            color: #0f172a;
+            padding: 11px 14px;
+            border-bottom: 1px solid #e2e8f0;
+            vertical-align: top;
+            line-height: 1.4;
+            background: #ffffff;
+        }
+        .fpi-method-table tr:nth-child(even) td { background: #f8fafc; }
+        .fpi-method-table tr:last-child td { border-bottom: none; }
+        .fpi-method-table-wrap *, .fpi-method-table * {
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+_fpi_apply_v131_methodology_table_css()
+
 # =========================================================
 # V119 - Nuclear light UI override: no black controls/tables
 # =========================================================
@@ -13492,10 +13546,32 @@ def render_methodology_tab() -> None:
         ("Labdabirtoklás", "kontroll, dominancia, labdajáratás"),
         ("Lövésprofil", "lövésszám, xG, helyzetminőség"),
     ]]
-    st.dataframe(pd.DataFrame(dim_rows), use_container_width=True, hide_index=True)
-    st.markdown("**Két fő tengely:** játékstílus: direkt -> vegyes -> kiegyensúlyozott -> kontroll -> agresszív; blokkmagasság: mély -> alacsony-közép -> közép -> közép-magas -> magas.")
-    strat_df = pd.DataFrame(_fpi_strategy_palette_rows_any_v130(), columns=["Kód", "Stratégia", "Játékstílus", "Blokkmagasság", "Jelentés"])
-    st.dataframe(strat_df, use_container_width=True, hide_index=True)
+    # V131: st.dataframe egyes böngésző/CSS kombinációkban üres fehér dobozként jelent meg.
+    # Ezért a metodikai táblázatokat statikus, olvasható HTML táblaként rendereljük.
+    def _fpi_methodology_html_table_v131(rows, headers):
+        def esc(x):
+            return html.escape(str(x if x is not None else ""))
+        head = "".join(f"<th>{esc(h)}</th>" for h in headers)
+        body = ""
+        for r in rows:
+            if isinstance(r, dict):
+                vals = [r.get(h, "") for h in headers]
+            else:
+                vals = list(r)
+            body += "<tr>" + "".join(f"<td>{esc(v)}</td>" for v in vals) + "</tr>"
+        return f"""
+        <div class="fpi-method-table-wrap">
+          <table class="fpi-method-table">
+            <thead><tr>{head}</tr></thead>
+            <tbody>{body}</tbody>
+          </table>
+        </div>
+        """
+
+    st.markdown(_fpi_methodology_html_table_v131(dim_rows, ["Dimenzió", "Mit jelent?"]), unsafe_allow_html=True)
+    st.markdown("**Két fő tengely:** játékstílus: direkt → vegyes → kiegyensúlyozott → kontroll → agresszív; blokkmagasság: mély → alacsony-közép → közép → közép-magas → magas.")
+    strat_rows = _fpi_strategy_palette_rows_any_v130()
+    st.markdown(_fpi_methodology_html_table_v131(strat_rows, ["Kód", "Stratégia", "Játékstílus", "Blokkmagasság", "Jelentés"]), unsafe_allow_html=True)
     st.info("A 9 stratégia nem lezárt címke. A gyakorlatban a Football Performance Intelligence elsődleges profilt, alternatív profilt és konkrét meccsfókuszokat ad. Példa: BAT elsődleges, POZ/KIE alternatív profillal, rest defense és átmeneti fókuszokkal.")
 
     st.markdown("### 6. Értelmezési korlát")
