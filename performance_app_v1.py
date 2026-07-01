@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V130_TACTICAL_FRAMEWORK_FIX_2026_06_30"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V132_OWN_TEAM_OPPONENT_PLAYERS_2026_07_01"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -8526,6 +8526,304 @@ def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool
 
 
 # =========================================================
+# V132 - Own team report + opponent player intelligence helpers
+# =========================================================
+FPI_FORMATION_OPTIONS_V132 = ["4-2-3-1", "4-3-3", "3-5-2", "3-4-3", "4-4-2", "5-3-2", "5-4-1", "Egyéb"]
+FPI_BLOCK_OPTIONS_V132 = ["Magas blokk", "Középső blokk", "Mély blokk", "Vegyes / meccsfüggő"]
+FPI_ATTACK_ROUTE_OPTIONS_V132 = ["Szélek", "Centrum / félterületek", "Átmenetek", "Direkt játék", "Vegyes"]
+
+
+def _fpi_df_to_player_eval_rows_v132(table: object, role: str, value_col: str, meaning: str, action: str, max_rows: int = 3) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    if not isinstance(table, pd.DataFrame) or table.empty or "player" not in table.columns:
+        return rows
+    for _, r in table.head(max_rows).iterrows():
+        player = str(r.get("player", "")).strip()
+        if not player:
+            continue
+        pos = str(r.get("position", "")).strip()
+        val = r.get(value_col, "")
+        try:
+            val_txt = f"{float(val):.1f}"
+        except Exception:
+            val_txt = str(val)
+        evidence = f"{value_col}: {val_txt}" if val_txt else "játékosstatisztika alapján"
+        rows.append({"Játékos": player, "Poszt": pos, "Szerep": role, "Bizonyíték": evidence, "Értelmezés": meaning, "Javaslat": action})
+    return rows
+
+
+def _fpi_build_player_evaluation_v132(player_tables: object, side: str = "opp", max_rows: int = 9) -> List[Dict[str, str]]:
+    """Játékosszintű taktikai értékelés a már meglévő parser tábláiból.
+    Nem új adatot talál ki: creators / progressors / build_up / defenders / duel_players táblákból épít coach-friendly blokkot.
+    """
+    if not isinstance(player_tables, dict):
+        return []
+    if side == "opp":
+        specs = [
+            ("creators", "Kreatív kulcsjátékos", "key_passes", "helyzetkialakításban veszélyes kapcsolódási pont", "passzsáv zárása, testhelyzet kontroll, belső irány lezárása"),
+            ("progressors", "Labdafelhozó / progresszor", "progressive_passes", "előrehaladást segítő játékos", "presszing trigger: ne fordulhasson szabadon előre"),
+            ("build_up", "Labdakihozatal szervező", "passes", "sok labdaérintésen keresztül épít", "irányított presszing vagy oldalra terelés"),
+            ("duel_players", "Párharcerős játékos", "defensive_challenges", "párharcokban aktív védőjátékos", "izolált 1v1 helyett kombináció / oldalváltás"),
+            ("defenders", "Labdaszerző / védekező láncszem", "interceptions", "közbelépésekben aktív játékos", "második labdák és visszatámadás kontrollja"),
+        ]
+    else:
+        specs = [
+            ("creators", "Saját kreatív kapcsolódási pont", "key_passes", "rajta keresztül érdemes helyzetet kialakítani", "támadóharmadban több kapcsolódás / félterületi pozíció"),
+            ("progressors", "Saját progresszor", "progressive_passes", "gyors előrehaladás egyik kulcsa", "build-upban tudatos keresése"),
+            ("build_up", "Saját labdakihozatal szervező", "passes", "sokat vesz részt az építkezésben", "első fázisban biztos passzopcióként használni"),
+            ("duel_players", "Saját párharcerős játékos", "defensive_challenges", "párharcokban aktív", "védekező átmenetben és második labdáknál támaszkodni rá"),
+            ("defenders", "Saját labdaszerző", "interceptions", "labdaszerzésekben aktív", "középső blokkban labdaszerzésre építő szerep"),
+        ]
+    rows: List[Dict[str, str]] = []
+    seen = set()
+    for key, role, col, meaning, action in specs:
+        for r in _fpi_df_to_player_eval_rows_v132(player_tables.get(key), role, col, meaning, action, max_rows=3):
+            sig = (r.get("Játékos", ""), r.get("Szerep", ""))
+            if sig in seen:
+                continue
+            seen.add(sig)
+            rows.append(r)
+            if len(rows) >= max_rows:
+                return rows
+    return rows[:max_rows]
+
+
+def _fpi_player_eval_to_findings_v132(rows: List[Dict[str, str]], side_label: str = "Ellenfél") -> List[Dict[str, str]]:
+    out = []
+    for r in rows[:6]:
+        player = r.get("Játékos", "")
+        role = r.get("Szerep", "")
+        out.append({
+            "Téma": f"{side_label}: {role}",
+            "Bizonyíték": f"{player} ({r.get('Poszt','')}): {r.get('Bizonyíték','')}",
+            "Edzői következtetés": r.get("Javaslat", ""),
+            "Prioritás": "Magas" if side_label == "Ellenfél" and any(k in role.lower() for k in ["kulcs", "progresszor", "labdafelhozó"]) else "Közepes",
+        })
+    return out
+
+
+def _fpi_team_metric_rows_v132(metrics: object) -> List[Tuple[str, str]]:
+    if not isinstance(metrics, dict) or not metrics:
+        return []
+    label_map = {
+        "possession_pct": "Labdabirtoklás", "shots": "Lövések", "xg": "xG", "entries_box": "Box belépések",
+        "final_third_entries": "Támadóharmad belépések", "key_passes": "Kulcspasszok", "corners": "Szögletek",
+        "ppda": "PPDA", "pressing_success_pct": "Presszing sikeresség", "passes_accurate_pct": "Passzpontosság",
+        "crosses": "Beadások", "recoveries": "Labdaszerzések", "lost_balls": "Labdavesztések", "counterattacks": "Kontrák",
+    }
+    rows = []
+    for k, lab in label_map.items():
+        v = metrics.get(k)
+        if v in [None, "", 0, 0.0]:
+            continue
+        try:
+            fv = float(v)
+            if k in ["possession_pct", "pressing_success_pct", "passes_accurate_pct"] and fv <= 1:
+                fv *= 100
+            suffix = "%" if k in ["possession_pct", "pressing_success_pct", "passes_accurate_pct"] else ""
+            rows.append((lab, f"{fv:.1f}{suffix}"))
+        except Exception:
+            rows.append((lab, str(v)))
+    return rows[:12]
+
+
+def _fpi_own_context_from_session_v132() -> Dict[str, str]:
+    return {
+        "formation": str(st.session_state.get("clean_own_formation_v132", "")),
+        "defensive_block": str(st.session_state.get("clean_own_block_v132", "")),
+        "attack_route": str(st.session_state.get("clean_own_attack_route_v132", "")),
+        "playmodel": str(st.session_state.get("clean_playmodel_profile_v112", st.session_state.get("clean_playstyle_v112", ""))),
+    }
+
+
+def build_fpi_own_team_profile_pdf_bytes(
+    data: pd.DataFrame,
+    selected_week: Optional[str] = None,
+    playstyle: str = "Kiegyensúlyozott",
+    tactical_context: Optional[Dict[str, object]] = None,
+    demo_label: str = "",
+) -> Optional[bytes]:
+    """Külön PDF: saját csapat csapat- és játékosszintű profil. Nem meccsriport, hanem csapatdiagnózis."""
+    if SimpleDocTemplate is None:
+        return None
+    try:
+        ctx = _fpi_report_context(data, selected_week, playstyle)
+    except Exception:
+        return None
+    if ctx.get("error"):
+        return None
+    tactical_context = tactical_context if tactical_context is not None else st.session_state.get("tactical_pro_context", {})
+    own_ctx = _fpi_own_context_from_session_v132()
+    readiness = int(ctx.get("readiness_score", 70) or 70)
+    risk_df = ctx.get("risk_df") if isinstance(ctx.get("risk_df"), pd.DataFrame) else pd.DataFrame()
+    high_risk, med_risk = _fpi_count_risk_levels_v126(risk_df) if "_fpi_count_risk_levels_v126" in globals() else (0, 0)
+    week = ctx.get("selected_week", selected_week or "")
+    own_metrics = (tactical_context or {}).get("own_team_metrics", {}) if isinstance(tactical_context, dict) else {}
+    own_players = (tactical_context or {}).get("own_player_tables", {}) if isinstance(tactical_context, dict) else {}
+    own_eval = (tactical_context or {}).get("own_player_evaluation", []) if isinstance(tactical_context, dict) else []
+    if not own_eval:
+        own_eval = _fpi_build_player_evaluation_v132(own_players, side="own", max_rows=10)
+    strategy = ((tactical_context or {}).get("strategy_framework") or {}) if isinstance(tactical_context, dict) else {}
+
+    font_name, font_bold = _register_pdf_font()
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=0.9*cm, leftMargin=0.9*cm, topMargin=0.7*cm, bottomMargin=0.7*cm)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("FPIOwnTitle", parent=styles["Title"], fontName=font_bold, fontSize=20, leading=23, textColor=colors.HexColor("#0F172A"))
+    sub = ParagraphStyle("FPIOwnSub", parent=styles["Normal"], fontName=font_name, fontSize=8.5, leading=10.5, textColor=colors.HexColor("#334155"))
+    body = ParagraphStyle("FPIOwnBody", parent=styles["Normal"], fontName=font_name, fontSize=7.6, leading=9.3, textColor=colors.HexColor("#111827"))
+    small = ParagraphStyle("FPIOwnSmall", parent=styles["Normal"], fontName=font_name, fontSize=6.5, leading=7.8, textColor=colors.HexColor("#111827"))
+    head = ParagraphStyle("FPIOwnHead", parent=styles["Normal"], fontName=font_bold, fontSize=7.0, leading=8.5, alignment=1, textColor=colors.white)
+
+    def clean(v):
+        return pdf_safe_text(v).replace("\r", "").strip()
+    def P(v, style=body):
+        return Paragraph(html.escape(clean(v)).replace("\n", "<br/>") or "—", style)
+    def section(txt, color="#DBEAFE"):
+        t = Table([[P(txt, ParagraphStyle("FPIOwnH", parent=body, fontName=font_bold, fontSize=11.0, leading=13.0, textColor=colors.HexColor("#0F172A")))]], colWidths=[27.7*cm])
+        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor(color)),("BOX",(0,0),(-1,-1),0.4,colors.HexColor("#93C5FD")),("LEFTPADDING",(0,0),(-1,-1),7),("RIGHTPADDING",(0,0),(-1,-1),7),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
+        return t
+    def table(rows, widths, header_bg="#0F172A", row_bgs=None):
+        if row_bgs is None:
+            row_bgs=[colors.white, colors.HexColor("#F8FAFC")]
+        t=Table(rows, colWidths=widths, repeatRows=1)
+        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor(header_bg)),("GRID",(0,0),(-1,-1),0.25,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),row_bgs),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
+        return t
+
+    story=[]
+    label_prefix = f"{demo_label} | " if demo_label else ""
+    story.append(P("Football Performance Intelligence – saját csapat profil", title))
+    story.append(P(f"{label_prefix}Hét: {format_week_label(str(week))} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
+    story.append(Spacer(1,0.18*cm))
+    rows=[[P("Terület", head), P("Érték / értelmezés", head)]]
+    rows += [
+        [P("Readiness", small), P(f"{readiness}/100 – {score_to_label(readiness)}", small)],
+        [P("Játékoskockázat", small), P(f"{high_risk} magas / {med_risk} közepes", small)],
+        [P("Alapfelállás", small), P(own_ctx.get("formation") or "nincs megadva", small)],
+        [P("Védekezési blokk", small), P(own_ctx.get("defensive_block") or "nincs megadva", small)],
+        [P("Fő támadási út", small), P(own_ctx.get("attack_route") or "nincs megadva", small)],
+        [P("Tactical Framework profil", small), P(str(strategy.get("primary", "nincs számított profil")), small)],
+    ]
+    story.append(table(rows,[5.5*cm,22.2*cm],header_bg="#0F766E",row_bgs=[colors.HexColor("#F0FDFA"),colors.white]))
+    story.append(Spacer(1,0.18*cm))
+
+    metric_rows=_fpi_team_metric_rows_v132(own_metrics)
+    story.append(section("Csapatszintű taktikai / játékprofil", "#E0F2FE"))
+    if metric_rows:
+        tr=[[P("Mutató",head),P("Érték",head),P("Edzői olvasat",head)]]
+        for lab,val in metric_rows:
+            tr.append([P(lab,small),P(val,small),P("Saját játékmodell és heti terhelhetőség alapján értelmezendő.",small)])
+        story.append(table(tr,[6.0*cm,4.5*cm,17.2*cm],header_bg="#1E3A8A",row_bgs=[colors.HexColor("#EFF6FF"),colors.white]))
+    else:
+        story.append(P("Nincs saját csapatstatisztika Excel feltöltve. A riport ilyenkor GPS + megadott játékmodell alapján ad saját csapat profilt.", body))
+    story.append(Spacer(1,0.18*cm))
+
+    story.append(section("Játékosszintű saját szerepek", "#DCFCE7"))
+    if own_eval:
+        pr=[[P("Játékos",head),P("Poszt",head),P("Szerep",head),P("Bizonyíték",head),P("Használati javaslat",head)]]
+        for r in own_eval[:10]:
+            pr.append([P(r.get("Játékos",""),small),P(r.get("Poszt",""),small),P(r.get("Szerep",""),small),P(r.get("Bizonyíték",""),small),P(r.get("Javaslat",""),small)])
+        story.append(table(pr,[4.2*cm,2.6*cm,5.2*cm,5.5*cm,10.2*cm],header_bg="#166534",row_bgs=[colors.HexColor("#ECFDF5"),colors.white]))
+    else:
+        story.append(P("Nincs saját játékosstatisztika Excel. Játékosszintű szerepértékeléshez saját játékos Excel szükséges.", body))
+    story.append(Spacer(1,0.18*cm))
+
+    story.append(section("Edzői összegzés", "#FEF3C7"))
+    bullets=[
+        "Ez a riport nem ellenfélre készülő meccsterv, hanem a saját csapat aktuális profilja.",
+        "A saját játékmodell, alapfelállás, blokkmagasság és fő támadási út segít a GPS- és taktikai inputok értelmezésében.",
+        "A játékosszintű blokk azt mutatja, kikre építhető a labdakihozatal, progresszió, kreativitás vagy védekező stabilitás.",
+    ]
+    story.append(P("<br/>".join([f"• {b}" for b in bullets]), body))
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def build_fpi_own_team_profile_sample_pdf_bytes() -> Optional[bytes]:
+    demo_raw = build_demo_performance_data()
+    demo_df, _, missing = standardize_dataframe(demo_raw)
+    if missing:
+        return None
+    demo_df = add_position_group(demo_df)
+    latest = _fpi_latest_week(demo_df)
+    tactical_ctx = _build_demo_tactical_context()
+    # Demo player tables, hogy a minta PDF-ben is legyen játékosszintű saját csapat blokk.
+    tactical_ctx["own_player_tables"] = {
+        "creators": pd.DataFrame([{"player":"Kovács M.","position":"AM","key_passes":4.0},{"player":"Szabó B.","position":"W","key_passes":3.0}]),
+        "progressors": pd.DataFrame([{"player":"Nagy D.","position":"CM","progressive_passes":9.0},{"player":"Tóth Á.","position":"DM","progressive_passes":7.0}]),
+        "build_up": pd.DataFrame([{"player":"Varga L.","position":"CB","passes":62.0},{"player":"Tóth Á.","position":"DM","passes":55.0}]),
+        "defenders": pd.DataFrame([{"player":"Farkas Z.","position":"CB","interceptions":6.0}]),
+        "duel_players": pd.DataFrame([{"player":"Balogh P.","position":"FB","defensive_challenges":11.0}]),
+    }
+    tactical_ctx["own_player_evaluation"] = _fpi_build_player_evaluation_v132(tactical_ctx["own_player_tables"], side="own", max_rows=10)
+    old_vals = {"clean_own_formation_v132": st.session_state.get("clean_own_formation_v132"), "clean_own_block_v132": st.session_state.get("clean_own_block_v132"), "clean_own_attack_route_v132": st.session_state.get("clean_own_attack_route_v132")}
+    st.session_state["clean_own_formation_v132"] = st.session_state.get("clean_own_formation_v132", "4-2-3-1") or "4-2-3-1"
+    st.session_state["clean_own_block_v132"] = st.session_state.get("clean_own_block_v132", "Középső blokk") or "Középső blokk"
+    st.session_state["clean_own_attack_route_v132"] = st.session_state.get("clean_own_attack_route_v132", "Átmenetek") or "Átmenetek"
+    pdf = build_fpi_own_team_profile_pdf_bytes(demo_df, latest, "Magas presszing", tactical_context=tactical_ctx, demo_label="MINTA RIPORT / KTE U19 – saját csapat profil")
+    for k, v in old_vals.items():
+        if v is None:
+            st.session_state.pop(k, None)
+        else:
+            st.session_state[k] = v
+    return pdf
+
+
+def _fpi_enrich_tactical_context_v132(executive_ctx: Dict[str, object], own_player_tables: object, opp_player_tables: object) -> Dict[str, object]:
+    """Executive context kiegészítése saját/ellenfél játékosszintű értékeléssel."""
+    ctx = dict(executive_ctx or {})
+    ctx["own_player_tables"] = own_player_tables if isinstance(own_player_tables, dict) else {}
+    ctx["opp_player_tables"] = opp_player_tables if isinstance(opp_player_tables, dict) else {}
+    opp_eval = _fpi_build_player_evaluation_v132(ctx["opp_player_tables"], side="opp", max_rows=9)
+    own_eval = _fpi_build_player_evaluation_v132(ctx["own_player_tables"], side="own", max_rows=9)
+    ctx["opponent_player_evaluation"] = opp_eval
+    ctx["own_player_evaluation"] = own_eval
+    findings = list(ctx.get("tactical_findings") or [])
+    findings = _fpi_player_eval_to_findings_v132(opp_eval, "Ellenfél") + findings + _fpi_player_eval_to_findings_v132(own_eval[:3], "Saját")
+    # duplikátumok kivétele, hogy a PDF ne legyen túl hosszú
+    seen = set(); compact = []
+    for f in findings:
+        sig = (str(f.get("Téma","")), str(f.get("Bizonyíték",""))[:80])
+        if sig in seen:
+            continue
+        seen.add(sig); compact.append(f)
+    ctx["tactical_findings"] = compact[:14]
+    # A kockázati/fókusz lista elejére bekerül az ellenfél játékosprofil is, így az Executive Summary-ban is látszik.
+    risks = list(ctx.get("risks") or [])
+    for r in opp_eval[:4]:
+        txt = f"{r.get('Játékos')}: {r.get('Szerep')} – {r.get('Javaslat')}"
+        if txt not in risks:
+            risks.insert(0, txt)
+    ctx["risks"] = risks[:10]
+    return ctx
+
+# V132 override: a taktikai üzenetek elsőként az ellenfél játékosszintű értékelésből induljanak, ha van ilyen.
+def _fpi_top_tactical_messages_v82(tactical_context: Optional[Dict[str, object]], limit: int = 3, gps_context: Optional[Dict[str, object]] = None, readiness: Optional[int] = None, priorities: Optional[List[dict]] = None, week: Optional[str] = None) -> List[str]:
+    if not _fpi_has_tactical_signal_v95(tactical_context):
+        if gps_context is not None:
+            return _fpi_gps_only_conclusions_v95(gps_context, priorities or [], int(readiness or 70), str(week or gps_context.get("selected_week", "")), limit=max(limit, 5))
+        return ["GPS-only mód: nincs taktikai input, ezért a javaslat az erőnléti/GPS adatokra épül."]
+    out: List[str] = []
+    for r in (tactical_context or {}).get("opponent_player_evaluation", [])[:3]:
+        out.append(f"{r.get('Játékos')}: {r.get('Szerep')} – {r.get('Javaslat')}")
+    findings = (tactical_context or {}).get("tactical_findings") or []
+    pdf_first = [f for f in findings if str(f.get("Téma", "")).lower().startswith("pdf") or "PDF" in str(f.get("Forrás", ""))]
+    other = [f for f in findings if f not in pdf_first]
+    for f in (pdf_first + other):
+        if len(out) >= limit:
+            break
+        theme = str(f.get("Téma", "")).strip()
+        decision = str(f.get("Edzői következtetés", "")).strip()
+        if theme and decision:
+            out.append(f"{theme}: {decision}")
+    if not out:
+        risks = (tactical_context or {}).get("risks", []) or []
+        out = [str(x) for x in risks[:limit]]
+    return [_fpi_clean_sentence_v82(x, 180) for x in out[:limit]] or ["Nincs erős taktikai jelzés."]
+
+
+# =========================================================
 # V10.0 - Landing page + import/export workflow
 # =========================================================
 
@@ -8908,10 +9206,11 @@ def render_fpi_landing_page_v100() -> None:
         sample_exec_pdf_bytes = build_fpi_sample_pdf_bytes("executive", include_tactical=True)
         sample_full_pdf_bytes = build_fpi_sample_pdf_bytes("full", include_tactical=True)
         sample_gps_only_pdf_bytes = build_fpi_gps_only_sample_pdf_bytes()
+        sample_own_team_pdf_bytes = build_fpi_own_team_profile_sample_pdf_bytes()
     except Exception:
-        sample_exec_pdf_bytes = sample_full_pdf_bytes = sample_gps_only_pdf_bytes = None
+        sample_exec_pdf_bytes = sample_full_pdf_bytes = sample_gps_only_pdf_bytes = sample_own_team_pdf_bytes = None
 
-    s1, s2, s3 = st.columns(3)
+    s1, s2, s3, s4 = st.columns(4)
     with s1:
         if sample_gps_only_pdf_bytes is not None:
             st.download_button("⬇️ Minta GPS-only Executive", data=sample_gps_only_pdf_bytes, file_name="fpi_minta_gps_only_executive.pdf", mime="application/pdf", use_container_width=True, key="landing_download_sample_gps_only_v123")
@@ -8921,6 +9220,9 @@ def render_fpi_landing_page_v100() -> None:
     with s3:
         if sample_full_pdf_bytes is not None:
             st.download_button("⬇️ Minta Full Report", data=sample_full_pdf_bytes, file_name="fpi_minta_full_report.pdf", mime="application/pdf", use_container_width=True, key="landing_download_sample_full_v123")
+    with s4:
+        if sample_own_team_pdf_bytes is not None:
+            st.download_button("⬇️ Minta saját csapat profil", data=sample_own_team_pdf_bytes, file_name="fpi_minta_sajat_csapat_profil.pdf", mime="application/pdf", use_container_width=True, key="landing_download_sample_own_team_v132")
 
     st.markdown("### Hogyan működik?")
     f1, f2, f3, f4 = st.columns(4)
@@ -8928,7 +9230,7 @@ def render_fpi_landing_page_v100() -> None:
         (f1, "1. GPS export", "GPS Excel feltöltése vagy mintaadat használata."),
         (f2, "2. Kontextus", "Meccsnap, ellenfél, korosztály, szint és hétprofil."),
         (f3, "3. Football Performance Intelligence motor", "Readiness, risk, referencia, játékmodell és mikrociklus."),
-        (f4, "4. PDF export", "GPS-only, Executive Summary vagy Full Report."),
+        (f4, "4. PDF export", "GPS-only, Executive Summary, Full Report vagy saját csapat profil."),
     ]:
         with col:
             st.markdown(f'<div class="fpi-flow-step"><b>{title}</b><div>{desc}</div></div>', unsafe_allow_html=True)
@@ -9386,6 +9688,7 @@ def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Optional[
         }
         plan = _fpi_safe_build_adaptive_plan_v104(gps_context or {}, tactical_ctx_for_plan)
         executive_ctx = _fpi_safe_build_tactical_executive_context_v104(gps_context or {}, tactical_ctx_for_plan, plan)
+        executive_ctx = _fpi_enrich_tactical_context_v132(executive_ctx, own_player_tables, opp_player_tables)
         st.session_state["tactical_pro_context"] = executive_ctx
 
         has_any = any([
@@ -9774,6 +10077,16 @@ def render_fpi_clean_workspace_v101() -> None:
         playmodel_profile_clean = st.selectbox("Játékmodell profil", FPI_PLAYMODEL_OPTIONS_V112, index=_fpi_idx_v113(FPI_PLAYMODEL_OPTIONS_V112, user_defaults_clean.get("playmodel_profile", "Kiegyensúlyozott"), 4), key="clean_playmodel_profile_v112")
     ref_profile_clean = f"{reference_age_clean} / {reference_level_clean} / játékosonkénti poszt / {playmodel_profile_clean}"
     st.caption(f"Aktív referencia: {ref_profile_clean}. A posztot az app játékosonként a Poszt/Position oszlopból veszi; ha nincs poszt, mezőnyátlaggal számol.")
+
+    st.markdown("#### Saját csapat alapprofil")
+    st.caption("Nem kötelező, de segít, hogy a Football Performance Intelligence jobban értelmezze a saját játékmodellt. Csak 3 rövid kérdés, hogy ne vesszen el a 30 másodperces workflow.")
+    oc1, oc2, oc3 = st.columns(3)
+    with oc1:
+        own_formation_clean = st.selectbox("Alapfelállás", FPI_FORMATION_OPTIONS_V132, index=_fpi_idx_v113(FPI_FORMATION_OPTIONS_V132, user_defaults_clean.get("own_formation", "4-2-3-1"), 0), key="clean_own_formation_v132")
+    with oc2:
+        own_block_clean = st.selectbox("Védekezési blokk", FPI_BLOCK_OPTIONS_V132, index=_fpi_idx_v113(FPI_BLOCK_OPTIONS_V132, user_defaults_clean.get("own_block", "Középső blokk"), 1), key="clean_own_block_v132")
+    with oc3:
+        own_attack_route_clean = st.selectbox("Fő támadási út", FPI_ATTACK_ROUTE_OPTIONS_V132, index=_fpi_idx_v113(FPI_ATTACK_ROUTE_OPTIONS_V132, user_defaults_clean.get("own_attack_route", "Vegyes"), 4), key="clean_own_attack_route_v132")
     st.markdown('<div class="fpi-settings-panel"><b>Menthető alapbeállítás</b><br>Az alábbi gomb a belépési e-mailhez / azonosítóhoz menti a választókat, így a következő indításkor ezek töltődnek be.</div>', unsafe_allow_html=True)
     _storage_note = st.session_state.get("fpi_defaults_storage_v117", "még nincs mentett alapbeállítás")
     st.caption(f"Mentés helye: {_storage_note}. A mentés gombnyomásra történik, nem automatikusan.")
@@ -9790,6 +10103,9 @@ def render_fpi_clean_workspace_v101() -> None:
             "training_days": int(st.session_state.get("clean_n_train_v112", 4)),
             "rest_days": int(st.session_state.get("clean_n_rest_v112", 1)),
             "md_day": st.session_state.get("clean_md_match_day_v112", "MD"),
+            "own_formation": st.session_state.get("clean_own_formation_v132", "4-2-3-1"),
+            "own_block": st.session_state.get("clean_own_block_v132", "Középső blokk"),
+            "own_attack_route": st.session_state.get("clean_own_attack_route_v132", "Vegyes"),
         })
         if ok_save:
             st.success("Alapbeállítás mentve ehhez a belépési azonosítóhoz.")
@@ -9855,6 +10171,9 @@ def render_fpi_clean_workspace_v101() -> None:
         "rest_days": int(n_rest_clean),
         "md_day": md_match_day_clean,
         "session_plan": session_plan_clean,
+        "own_formation": st.session_state.get("clean_own_formation_v132", ""),
+        "own_block": st.session_state.get("clean_own_block_v132", ""),
+        "own_attack_route": st.session_state.get("clean_own_attack_route_v132", ""),
     }
 
     week_context_clean = _fpi_week_context_df_v94(df_clean, match_date_clean)
@@ -9896,7 +10215,7 @@ def render_fpi_clean_workspace_v101() -> None:
     st.session_state["fpi_clean_tactical_context_v115"] = clean_tactical_context
 
     st.markdown("### 4. Export")
-    e1, e2, e3 = st.columns(3)
+    e1, e2, e3, e4 = st.columns(4)
     safe_week_clean = _safe_filename_week(selected_week_clean)
     with e1:
         gps_pdf_clean = build_fpi_gps_only_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean)
@@ -9910,6 +10229,10 @@ def render_fpi_clean_workspace_v101() -> None:
         full_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="full", tactical_context=clean_tactical_context)
         if full_pdf_clean is not None:
             st.download_button("⬇️ Full Report PDF", data=full_pdf_clean, file_name=f"fpi_full_report_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_full_v101")
+    with e4:
+        own_team_pdf_clean = build_fpi_own_team_profile_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, tactical_context=clean_tactical_context)
+        if own_team_pdf_clean is not None:
+            st.download_button("⬇️ Saját csapat profil PDF", data=own_team_pdf_clean, file_name=f"fpi_sajat_csapat_profil_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_own_team_v132")
 
 
 
