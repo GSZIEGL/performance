@@ -11,6 +11,7 @@ import os
 import json
 import re
 import unicodedata
+import zipfile
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -67,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V134_REFERENCED_PLAYER_EVAL_2026_07_01"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V136_ZIP_GPS_BATCH_IMPORT_2026_07_01"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -2187,6 +2188,121 @@ def read_excel_all(file) -> Dict[str, pd.DataFrame]:
     # header=None kell, mert sok GPS exportnál az első sor üres,
     # a valódi fejléc a 2. sorban van.
     return pd.read_excel(file, sheet_name=None, header=None)
+
+
+# =========================================================
+# V136 - ZIP / multi-session GPS import
+# =========================================================
+def _fpi_read_csv_bytes_v136(data: bytes, name: str = "") -> pd.DataFrame:
+    """CSV beolvasás több tipikus kódolással és automatikus elválasztóval."""
+    last_err = None
+    for enc in ["utf-8-sig", "utf-8", "latin2", "cp1250", "iso-8859-2"]:
+        try:
+            return pd.read_csv(io.BytesIO(data), sep=None, engine="python", encoding=enc, header=None)
+        except Exception as e:
+            last_err = e
+    raise ValueError(f"CSV beolvasási hiba ({name}): {last_err}")
+
+
+def _fpi_read_gps_upload_to_sheets_v136(uploaded_file) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame, str, bool]:
+    """Egy Excel/CSV vagy ZIP-ben lévő több GPS fájl beolvasása egységes sheet-dict formába.
+
+    A ZIP mód lényege:
+    - minden belső Excel/CSV fájlt beolvasunk,
+    - a sheet neve tartalmazza a fájlnevet is,
+    - a meglévő normalize_uploaded_sheet + Smart Mapper ugyanúgy fut rajtuk,
+    - végül a prepare_uploaded_sheets összefűzi az összes releváns adatlapot.
+    """
+    if uploaded_file is None:
+        return {}, pd.DataFrame(), "", False
+
+    try:
+        data = uploaded_file.getvalue()
+    except Exception:
+        data = uploaded_file.read()
+
+    upload_name = getattr(uploaded_file, "name", "gps_upload")
+    signature = hashlib.md5(data or b"").hexdigest()
+    ext = Path(str(upload_name)).suffix.lower()
+
+    sheets: Dict[str, pd.DataFrame] = {}
+    report_rows: List[Dict[str, object]] = []
+
+    def _add_report(name: str, status: str, rows: int = 0, sheets_n: int = 0, note: str = "") -> None:
+        report_rows.append({
+            "Fájl": name,
+            "Státusz": status,
+            "Sor": int(rows or 0),
+            "Lap": int(sheets_n or 0),
+            "Megjegyzés": note,
+        })
+
+    def _read_single_file(data_bytes: bytes, name: str) -> None:
+        low = str(name).lower()
+        try:
+            if low.endswith((".xlsx", ".xls")):
+                xls_sheets = pd.read_excel(io.BytesIO(data_bytes), sheet_name=None, header=None)
+                local_count = 0
+                local_rows = 0
+                for sheet_name, df_sheet in (xls_sheets or {}).items():
+                    if df_sheet is None or df_sheet.empty:
+                        continue
+                    key = f"{Path(name).stem} / {sheet_name}"
+                    # Ütközés esetén ne írjuk felül.
+                    if key in sheets:
+                        key = f"{Path(name).stem} / {sheet_name} / {len(sheets)+1}"
+                    sheets[key] = df_sheet
+                    local_count += 1
+                    local_rows += len(df_sheet)
+                _add_report(name, "OK", local_rows, local_count, "Excel beolvasva")
+            elif low.endswith(".csv"):
+                df_csv = _fpi_read_csv_bytes_v136(data_bytes, name)
+                key = Path(name).stem
+                if key in sheets:
+                    key = f"{Path(name).stem} / {len(sheets)+1}"
+                sheets[key] = df_csv
+                _add_report(name, "OK", len(df_csv), 1, "CSV beolvasva")
+            else:
+                _add_report(name, "Kihagyva", 0, 0, "Nem támogatott fájltípus")
+        except Exception as e:
+            _add_report(name, "Hiba", 0, 0, str(e)[:220])
+
+    is_zip = ext == ".zip"
+    if is_zip:
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                names = [n for n in zf.namelist() if not n.endswith("/") and not Path(n).name.startswith(("~$", "."))]
+                supported = [n for n in names if n.lower().endswith((".xlsx", ".xls", ".csv"))]
+                if not supported:
+                    _add_report(upload_name, "Hiba", 0, 0, "A ZIP nem tartalmaz támogatott Excel/CSV fájlt")
+                for n in supported:
+                    _read_single_file(zf.read(n), n)
+        except Exception as e:
+            _add_report(upload_name, "Hiba", 0, 0, f"ZIP beolvasási hiba: {e}")
+    else:
+        _read_single_file(data, upload_name)
+
+    report_df = pd.DataFrame(report_rows)
+    return sheets, report_df, signature, is_zip
+
+
+def _fpi_render_gps_import_report_v136(report_df: pd.DataFrame, is_zip: bool) -> None:
+    """Import ellenőrző blokk ZIP vagy egyfájlos GPS importhoz."""
+    if report_df is None or report_df.empty:
+        return
+    ok = int((report_df["Státusz"] == "OK").sum()) if "Státusz" in report_df.columns else 0
+    bad = int((report_df["Státusz"] == "Hiba").sum()) if "Státusz" in report_df.columns else 0
+    skipped = int((report_df["Státusz"] == "Kihagyva").sum()) if "Státusz" in report_df.columns else 0
+    total_rows = int(pd.to_numeric(report_df.get("Sor", 0), errors="coerce").fillna(0).sum()) if "Sor" in report_df.columns else 0
+
+    with st.expander("📦 Feltöltött GPS fájlok ellenőrzése", expanded=bool(is_zip)):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("OK fájl", ok)
+        c2.metric("Hibás fájl", bad)
+        c3.metric("Kihagyott", skipped)
+        c4.metric("Nyers sor", total_rows)
+        st.caption("ZIP mód esetén minden belső Excel/CSV fájlra ugyanaz a normalizálás és Smart Mapper logika fut. Hibás fájl nem állítja meg az egész importot.")
+        st.dataframe(report_df, use_container_width=True, hide_index=True)
 
 
 def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Optional[str]], List[str]]:
@@ -10285,10 +10401,11 @@ def render_fpi_clean_workspace_v101() -> None:
         if st.button("⚙️ Haladó app", use_container_width=True, key="clean_go_full_app_v101"):
             _fpi_set_page_v100("app")
 
-    _fpi_section_header_v113("1. Import GPS", "GPS / terhelési Excel feltöltése, mintaadat vagy sablon letöltése.", "gps")
+    _fpi_section_header_v113("1. Import GPS", "Egy nagy GPS export, CSV vagy ZIP-ben több edzésfájl feltöltése.", "gps")
     up1, up2 = st.columns([2, 1])
     with up1:
-        uploaded_clean = st.file_uploader("GPS / terhelési Excel feltöltése", type=["xlsx", "xls"], key="clean_gps_upload_v101")
+        uploaded_clean = st.file_uploader("GPS / terhelési Excel/CSV vagy ZIP feltöltése", type=["xlsx", "xls", "csv", "zip"], key="clean_gps_upload_v136")
+        st.caption("ZIP mód: több tíz/száz edzés külön Excel/CSV fájlban is feltölthető. A Smart Mapper ugyanarra az egységes struktúrára fut rá.")
     with up2:
         use_demo_clean = st.toggle("Mintaadat használata", value=uploaded_clean is None, key="clean_use_demo_v101")
         template_bytes_clean = create_sample_input_template_bytes()
@@ -10320,9 +10437,22 @@ def render_fpi_clean_workspace_v101() -> None:
                     st.session_state["clean_active_upload_signature_v105"] = _clean_sig
             except Exception:
                 pass
-            sheets_clean = prepare_uploaded_sheets(read_excel_all(uploaded_clean))
+            gps_raw_sheets_v136, gps_report_v136, _clean_sig_v136, is_zip_v136 = _fpi_read_gps_upload_to_sheets_v136(uploaded_clean)
+            try:
+                if st.session_state.get("clean_active_upload_signature_v105") != _clean_sig_v136:
+                    st.session_state.pop("clean_mapped_df_override_v105", None)
+                    st.session_state.pop("clean_manual_mapping_v105", None)
+                    st.session_state["clean_active_upload_signature_v105"] = _clean_sig_v136
+            except Exception:
+                pass
+            _fpi_render_gps_import_report_v136(gps_report_v136, is_zip_v136)
+            if not gps_raw_sheets_v136:
+                st.error("Nem sikerült értelmezhető GPS adatlapot beolvasni. Ellenőrizd a fájlt vagy a ZIP tartalmát.")
+                st.stop()
+            sheets_clean = prepare_uploaded_sheets(gps_raw_sheets_v136)
             sheet_names_clean = list(sheets_clean.keys())
-            selected_sheet_clean = st.selectbox("Munkalap", sheet_names_clean, index=0, key="clean_sheet_select_v101")
+            default_sheet_idx_v136 = sheet_names_clean.index("Összes releváns adatlap") if "Összes releváns adatlap" in sheet_names_clean else 0
+            selected_sheet_clean = st.selectbox("Munkalap / összesített ZIP adat", sheet_names_clean, index=default_sheet_idx_v136, key="clean_sheet_select_v136")
             raw_df_clean = sheets_clean[selected_sheet_clean]
         except Exception as e:
             st.error(f"Nem sikerült beolvasni az Excelt: {e}")
