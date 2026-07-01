@@ -7714,7 +7714,7 @@ def _build_demo_tactical_context() -> Dict[str, object]:
             {"Téma": "Szélső játék / oldali dominancia", "Bizonyosság": 78},
             {"Téma": "Pontrúgások", "Bizonyosság": 72},
         ],
-        "own_team_metrics": {"possession_pct": 54, "shots": 12, "xg": 1.55, "entries_box": 18, "final_third_entries": 42, "key_passes": 9, "pressing_success_pct": 62, "passes_accurate_pct": 84, "recoveries": 54, "lost_balls": 31, "crosses": 14, "corners": 5},
+        "own_team_metrics": {"possession_pct": 39, "shots": 18, "xg": 0.75, "entries_box": 9, "final_third_entries": 62, "key_passes": 3, "pressing_success_pct": 71, "passes_accurate_pct": 74, "recoveries": 72, "lost_balls": 48, "crosses": 24, "corners": 2},
         "opp_team_metrics": {"counterattacks": 8, "crosses": 21, "corners": 6, "shots": 10, "xg": 1.20, "key_passes": 7, "ppda": 10.5},
         "plan_a": "BAT – középső blokk + gyors átmenet, jobb oldali biztosítással",
         "risks": [
@@ -8684,9 +8684,12 @@ def _fpi_player_metric_summary_v133(r: object) -> str:
 
 
 def _fpi_player_interpretation_v133(r: object, side: str, role: str) -> str:
-    """Értékelés: ne csak szerep, hanem a számok alapján konkrét olvasat."""
+    """Értékelés: kategóriázott, edzői nyelvű játékosszintű olvasat.
+    V135: az Értékelés oszlopban egyértelműen jelzi, mi kiemelkedő/jó/átlagos/fejlesztendő/figyelendő.
+    """
     if not hasattr(r, "get"):
         return role
+
     metrics = {
         "shots": _fpi_num_v133(r.get("shots"), 0) or 0,
         "xg": _fpi_num_v133(r.get("xg"), 0) or 0,
@@ -8699,33 +8702,74 @@ def _fpi_player_interpretation_v133(r: object, side: str, role: str) -> str:
         "interceptions": _fpi_num_v133(r.get("interceptions"), 0) or 0,
         "defensive_challenges": _fpi_num_v133(r.get("defensive_challenges"), 0) or 0,
         "lost_balls": _fpi_num_v133(r.get("lost_balls"), 0) or 0,
+        "minutes_played": _fpi_num_v133(r.get("minutes_played"), 0) or 0,
     }
-    notes: List[str] = []
-    def eval_for(key: str, label: str, ref_key: str):
+
+    rows: List[str] = []
+
+    positive_high = {
+        "sok lövés", "magas helyzetminőség", "kiemelt kreatív akció", "erős progresszió",
+        "magas beadási volumen", "labdakihozatali hub", "aktív labdaszerző", "sok közbelépés",
+        "magas párharcintenzitás", "teljes/majdnem teljes terhelés", "stabil passzminőség",
+        "labdabiztos",
+    }
+    negative_low = {
+        "kevés lövés", "alacsony helyzetminőség", "kevés kreatív akció", "kevés progresszió",
+        "kevés beadás", "kevés labdás részvétel", "kevés labdaszerzés", "kevés közbelépés",
+        "kevés párharc", "rövid játékidő",
+    }
+    warning = {"labdavesztési kockázat"}
+
+    def add_metric(key: str, label: str, ref_key: str):
         v = metrics.get(key, 0)
         if not v:
             return
         _ref, ev = _fpi_ref_eval_value_v134(ref_key, v, "player")
-        if ev not in ["referenciatartományban", "elfogadható labdavesztési tartomány", "kontextus alapján értelmezendő"]:
-            notes.append(f"{label}: {ev}")
-    eval_for("shots", "lövés", "player_shots")
-    eval_for("xg", "xG", "player_xg")
-    eval_for("key_passes", "kulcspassz", "player_key_passes")
-    eval_for("progressive_passes", "progresszió", "player_progressive_passes")
-    eval_for("crosses", "beadás", "player_crosses")
-    eval_for("passes", "passzvolumen", "player_passes")
-    eval_for("recoveries", "labdaszerzés", "player_recoveries")
-    eval_for("interceptions", "közbelépés", "player_interceptions")
-    eval_for("defensive_challenges", "párharc", "player_defensive_challenges")
-    eval_for("lost_balls", "labdavesztés", "player_lost_balls")
+        ev_l = str(ev).lower()
+        if ev_l in positive_high:
+            cat = "Kiemelkedő"
+        elif ev_l == "referenciatartományban" or ev_l == "elfogadható labdavesztési tartomány":
+            cat = "Átlagos / stabil"
+        elif ev_l in warning:
+            cat = "Figyelendő"
+        elif ev_l in negative_low:
+            cat = "Fejlesztendő"
+        else:
+            cat = "Jó" if ev_l and ev_l not in ["kontextus alapján értelmezendő", "nem értékelhető"] else "Átlagos / stabil"
+        rows.append(f"{cat}: {label} – {ev}")
+
+    add_metric("shots", "lövésaktivitás", "player_shots")
+    add_metric("xg", "helyzetminőség", "player_xg")
+    add_metric("key_passes", "kreativitás", "player_key_passes")
+    add_metric("progressive_passes", "progresszió", "player_progressive_passes")
+    add_metric("crosses", "beadási volumen", "player_crosses")
+    add_metric("passes", "labdás részvétel", "player_passes")
+    add_metric("recoveries", "labdaszerzés", "player_recoveries")
+    add_metric("interceptions", "közbelépés", "player_interceptions")
+    add_metric("defensive_challenges", "párharcintenzitás", "player_defensive_challenges")
+    add_metric("lost_balls", "labdabiztonság", "player_lost_balls")
+
+    # Befejezési hatékonyság külön olvasat: sok helyzet/xG + nincs gól = figyelendő, nem feltétlen rossz játék.
     if metrics["shots"] >= 3 or metrics["xg"] >= 0.35:
         if metrics["goals"] < max(1, metrics["xg"] * 0.8):
-            notes.append("befejezési hatékonyság figyelendő")
+            rows.append("Figyelendő: befejezési hatékonyság – a helyzetminőséghez képest kevés gól")
         else:
-            notes.append("kapura veszélyes, hatékony befejező")
-    if not notes:
-        notes.append("a szerephez tartozó fő mutatók a rendelkezésre álló adatok alapján stabilak")
-    return "; ".join(notes[:4])
+            rows.append("Kiemelkedő: befejezés – kapura veszélyes és hatékony")
+
+    # Ha csak átlagos/stabil jelzések vannak, legyen rövid, egyértelmű összegzés.
+    if not rows:
+        rows.append("Átlagos / stabil: a szerephez tartozó fő mutatók nem jeleznek kiugró eltérést")
+
+    # Dedup és sorrend: előbb a fontosabb kategóriák.
+    priority = {"Kiemelkedő": 0, "Jó": 1, "Figyelendő": 2, "Fejlesztendő": 3, "Átlagos / stabil": 4}
+    dedup = []
+    seen = set()
+    for item in rows:
+        if item not in seen:
+            seen.add(item)
+            dedup.append(item)
+    dedup.sort(key=lambda x: priority.get(x.split(":", 1)[0], 9))
+    return "; ".join(dedup[:5])
 
 def _fpi_player_action_v133(side: str, role: str, interp: str) -> str:
     txt = (role + " " + interp).lower()
