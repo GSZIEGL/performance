@@ -7616,6 +7616,15 @@ def build_fpi_product_pdf_bytes(
             story.append(table(f_rows, [5.2*cm, 8.2*cm, 10.2*cm, 4.1*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"), colors.white]))
             story.append(Spacer(1, 0.16*cm))
 
+        opp_eval_pdf = tactical_context.get("opponent_player_evaluation", []) or []
+        if opp_eval_pdf:
+            story.append(section("Ellenfél játékosszintű értékelés", "#FEE2E2"))
+            op_rows = [[P("Játékos", head), P("Szerep", head), P("Konkrét mutatók", head), P("Értékelés", head), P("Meccstervi teendő", head)]]
+            for r in opp_eval_pdf[:8]:
+                op_rows.append([P(r.get("Játékos", ""), small), P(r.get("Szerep", ""), small), P(r.get("Bizonyíték", ""), small), P(r.get("Értelmezés", ""), small), P(r.get("Javaslat", ""), small)])
+            story.append(table(op_rows, [3.8*cm, 4.5*cm, 5.8*cm, 6.5*cm, 7.1*cm], header_bg="#991B1B", row_bgs=[colors.HexColor("#FEF2F2"), colors.white]))
+            story.append(Spacer(1, 0.16*cm))
+
         if tactical_context.get("md_plan"):
             story.append(section("Integrált mikrociklus – rövid MD-terv", "#EDE9FE"))
             md_rows = [[P("Nap", head), P("Erőnléti cél", head), P("Taktikai cél", head), P("Indoklás", head)]]
@@ -7695,8 +7704,8 @@ def _build_demo_tactical_context() -> Dict[str, object]:
             {"Téma": "Szélső játék / oldali dominancia", "Bizonyosság": 78},
             {"Téma": "Pontrúgások", "Bizonyosság": 72},
         ],
-        "own_team_metrics": {"possession_pct": 54, "shots": 12, "entries_box": 18, "pressing_success_pct": 62},
-        "opp_team_metrics": {"counterattacks": 8, "crosses": 21, "corners": 6, "shots": 10},
+        "own_team_metrics": {"possession_pct": 54, "shots": 12, "xg": 1.55, "entries_box": 18, "final_third_entries": 42, "key_passes": 9, "pressing_success_pct": 62, "passes_accurate_pct": 84, "recoveries": 54, "lost_balls": 31, "crosses": 14, "corners": 5},
+        "opp_team_metrics": {"counterattacks": 8, "crosses": 21, "corners": 6, "shots": 10, "xg": 1.20, "key_passes": 7, "ppda": 10.5},
         "plan_a": "BAT – középső blokk + gyors átmenet, jobb oldali biztosítással",
         "risks": [
             "Ellenfél-kontrák / gyors átmenetek kezelése",
@@ -7734,6 +7743,11 @@ def _build_demo_tactical_context() -> Dict[str, object]:
             {"Mutató": "Labdabirtoklás", "Saját": 54.0, "Ellenfél": 46.0, "Értelmezés": "Saját kontroll"},
             {"Mutató": "Kontrák", "Saját": 4.0, "Ellenfél": 8.0, "Értelmezés": "Ellenfél átmeneti veszély"},
             {"Mutató": "Beadások", "Saját": 14.0, "Ellenfél": 21.0, "Értelmezés": "Ellenfél szélső veszély"},
+        ],
+        "opponent_player_evaluation": [
+            {"Játékos":"András Simon","Poszt":"CF","Szerep":"Befejező / kapura veszélyes játékos","Bizonyíték":"lövés: 4.0; xG: 0.6","Értelmezés":"aktív befejező, kapura veszélyes","Javaslat":"Boxon belüli felvétel korlátozása, második labdák kontrollja."},
+            {"Játékos":"Bence Szabó","Poszt":"RM","Szerep":"Szélső / beadó veszély","Bizonyíték":"beadás: 8.0; kulcspassz: 3.0","Értelmezés":"oldali veszély / beadások jelentős száma","Javaslat":"Oldali 1v1 kontroll, beadásblokkolás, hosszú oldali zárás."},
+            {"Játékos":"Zsolt János Magyar","Poszt":"AM","Szerep":"Kreatív kulcsjátékos","Bizonyíték":"kulcspassz: 4.0; progresszív passz: 7.0","Értelmezés":"jó kreatív kapcsolódási pont, több kulcspasszal","Javaslat":"Passzsáv zárása, testhelyzet kontroll, belső irány lezárása."},
         ],
     }
 
@@ -8533,7 +8547,111 @@ FPI_BLOCK_OPTIONS_V132 = ["Magas blokk", "Középső blokk", "Mély blokk", "Veg
 FPI_ATTACK_ROUTE_OPTIONS_V132 = ["Szélek", "Centrum / félterületek", "Átmenetek", "Direkt játék", "Vegyes"]
 
 
-def _fpi_df_to_player_eval_rows_v132(table: object, role: str, value_col: str, meaning: str, action: str, max_rows: int = 3) -> List[Dict[str, str]]:
+def _fpi_num_v133(v, default: Optional[float] = None) -> Optional[float]:
+    try:
+        if v is None or v == "":
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+
+def _fpi_player_metric_summary_v133(r: object) -> str:
+    """Játékosszintű, coach-friendly mutatóösszefoglaló.
+    Nem csak szerepet ad: a rendelkezésre álló játékos Excel oszlopokból konkrét értékelést épít.
+    """
+    if not hasattr(r, "get"):
+        return "játékosstatisztika alapján"
+    parts: List[str] = []
+    def add(label: str, key: str, suffix: str = ""):
+        v = r.get(key, None)
+        if v not in [None, "", 0, 0.0]:
+            try:
+                parts.append(f"{label}: {float(v):.1f}{suffix}")
+            except Exception:
+                parts.append(f"{label}: {v}")
+    add("lövés", "shots")
+    add("xG", "xg")
+    add("gól", "goals")
+    add("kulcspassz", "key_passes")
+    add("progresszív passz", "progressive_passes")
+    add("beadás", "crosses")
+    add("passz", "passes")
+    add("labdaszerzés", "recoveries")
+    add("közbelépés", "interceptions")
+    add("védekező párharc", "defensive_challenges")
+    add("labdavesztés", "lost_balls")
+    add("játékperc", "minutes_played")
+    return "; ".join(parts[:5]) if parts else "játékosstatisztika alapján"
+
+
+def _fpi_player_interpretation_v133(r: object, side: str, role: str) -> str:
+    if not hasattr(r, "get"):
+        return role
+    shots = _fpi_num_v133(r.get("shots"), 0) or 0
+    xg = _fpi_num_v133(r.get("xg"), 0) or 0
+    goals = _fpi_num_v133(r.get("goals"), 0) or 0
+    keyp = _fpi_num_v133(r.get("key_passes"), 0) or 0
+    prog = _fpi_num_v133(r.get("progressive_passes"), 0) or 0
+    crosses = _fpi_num_v133(r.get("crosses"), 0) or 0
+    rec = _fpi_num_v133(r.get("recoveries"), 0) or 0
+    inter = _fpi_num_v133(r.get("interceptions"), 0) or 0
+    duels = _fpi_num_v133(r.get("defensive_challenges"), 0) or 0
+    lost = _fpi_num_v133(r.get("lost_balls"), 0) or 0
+    notes: List[str] = []
+    if shots >= 3 or xg >= 0.35:
+        if goals < max(1, xg * 0.8):
+            notes.append("sok helyzet / befejezési hatékonyság figyelendő")
+        else:
+            notes.append("aktív befejező, kapura veszélyes")
+    if keyp >= 2:
+        notes.append("jó kreatív kapcsolódási pont, több kulcspasszal")
+    if prog >= 5:
+        notes.append("erős progresszió, sok előrehaladó passz")
+    if crosses >= 4:
+        notes.append("oldali veszély / beadások jelentős száma")
+    if rec + inter >= 6:
+        notes.append("labdaszerzésben és visszatámadásban aktív")
+    if duels >= 8:
+        notes.append("párharcintenzitása magas")
+    if lost >= 6:
+        notes.append("presszing alatt támadható / labdavesztési kockázat")
+    if not notes:
+        notes.append("szerepe a rendelkezésre álló mutatók alapján értelmezhető")
+    return "; ".join(notes[:3])
+
+
+def _fpi_player_action_v133(side: str, role: str, interp: str) -> str:
+    txt = (role + " " + interp).lower()
+    if side == "opp":
+        if "progressz" in txt or "labdafelhozó" in txt:
+            return "Ne fordulhasson szabadon előre; presszing trigger és oldalra terelés."
+        if "kreatív" in txt or "kulcspassz" in txt:
+            return "Passzsáv zárása, testhelyzet kontroll, belső irány lezárása."
+        if "beadás" in txt or "oldali" in txt:
+            return "Oldali 1v1 kontroll, beadásblokkolás, hosszú oldali zárás."
+        if "befejező" in txt or "xg" in txt or "helyzet" in txt:
+            return "Boxon belüli felvétel korlátozása, második labdák kontrollja."
+        if "labdaveszt" in txt:
+            return "Célzott presszingpont lehet; labdaátvételnél agresszív nyomás."
+        return "Meccstervben külön kontrollpontként kezelni."
+    else:
+        if "progressz" in txt:
+            return "Build-upban tudatosan keresni; első/középső fázisban progressziós opció."
+        if "kreatív" in txt or "kulcspassz" in txt:
+            return "Támadóharmadban több kapcsolódás, félterületi labdafelvevő szerep."
+        if "beadás" in txt or "oldali" in txt:
+            return "Szélesség és beadási helyzetek tudatos kialakítása rajta keresztül."
+        if "befejez" in txt or "helyzet" in txt:
+            return "Helyzetminőség és döntés kontroll; befejező edzésblokk indokolt lehet."
+        if "labdaveszt" in txt:
+            return "Labdabiztonság / döntésgyorsaság fejlesztési fókusz."
+        if "labdaszerzés" in txt:
+            return "Védekező átmenetben és második labdáknál támaszkodni rá."
+        return "Szerepét a heti tervben célzottan érdemes használni."
+
+
+def _fpi_df_to_player_eval_rows_v132(table: object, role: str, value_col: str, meaning: str, action: str, max_rows: int = 3, side: str = "opp") -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
     if not isinstance(table, pd.DataFrame) or table.empty or "player" not in table.columns:
         return rows
@@ -8542,51 +8660,53 @@ def _fpi_df_to_player_eval_rows_v132(table: object, role: str, value_col: str, m
         if not player:
             continue
         pos = str(r.get("position", "")).strip()
-        val = r.get(value_col, "")
-        try:
-            val_txt = f"{float(val):.1f}"
-        except Exception:
-            val_txt = str(val)
-        evidence = f"{value_col}: {val_txt}" if val_txt else "játékosstatisztika alapján"
-        rows.append({"Játékos": player, "Poszt": pos, "Szerep": role, "Bizonyíték": evidence, "Értelmezés": meaning, "Javaslat": action})
+        evidence = _fpi_player_metric_summary_v133(r)
+        interpretation = _fpi_player_interpretation_v133(r, side=side, role=role)
+        action_txt = _fpi_player_action_v133(side, role, interpretation)
+        rows.append({"Játékos": player, "Poszt": pos, "Szerep": role, "Bizonyíték": evidence, "Értelmezés": interpretation, "Javaslat": action_txt})
     return rows
 
-
 def _fpi_build_player_evaluation_v132(player_tables: object, side: str = "opp", max_rows: int = 9) -> List[Dict[str, str]]:
-    """Játékosszintű taktikai értékelés a már meglévő parser tábláiból.
-    Nem új adatot talál ki: creators / progressors / build_up / defenders / duel_players táblákból épít coach-friendly blokkot.
+    """Játékosszintű taktikai értékelés.
+    V133: nem csak szerepcímkét ad, hanem a rendelkezésre álló mutatókból rövid teljesítmény-értékelést is épít.
     """
     if not isinstance(player_tables, dict):
         return []
     if side == "opp":
         specs = [
-            ("creators", "Kreatív kulcsjátékos", "key_passes", "helyzetkialakításban veszélyes kapcsolódási pont", "passzsáv zárása, testhelyzet kontroll, belső irány lezárása"),
-            ("progressors", "Labdafelhozó / progresszor", "progressive_passes", "előrehaladást segítő játékos", "presszing trigger: ne fordulhasson szabadon előre"),
-            ("build_up", "Labdakihozatal szervező", "passes", "sok labdaérintésen keresztül épít", "irányított presszing vagy oldalra terelés"),
-            ("duel_players", "Párharcerős játékos", "defensive_challenges", "párharcokban aktív védőjátékos", "izolált 1v1 helyett kombináció / oldalváltás"),
-            ("defenders", "Labdaszerző / védekező láncszem", "interceptions", "közbelépésekben aktív játékos", "második labdák és visszatámadás kontrollja"),
+            ("creators", "Kreatív kulcsjátékos", "key_passes", "", ""),
+            ("progressors", "Labdafelhozó / progresszor", "progressive_passes", "", ""),
+            ("build_up", "Labdakihozatal szervező", "passes", "", ""),
+            ("finishers", "Befejező / kapura veszélyes játékos", "xg", "", ""),
+            ("wide_players", "Szélső / beadó veszély", "crosses", "", ""),
+            ("duel_players", "Párharcerős játékos", "defensive_challenges", "", ""),
+            ("defenders", "Labdaszerző / védekező láncszem", "interceptions", "", ""),
+            ("weak_links", "Támadható láncszem", "lost_balls", "", ""),
         ]
     else:
         specs = [
-            ("creators", "Saját kreatív kapcsolódási pont", "key_passes", "rajta keresztül érdemes helyzetet kialakítani", "támadóharmadban több kapcsolódás / félterületi pozíció"),
-            ("progressors", "Saját progresszor", "progressive_passes", "gyors előrehaladás egyik kulcsa", "build-upban tudatos keresése"),
-            ("build_up", "Saját labdakihozatal szervező", "passes", "sokat vesz részt az építkezésben", "első fázisban biztos passzopcióként használni"),
-            ("duel_players", "Saját párharcerős játékos", "defensive_challenges", "párharcokban aktív", "védekező átmenetben és második labdáknál támaszkodni rá"),
-            ("defenders", "Saját labdaszerző", "interceptions", "labdaszerzésekben aktív", "középső blokkban labdaszerzésre építő szerep"),
+            ("creators", "Saját kreatív kapcsolódási pont", "key_passes", "", ""),
+            ("progressors", "Saját progresszor", "progressive_passes", "", ""),
+            ("build_up", "Saját labdakihozatal szervező", "passes", "", ""),
+            ("finishers", "Saját befejező / helyzetjátékos", "xg", "", ""),
+            ("wide_players", "Saját szélső / beadó opció", "crosses", "", ""),
+            ("duel_players", "Saját párharcerős játékos", "defensive_challenges", "", ""),
+            ("defenders", "Saját labdaszerző", "interceptions", "", ""),
+            ("weak_links", "Fejlesztendő labdabiztonság", "lost_balls", "", ""),
         ]
     rows: List[Dict[str, str]] = []
-    seen = set()
+    seen_players = set()
     for key, role, col, meaning, action in specs:
-        for r in _fpi_df_to_player_eval_rows_v132(player_tables.get(key), role, col, meaning, action, max_rows=3):
-            sig = (r.get("Játékos", ""), r.get("Szerep", ""))
-            if sig in seen:
+        for r in _fpi_df_to_player_eval_rows_v132(player_tables.get(key), role, col, meaning, action, max_rows=3, side=side):
+            # Egy játékos több szerepben is megjelenhet, de a PDF-ben rövid maradjon: első két legerősebb szerep elég.
+            player = r.get("Játékos", "")
+            sig_count = sum(1 for x in rows if x.get("Játékos") == player)
+            if sig_count >= 2:
                 continue
-            seen.add(sig)
             rows.append(r)
             if len(rows) >= max_rows:
                 return rows
     return rows[:max_rows]
-
 
 def _fpi_player_eval_to_findings_v132(rows: List[Dict[str, str]], side_label: str = "Ellenfél") -> List[Dict[str, str]]:
     out = []
@@ -8602,7 +8722,58 @@ def _fpi_player_eval_to_findings_v132(rows: List[Dict[str, str]], side_label: st
     return out
 
 
-def _fpi_team_metric_rows_v132(metrics: object) -> List[Tuple[str, str]]:
+def _fpi_team_metric_reading_v133(label: str, value: str, metric_key: str, own_ctx: Optional[Dict[str, str]] = None) -> str:
+    own_ctx = own_ctx or {}
+    route = str(own_ctx.get("attack_route", "")).lower()
+    block = str(own_ctx.get("defensive_block", "")).lower()
+    playmodel = str(own_ctx.get("playmodel", "")).lower()
+    try:
+        v = float(str(value).replace("%", ""))
+    except Exception:
+        v = None
+    if metric_key == "possession_pct":
+        if v is not None and v >= 55:
+            return "Labdabirtoklási kontrollra képes profil; dominancia/pozíciós támadás felé tolhatja a tervet."
+        if v is not None and v <= 45:
+            return "Kevesebb labdás kontroll; átmeneti vagy direktabb játéktervvel lehet hatékonyabb."
+        return "Kiegyensúlyozott labdabirtoklási kép; a meccstervet inkább a veszélyforrások döntik el."
+    if metric_key == "shots":
+        return "Támadó aktivitást jelez; érdemes xG-vel és helyzetminőséggel együtt értelmezni."
+    if metric_key == "xg":
+        return "A helyzetek minőségét mutatja; magas értéknél a támadó folyamat működik, alacsonynál jobb helyzetminőség kell."
+    if metric_key == "entries_box":
+        return "A tizenhatosba jutás gyakorisága; jó támadóharmad-belépési mutató, de befejezéssel együtt értelmezendő."
+    if metric_key == "final_third_entries":
+        return "Támadóharmadba jutási képesség; pozíciós vagy szélső támadásoknál kulcsjelző."
+    if metric_key == "key_passes":
+        return "Kreatív passzminőség; megmutatja, van-e elég utolsó passz / helyzet-előkészítés."
+    if metric_key == "corners":
+        return "Pontrúgás-potenciál; ha magas, külön támadó/védekező pontrúgásblokk indokolt."
+    if metric_key == "ppda":
+        if v is not None and v <= 9:
+            return "Intenzív presszingprofil; terhelésben High Efforts és neuromuszkuláris igény nőhet."
+        if v is not None and v >= 15:
+            return "Kevésbé agresszív letámadás; inkább közép/mély blokk vagy kontrollált védekezés valószínű."
+        return "Közepes presszingintenzitás; blokkmagassággal együtt értelmezendő."
+    if metric_key == "pressing_success_pct":
+        return "A presszing hatékonyságát jelzi; magas értéknél bátrabban építhető rá meccsterv."
+    if metric_key == "passes_accurate_pct":
+        return "Labdabiztonság és technikai stabilitás; presszing alatt különösen fontos mutató."
+    if metric_key == "crosses":
+        return "Szélső játék / beadási volumen; oldali fölény vagy beadásokra építő támadási út jele."
+    if metric_key == "recoveries":
+        return "Labdaszerzési aktivitás; visszatámadásnál és középső blokkban fontos."
+    if metric_key == "lost_balls":
+        return "Labdabiztonsági kockázat; presszing alatt támadható vagy döntésgyorsasági fejlesztési pont."
+    if metric_key == "counterattacks":
+        return "Átmeneti veszély / gyors támadások; rest defense és visszarendeződés szempontból kulcsmutató."
+    return "A saját játékmodell, felállás és heti terhelhetőség alapján értelmezendő."
+
+
+def _fpi_team_metric_rows_v132(metrics: object) -> List[Tuple[str, str, str, str]]:
+    """Csapatszintű KPI-k: nem fix 4 mutató, hanem minden releváns rendelkezésre álló mező.
+    V133: a PDF-ben konkrét edzői olvasat is készül hozzájuk.
+    """
     if not isinstance(metrics, dict) or not metrics:
         return []
     label_map = {
@@ -8611,6 +8782,7 @@ def _fpi_team_metric_rows_v132(metrics: object) -> List[Tuple[str, str]]:
         "ppda": "PPDA", "pressing_success_pct": "Presszing sikeresség", "passes_accurate_pct": "Passzpontosság",
         "crosses": "Beadások", "recoveries": "Labdaszerzések", "lost_balls": "Labdavesztések", "counterattacks": "Kontrák",
     }
+    own_ctx = _fpi_own_context_from_session_v132() if "_fpi_own_context_from_session_v132" in globals() else {}
     rows = []
     for k, lab in label_map.items():
         v = metrics.get(k)
@@ -8621,11 +8793,11 @@ def _fpi_team_metric_rows_v132(metrics: object) -> List[Tuple[str, str]]:
             if k in ["possession_pct", "pressing_success_pct", "passes_accurate_pct"] and fv <= 1:
                 fv *= 100
             suffix = "%" if k in ["possession_pct", "pressing_success_pct", "passes_accurate_pct"] else ""
-            rows.append((lab, f"{fv:.1f}{suffix}"))
+            val_txt = f"{fv:.1f}{suffix}"
         except Exception:
-            rows.append((lab, str(v)))
-    return rows[:12]
-
+            val_txt = str(v)
+        rows.append((lab, val_txt, _fpi_team_metric_reading_v133(lab, val_txt, k, own_ctx), k))
+    return rows[:14]
 
 def _fpi_own_context_from_session_v132() -> Dict[str, str]:
     return {
@@ -8711,19 +8883,19 @@ def build_fpi_own_team_profile_pdf_bytes(
     story.append(section("Csapatszintű taktikai / játékprofil", "#E0F2FE"))
     if metric_rows:
         tr=[[P("Mutató",head),P("Érték",head),P("Edzői olvasat",head)]]
-        for lab,val in metric_rows:
-            tr.append([P(lab,small),P(val,small),P("Saját játékmodell és heti terhelhetőség alapján értelmezendő.",small)])
-        story.append(table(tr,[6.0*cm,4.5*cm,17.2*cm],header_bg="#1E3A8A",row_bgs=[colors.HexColor("#EFF6FF"),colors.white]))
+        for lab,val,reading,_key in metric_rows:
+            tr.append([P(lab,small),P(val,small),P(reading,small)])
+        story.append(table(tr,[5.3*cm,3.7*cm,18.7*cm],header_bg="#1E3A8A",row_bgs=[colors.HexColor("#EFF6FF"),colors.white]))
     else:
         story.append(P("Nincs saját csapatstatisztika Excel feltöltve. A riport ilyenkor GPS + megadott játékmodell alapján ad saját csapat profilt.", body))
     story.append(Spacer(1,0.18*cm))
 
-    story.append(section("Játékosszintű saját szerepek", "#DCFCE7"))
+    story.append(section("Játékosszintű saját értékelés", "#DCFCE7"))
     if own_eval:
-        pr=[[P("Játékos",head),P("Poszt",head),P("Szerep",head),P("Bizonyíték",head),P("Használati javaslat",head)]]
+        pr=[[P("Játékos",head),P("Szerep",head),P("Konkrét mutatók",head),P("Értékelés",head),P("Használati javaslat",head)]]
         for r in own_eval[:10]:
-            pr.append([P(r.get("Játékos",""),small),P(r.get("Poszt",""),small),P(r.get("Szerep",""),small),P(r.get("Bizonyíték",""),small),P(r.get("Javaslat",""),small)])
-        story.append(table(pr,[4.2*cm,2.6*cm,5.2*cm,5.5*cm,10.2*cm],header_bg="#166534",row_bgs=[colors.HexColor("#ECFDF5"),colors.white]))
+            pr.append([P(r.get("Játékos",""),small),P(r.get("Szerep",""),small),P(r.get("Bizonyíték",""),small),P(r.get("Értelmezés",""),small),P(r.get("Javaslat",""),small)])
+        story.append(table(pr,[3.8*cm,4.8*cm,6.0*cm,6.2*cm,6.9*cm],header_bg="#166534",row_bgs=[colors.HexColor("#ECFDF5"),colors.white]))
     else:
         story.append(P("Nincs saját játékosstatisztika Excel. Játékosszintű szerepértékeléshez saját játékos Excel szükséges.", body))
     story.append(Spacer(1,0.18*cm))
@@ -8750,11 +8922,13 @@ def build_fpi_own_team_profile_sample_pdf_bytes() -> Optional[bytes]:
     tactical_ctx = _build_demo_tactical_context()
     # Demo player tables, hogy a minta PDF-ben is legyen játékosszintű saját csapat blokk.
     tactical_ctx["own_player_tables"] = {
-        "creators": pd.DataFrame([{"player":"Kovács M.","position":"AM","key_passes":4.0},{"player":"Szabó B.","position":"W","key_passes":3.0}]),
-        "progressors": pd.DataFrame([{"player":"Nagy D.","position":"CM","progressive_passes":9.0},{"player":"Tóth Á.","position":"DM","progressive_passes":7.0}]),
-        "build_up": pd.DataFrame([{"player":"Varga L.","position":"CB","passes":62.0},{"player":"Tóth Á.","position":"DM","passes":55.0}]),
-        "defenders": pd.DataFrame([{"player":"Farkas Z.","position":"CB","interceptions":6.0}]),
-        "duel_players": pd.DataFrame([{"player":"Balogh P.","position":"FB","defensive_challenges":11.0}]),
+        "creators": pd.DataFrame([{"player":"Kovács M.","position":"AM","key_passes":4.0,"xg":0.22,"shots":2},{"player":"Szabó B.","position":"W","key_passes":3.0,"crosses":7}]),
+        "progressors": pd.DataFrame([{"player":"Nagy D.","position":"CM","progressive_passes":9.0,"passes":58},{"player":"Tóth Á.","position":"DM","progressive_passes":7.0,"recoveries":8}]),
+        "build_up": pd.DataFrame([{"player":"Varga L.","position":"CB","passes":62.0,"progressive_passes":6},{"player":"Tóth Á.","position":"DM","passes":55.0,"lost_balls":3}]),
+        "finishers": pd.DataFrame([{"player":"Farkas Z.","position":"F","shots":5,"xg":0.75,"goals":0}]),
+        "wide_players": pd.DataFrame([{"player":"Szabó B.","position":"W","crosses":7,"key_passes":3}]),
+        "defenders": pd.DataFrame([{"player":"Farkas Z.","position":"CB","interceptions":6.0,"recoveries":9}]),
+        "duel_players": pd.DataFrame([{"player":"Balogh P.","position":"FB","defensive_challenges":11.0,"recoveries":6}]),
     }
     tactical_ctx["own_player_evaluation"] = _fpi_build_player_evaluation_v132(tactical_ctx["own_player_tables"], side="own", max_rows=10)
     old_vals = {"clean_own_formation_v132": st.session_state.get("clean_own_formation_v132"), "clean_own_block_v132": st.session_state.get("clean_own_block_v132"), "clean_own_attack_route_v132": st.session_state.get("clean_own_attack_route_v132")}
@@ -8775,8 +8949,21 @@ def _fpi_enrich_tactical_context_v132(executive_ctx: Dict[str, object], own_play
     ctx = dict(executive_ctx or {})
     ctx["own_player_tables"] = own_player_tables if isinstance(own_player_tables, dict) else {}
     ctx["opp_player_tables"] = opp_player_tables if isinstance(opp_player_tables, dict) else {}
-    opp_eval = _fpi_build_player_evaluation_v132(ctx["opp_player_tables"], side="opp", max_rows=9)
-    own_eval = _fpi_build_player_evaluation_v132(ctx["own_player_tables"], side="own", max_rows=9)
+    existing_opp_eval = list(ctx.get("opponent_player_evaluation") or [])
+    existing_own_eval = list(ctx.get("own_player_evaluation") or [])
+    opp_eval = existing_opp_eval + _fpi_build_player_evaluation_v132(ctx["opp_player_tables"], side="opp", max_rows=9)
+    own_eval = existing_own_eval + _fpi_build_player_evaluation_v132(ctx["own_player_tables"], side="own", max_rows=9)
+    # dedupe player-role
+    def _dedupe_eval(rows):
+        seen=set(); out=[]
+        for rr in rows:
+            sig=(rr.get("Játékos",""), rr.get("Szerep",""))
+            if sig in seen:
+                continue
+            seen.add(sig); out.append(rr)
+        return out
+    opp_eval = _dedupe_eval(opp_eval)[:9]
+    own_eval = _dedupe_eval(own_eval)[:9]
     ctx["opponent_player_evaluation"] = opp_eval
     ctx["own_player_evaluation"] = own_eval
     findings = list(ctx.get("tactical_findings") or [])
