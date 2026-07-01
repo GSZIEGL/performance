@@ -67,7 +67,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V132_OWN_TEAM_OPPONENT_PLAYERS_2026_07_01"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V134_REFERENCED_PLAYER_EVAL_2026_07_01"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7372,6 +7372,16 @@ def build_fpi_product_pdf_bytes(
         story.append(table(msg_rows, [13.8*cm, 13.9*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
         story.append(Spacer(1, 0.18*cm))
 
+        # 3/b) ellenfél játékosszintű értékelés – ha van taktikai/játékos input vagy minta context
+        opp_eval_exec = (tactical_context or {}).get("opponent_player_evaluation", []) if isinstance(tactical_context, dict) else []
+        if opp_eval_exec:
+            story.append(section("Ellenfél játékosszintű fókusz – kulcsemberek és támadható pontok", "#FEE2E2"))
+            op_rows = [[P("Játékos", head), P("Szerep", head), P("Mutató + referencia", head), P("Értékelés", head), P("Meccstervi teendő", head)]]
+            for r in opp_eval_exec[:5]:
+                op_rows.append([P(r.get("Játékos", ""), small), P(r.get("Szerep", ""), small), P(r.get("Bizonyíték", ""), small), P(r.get("Értelmezés", ""), small), P(r.get("Javaslat", ""), small)])
+            story.append(table(op_rows, [3.4*cm, 4.4*cm, 7.0*cm, 6.2*cm, 6.7*cm], header_bg="#991B1B", row_bgs=[colors.HexColor("#FEF2F2"), colors.white]))
+            story.append(Spacer(1, 0.18*cm))
+
         # 4) játékos risk röviden
         story.append(section("Játékoskockázat – csak a döntéshez szükséges", "#FEE2E2"))
         rr = [[P(c, head) for c in risk_rows_simple[0]]]
@@ -8535,6 +8545,27 @@ def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool
     demo_df = add_position_group(demo_df)
     latest = _fpi_latest_week(demo_df)
     tactical_ctx = _build_demo_tactical_context() if include_tactical else None
+    if include_tactical and isinstance(tactical_ctx, dict):
+        # V134: a minta Executive Summary-ben is legyen konkrét ellenfél-játékos értékelés referenciaértékekkel.
+        if not tactical_ctx.get("opponent_player_evaluation"):
+            tactical_ctx["opp_player_tables"] = {
+                "creators": pd.DataFrame([{"player":"Zsolt János Magyar","position":"AM","key_passes":4.0,"progressive_passes":7.0,"shots":2.0,"xg":0.20}]),
+                "wide_players": pd.DataFrame([{"player":"Bence Szabó","position":"RM","crosses":8.0,"key_passes":3.0,"lost_balls":4.0}]),
+                "finishers": pd.DataFrame([{"player":"András Simon","position":"CF","shots":4.0,"xg":0.60,"goals":1.0}]),
+                "weak_links": pd.DataFrame([{"player":"Márk Helembai","position":"CB","lost_balls":7.0,"passes":42.0}]),
+            }
+            tactical_ctx["opponent_player_evaluation"] = _fpi_build_player_evaluation_v132(tactical_ctx["opp_player_tables"], side="opp", max_rows=8)
+        else:
+            # A korábbi statikus minta sorokat kiegészítjük referencia-jellegű bizonyítékkal, ha még nincs benne.
+            for rr in tactical_ctx.get("opponent_player_evaluation", []):
+                if "ref:" not in str(rr.get("Bizonyíték", "")):
+                    role = str(rr.get("Szerep", "")).lower()
+                    if "befejező" in role:
+                        rr["Bizonyíték"] = "lövés: 4.0 (ref: 1–3; sok lövés); xG: 0.6 (ref: 0.20–0.50; magas helyzetminőség)"
+                    elif "szélső" in role or "beadó" in role:
+                        rr["Bizonyíték"] = "beadás: 8.0 (ref: 3–6; magas beadási volumen); kulcspassz: 3.0 (ref: 1–3; referenciatartományban)"
+                    elif "kreatív" in role:
+                        rr["Bizonyíték"] = "kulcspassz: 4.0 (ref: 1–3; kiemelt kreatív akció); progresszív passz: 7.0 (ref: 4–8; referenciatartományban)"
     label = "MINTA RIPORT / KTE U19 – GPS + Tactical" if include_tactical else "MINTA RIPORT / KTE U19 – GPS only"
     return build_fpi_product_pdf_bytes(demo_df, latest, "Magas presszing", report_type=report_type, demo_label=label, tactical_context=tactical_ctx)
 
@@ -8556,70 +8587,145 @@ def _fpi_num_v133(v, default: Optional[float] = None) -> Optional[float]:
         return default
 
 
+
+def _fpi_ref_eval_value_v134(metric_key: str, value: object, level: str = "player") -> Tuple[str, str]:
+    """Rövid referencia/értékelés taktikai PDF-ekhez. Nem abszolút norma, hanem coach-friendly összevetési sáv."""
+    try:
+        v = float(str(value).replace("%", "").replace(",", "."))
+    except Exception:
+        return ("nincs referencia", "nem értékelhető")
+    pct_keys = {"possession_pct", "pressing_success_pct", "passes_accurate_pct"}
+    if metric_key in pct_keys and v <= 1:
+        v *= 100
+    refs = {
+        # csapat
+        "possession_pct": (45, 55, "45–55%", "alacsony labdabirtoklás", "domináns labdabirtoklás"),
+        "shots": (8, 14, "8–14", "alacsony lövésvolumen", "magas lövésvolumen"),
+        "xg": (1.0, 1.8, "1.0–1.8", "kevés / alacsony minőségű helyzet", "erős helyzetminőség"),
+        "entries_box": (12, 20, "12–20", "kevés boxjelenlét", "erős boxjelenlét"),
+        "final_third_entries": (35, 55, "35–55", "kevés támadóharmad-belépés", "sok támadóharmad-belépés"),
+        "key_passes": (5, 10, "5–10", "kevés kulcspassz", "magas kreatív volumen"),
+        "corners": (3, 6, "3–6", "kevés pontrúgásnyomás", "pontrúgásveszély magas"),
+        "ppda": (8, 12, "8–12", "nagyon agresszív presszing", "passzívabb védekezési aktivitás"),
+        "pressing_success_pct": (50, 65, "50–65%", "gyengébb presszinghatékonyság", "erős presszinghatékonyság"),
+        "passes_accurate_pct": (78, 86, "78–86%", "labdabiztonsági kockázat", "stabil passzminőség"),
+        "crosses": (10, 18, "10–18", "kevés szélső/beadási volumen", "magas szélső/beadási volumen"),
+        "recoveries": (45, 65, "45–65", "kevés labdaszerzés", "magas labdaszerzési aktivitás"),
+        "lost_balls": (25, 40, "25–40", "kevés labdavesztés", "sok labdavesztés / támadható"),
+        "counterattacks": (3, 7, "3–7", "kevés átmeneti veszély", "magas kontraveszély"),
+        # játékos
+        "player_shots": (1, 3, "1–3", "kevés lövés", "sok lövés"),
+        "player_xg": (0.20, 0.50, "0.20–0.50", "alacsony helyzetminőség", "magas helyzetminőség"),
+        "player_key_passes": (1, 3, "1–3", "kevés kreatív akció", "kiemelt kreatív akció"),
+        "player_progressive_passes": (4, 8, "4–8", "kevés progresszió", "erős progresszió"),
+        "player_crosses": (3, 6, "3–6", "kevés beadás", "magas beadási volumen"),
+        "player_passes": (35, 60, "35–60", "kevés labdás részvétel", "labdakihozatali hub"),
+        "player_recoveries": (4, 8, "4–8", "kevés labdaszerzés", "aktív labdaszerző"),
+        "player_interceptions": (2, 5, "2–5", "kevés közbelépés", "sok közbelépés"),
+        "player_defensive_challenges": (5, 10, "5–10", "kevés párharc", "magas párharcintenzitás"),
+        "player_lost_balls": (3, 6, "3–6", "labdabiztos", "labdavesztési kockázat"),
+        "player_minutes_played": (60, 90, "60–90 perc", "rövid játékidő", "teljes/majdnem teljes terhelés"),
+    }
+    if metric_key not in refs:
+        return ("nincs fix sáv", "kontextus alapján értelmezendő")
+    lo, hi, label, low_txt, high_txt = refs[metric_key]
+    # PPDA és lost_balls típusú mutatóknál az alacsonyabb érték nem feltétlen gyenge.
+    if metric_key == "ppda":
+        if v < lo:
+            return (label, low_txt)
+        if v > hi:
+            return (label, high_txt)
+        return (label, "aktív / kontrollált presszingzóna")
+    if metric_key in ["lost_balls", "player_lost_balls"]:
+        if v < lo:
+            return (label, low_txt)
+        if v > hi:
+            return (label, high_txt)
+        return (label, "elfogadható labdavesztési tartomány")
+    if v < lo:
+        return (label, low_txt)
+    if v > hi:
+        return (label, high_txt)
+    return (label, "referenciatartományban")
+
+
 def _fpi_player_metric_summary_v133(r: object) -> str:
-    """Játékosszintű, coach-friendly mutatóösszefoglaló.
-    Nem csak szerepet ad: a rendelkezésre álló játékos Excel oszlopokból konkrét értékelést épít.
-    """
+    """Játékosszintű mutatóösszefoglaló referenciaértékkel és értékeléssel."""
     if not hasattr(r, "get"):
         return "játékosstatisztika alapján"
     parts: List[str] = []
-    def add(label: str, key: str, suffix: str = ""):
+    def add(label: str, key: str, ref_key: Optional[str] = None, suffix: str = ""):
         v = r.get(key, None)
-        if v not in [None, "", 0, 0.0]:
-            try:
-                parts.append(f"{label}: {float(v):.1f}{suffix}")
-            except Exception:
-                parts.append(f"{label}: {v}")
-    add("lövés", "shots")
-    add("xG", "xg")
-    add("gól", "goals")
-    add("kulcspassz", "key_passes")
-    add("progresszív passz", "progressive_passes")
-    add("beadás", "crosses")
-    add("passz", "passes")
-    add("labdaszerzés", "recoveries")
-    add("közbelépés", "interceptions")
-    add("védekező párharc", "defensive_challenges")
-    add("labdavesztés", "lost_balls")
-    add("játékperc", "minutes_played")
+        if v in [None, "", 0, 0.0]:
+            return
+        try:
+            fv = float(v)
+            val_txt = f"{fv:.1f}{suffix}"
+        except Exception:
+            val_txt = str(v)
+        ref_label, eval_txt = _fpi_ref_eval_value_v134(ref_key or f"player_{key}", v, "player")
+        if ref_label and ref_label != "nincs referencia":
+            parts.append(f"{label}: {val_txt} (ref: {ref_label}; {eval_txt})")
+        else:
+            parts.append(f"{label}: {val_txt}")
+    add("lövés", "shots", "player_shots")
+    add("xG", "xg", "player_xg")
+    add("gól", "goals", None)
+    add("kulcspassz", "key_passes", "player_key_passes")
+    add("progresszív passz", "progressive_passes", "player_progressive_passes")
+    add("beadás", "crosses", "player_crosses")
+    add("passz", "passes", "player_passes")
+    add("labdaszerzés", "recoveries", "player_recoveries")
+    add("közbelépés", "interceptions", "player_interceptions")
+    add("védekező párharc", "defensive_challenges", "player_defensive_challenges")
+    add("labdavesztés", "lost_balls", "player_lost_balls")
+    add("játékperc", "minutes_played", "player_minutes_played")
     return "; ".join(parts[:5]) if parts else "játékosstatisztika alapján"
 
 
 def _fpi_player_interpretation_v133(r: object, side: str, role: str) -> str:
+    """Értékelés: ne csak szerep, hanem a számok alapján konkrét olvasat."""
     if not hasattr(r, "get"):
         return role
-    shots = _fpi_num_v133(r.get("shots"), 0) or 0
-    xg = _fpi_num_v133(r.get("xg"), 0) or 0
-    goals = _fpi_num_v133(r.get("goals"), 0) or 0
-    keyp = _fpi_num_v133(r.get("key_passes"), 0) or 0
-    prog = _fpi_num_v133(r.get("progressive_passes"), 0) or 0
-    crosses = _fpi_num_v133(r.get("crosses"), 0) or 0
-    rec = _fpi_num_v133(r.get("recoveries"), 0) or 0
-    inter = _fpi_num_v133(r.get("interceptions"), 0) or 0
-    duels = _fpi_num_v133(r.get("defensive_challenges"), 0) or 0
-    lost = _fpi_num_v133(r.get("lost_balls"), 0) or 0
+    metrics = {
+        "shots": _fpi_num_v133(r.get("shots"), 0) or 0,
+        "xg": _fpi_num_v133(r.get("xg"), 0) or 0,
+        "goals": _fpi_num_v133(r.get("goals"), 0) or 0,
+        "key_passes": _fpi_num_v133(r.get("key_passes"), 0) or 0,
+        "progressive_passes": _fpi_num_v133(r.get("progressive_passes"), 0) or 0,
+        "crosses": _fpi_num_v133(r.get("crosses"), 0) or 0,
+        "passes": _fpi_num_v133(r.get("passes"), 0) or 0,
+        "recoveries": _fpi_num_v133(r.get("recoveries"), 0) or 0,
+        "interceptions": _fpi_num_v133(r.get("interceptions"), 0) or 0,
+        "defensive_challenges": _fpi_num_v133(r.get("defensive_challenges"), 0) or 0,
+        "lost_balls": _fpi_num_v133(r.get("lost_balls"), 0) or 0,
+    }
     notes: List[str] = []
-    if shots >= 3 or xg >= 0.35:
-        if goals < max(1, xg * 0.8):
-            notes.append("sok helyzet / befejezési hatékonyság figyelendő")
+    def eval_for(key: str, label: str, ref_key: str):
+        v = metrics.get(key, 0)
+        if not v:
+            return
+        _ref, ev = _fpi_ref_eval_value_v134(ref_key, v, "player")
+        if ev not in ["referenciatartományban", "elfogadható labdavesztési tartomány", "kontextus alapján értelmezendő"]:
+            notes.append(f"{label}: {ev}")
+    eval_for("shots", "lövés", "player_shots")
+    eval_for("xg", "xG", "player_xg")
+    eval_for("key_passes", "kulcspassz", "player_key_passes")
+    eval_for("progressive_passes", "progresszió", "player_progressive_passes")
+    eval_for("crosses", "beadás", "player_crosses")
+    eval_for("passes", "passzvolumen", "player_passes")
+    eval_for("recoveries", "labdaszerzés", "player_recoveries")
+    eval_for("interceptions", "közbelépés", "player_interceptions")
+    eval_for("defensive_challenges", "párharc", "player_defensive_challenges")
+    eval_for("lost_balls", "labdavesztés", "player_lost_balls")
+    if metrics["shots"] >= 3 or metrics["xg"] >= 0.35:
+        if metrics["goals"] < max(1, metrics["xg"] * 0.8):
+            notes.append("befejezési hatékonyság figyelendő")
         else:
-            notes.append("aktív befejező, kapura veszélyes")
-    if keyp >= 2:
-        notes.append("jó kreatív kapcsolódási pont, több kulcspasszal")
-    if prog >= 5:
-        notes.append("erős progresszió, sok előrehaladó passz")
-    if crosses >= 4:
-        notes.append("oldali veszély / beadások jelentős száma")
-    if rec + inter >= 6:
-        notes.append("labdaszerzésben és visszatámadásban aktív")
-    if duels >= 8:
-        notes.append("párharcintenzitása magas")
-    if lost >= 6:
-        notes.append("presszing alatt támadható / labdavesztési kockázat")
+            notes.append("kapura veszélyes, hatékony befejező")
     if not notes:
-        notes.append("szerepe a rendelkezésre álló mutatók alapján értelmezhető")
-    return "; ".join(notes[:3])
-
+        notes.append("a szerephez tartozó fő mutatók a rendelkezésre álló adatok alapján stabilak")
+    return "; ".join(notes[:4])
 
 def _fpi_player_action_v133(side: str, role: str, interp: str) -> str:
     txt = (role + " " + interp).lower()
@@ -8722,58 +8828,55 @@ def _fpi_player_eval_to_findings_v132(rows: List[Dict[str, str]], side_label: st
     return out
 
 
+
 def _fpi_team_metric_reading_v133(label: str, value: str, metric_key: str, own_ctx: Optional[Dict[str, str]] = None) -> str:
     own_ctx = own_ctx or {}
     route = str(own_ctx.get("attack_route", "")).lower()
     block = str(own_ctx.get("defensive_block", "")).lower()
     playmodel = str(own_ctx.get("playmodel", "")).lower()
     try:
-        v = float(str(value).replace("%", ""))
+        v = float(str(value).replace("%", "").replace(",", "."))
     except Exception:
         v = None
+    ref_label, eval_txt = _fpi_ref_eval_value_v134(metric_key, v if v is not None else value, "team")
+    prefix = f"Értékelés: {eval_txt}. " if eval_txt else ""
     if metric_key == "possession_pct":
         if v is not None and v >= 55:
-            return "Labdabirtoklási kontrollra képes profil; dominancia/pozíciós támadás felé tolhatja a tervet."
+            return prefix + "A csapat labdával kontrollképes; dominancia vagy pozíciós támadás esetén ez erősség, de rest defense biztosítás kell."
         if v is not None and v <= 45:
-            return "Kevesebb labdás kontroll; átmeneti vagy direktabb játéktervvel lehet hatékonyabb."
-        return "Kiegyensúlyozott labdabirtoklási kép; a meccstervet inkább a veszélyforrások döntik el."
+            return prefix + "Kevesebb labdás kontroll; átmeneti vagy direktabb játéktervvel lehet hatékonyabb."
+        return prefix + "Kiegyensúlyozott labdabirtoklási kép; a meccstervet inkább a veszélyforrások döntik el."
     if metric_key == "shots":
-        return "Támadó aktivitást jelez; érdemes xG-vel és helyzetminőséggel együtt értelmezni."
+        return prefix + "A támadó aktivitást jelzi; xG-vel együtt dönthető el, hogy mennyiség vagy valódi helyzetminőség áll mögötte."
     if metric_key == "xg":
-        return "A helyzetek minőségét mutatja; magas értéknél a támadó folyamat működik, alacsonynál jobb helyzetminőség kell."
+        return prefix + "A helyzetek minőségét mutatja; magas értéknél a támadó automatizmusok működnek, alacsonynál a boxba jutás/helyzetminőség fejlesztendő."
     if metric_key == "entries_box":
-        return "A tizenhatosba jutás gyakorisága; jó támadóharmad-belépési mutató, de befejezéssel együtt értelmezendő."
+        return prefix + "A büntetőterületi jelenlétet jelzi; szélső és félterületi támadásoknál kulcsfontosságú."
     if metric_key == "final_third_entries":
-        return "Támadóharmadba jutási képesség; pozíciós vagy szélső támadásoknál kulcsjelző."
+        return prefix + "A támadóharmadba jutás gyakorisága; ha magas, a progresszió működik, ha alacsony, az első/középső építési fázis lehet szűk keresztmetszet."
     if metric_key == "key_passes":
-        return "Kreatív passzminőség; megmutatja, van-e elég utolsó passz / helyzet-előkészítés."
+        return prefix + "Kreatív áttörések száma; magas értéknél több minőségi utolsó passz és döntési pont azonosítható."
     if metric_key == "corners":
-        return "Pontrúgás-potenciál; ha magas, külön támadó/védekező pontrúgásblokk indokolt."
+        return prefix + "Pontrúgásnyomás; magas értéknél támadó pontrúgás-rutinokból is lehet versenyelőny."
     if metric_key == "ppda":
-        if v is not None and v <= 9:
-            return "Intenzív presszingprofil; terhelésben High Efforts és neuromuszkuláris igény nőhet."
-        if v is not None and v >= 15:
-            return "Kevésbé agresszív letámadás; inkább közép/mély blokk vagy kontrollált védekezés valószínű."
-        return "Közepes presszingintenzitás; blokkmagassággal együtt értelmezendő."
+        return prefix + "A védekezési aktivitás/presszing egyik proxyja; alacsonyabb érték agresszívebb nyomást jelez."
     if metric_key == "pressing_success_pct":
-        return "A presszing hatékonyságát jelzi; magas értéknél bátrabban építhető rá meccsterv."
+        return prefix + "Letámadás hatékonysága; magas értéknél presszingből is építhető meccsterv, alacsonynál kontrolláltabb trigger kell."
     if metric_key == "passes_accurate_pct":
-        return "Labdabiztonság és technikai stabilitás; presszing alatt különösen fontos mutató."
+        return prefix + "Labdabiztonság és technikai stabilitás; presszing alatt különösen fontos."
     if metric_key == "crosses":
-        return "Szélső játék / beadási volumen; oldali fölény vagy beadásokra építő támadási út jele."
+        return prefix + "Szélső játék / beadási volumen; oldali fölény vagy beadásokra építő támadási út jele."
     if metric_key == "recoveries":
-        return "Labdaszerzési aktivitás; visszatámadásnál és középső blokkban fontos."
+        return prefix + "Labdaszerzési aktivitás; visszatámadásnál és középső blokkban fontos."
     if metric_key == "lost_balls":
-        return "Labdabiztonsági kockázat; presszing alatt támadható vagy döntésgyorsasági fejlesztési pont."
+        return prefix + "Labdabiztonsági kockázat; magas értéknél presszing alatt támadható vagy döntésgyorsasági fejlesztési pont."
     if metric_key == "counterattacks":
-        return "Átmeneti veszély / gyors támadások; rest defense és visszarendeződés szempontból kulcsmutató."
-    return "A saját játékmodell, felállás és heti terhelhetőség alapján értelmezendő."
+        return prefix + "Átmeneti veszély / gyors támadások; rest defense és visszarendeződés szempontból kulcsmutató."
+    return prefix + "A saját játékmodell, felállás és heti terhelhetőség alapján értelmezendő."
 
 
-def _fpi_team_metric_rows_v132(metrics: object) -> List[Tuple[str, str, str, str]]:
-    """Csapatszintű KPI-k: nem fix 4 mutató, hanem minden releváns rendelkezésre álló mező.
-    V133: a PDF-ben konkrét edzői olvasat is készül hozzájuk.
-    """
+def _fpi_team_metric_rows_v132(metrics: object) -> List[Tuple[str, str, str, str, str]]:
+    """Csapatszintű KPI-k: minden releváns rendelkezésre álló mező + referencia/értékelés."""
     if not isinstance(metrics, dict) or not metrics:
         return []
     label_map = {
@@ -8796,7 +8899,9 @@ def _fpi_team_metric_rows_v132(metrics: object) -> List[Tuple[str, str, str, str
             val_txt = f"{fv:.1f}{suffix}"
         except Exception:
             val_txt = str(v)
-        rows.append((lab, val_txt, _fpi_team_metric_reading_v133(lab, val_txt, k, own_ctx), k))
+        ref_label, eval_txt = _fpi_ref_eval_value_v134(k, v, "team")
+        ref_txt = f"{ref_label}; {eval_txt}" if ref_label else eval_txt
+        rows.append((lab, val_txt, ref_txt, _fpi_team_metric_reading_v133(lab, val_txt, k, own_ctx), k))
     return rows[:14]
 
 def _fpi_own_context_from_session_v132() -> Dict[str, str]:
@@ -8882,10 +8987,10 @@ def build_fpi_own_team_profile_pdf_bytes(
     metric_rows=_fpi_team_metric_rows_v132(own_metrics)
     story.append(section("Csapatszintű taktikai / játékprofil", "#E0F2FE"))
     if metric_rows:
-        tr=[[P("Mutató",head),P("Érték",head),P("Edzői olvasat",head)]]
-        for lab,val,reading,_key in metric_rows:
-            tr.append([P(lab,small),P(val,small),P(reading,small)])
-        story.append(table(tr,[5.3*cm,3.7*cm,18.7*cm],header_bg="#1E3A8A",row_bgs=[colors.HexColor("#EFF6FF"),colors.white]))
+        tr=[[P("Mutató",head),P("Érték",head),P("Referencia / értékelés",head),P("Edzői olvasat",head)]]
+        for lab,val,ref_txt,reading,_key in metric_rows:
+            tr.append([P(lab,small),P(val,small),P(ref_txt,small),P(reading,small)])
+        story.append(table(tr,[4.4*cm,3.0*cm,5.8*cm,14.5*cm],header_bg="#1E3A8A",row_bgs=[colors.HexColor("#EFF6FF"),colors.white]))
     else:
         story.append(P("Nincs saját csapatstatisztika Excel feltöltve. A riport ilyenkor GPS + megadott játékmodell alapján ad saját csapat profilt.", body))
     story.append(Spacer(1,0.18*cm))
@@ -10694,7 +10799,7 @@ def _build_tactical_executive_context(gps_context: Dict[str, object], tactical_c
     pdfi = (tactical_ctx or {}).get("pdf_insights", {}) or {}
     own_i = (own.get("pdf_insights") or {})
     opp_i = (opp.get("pdf_insights") or {})
-    return {"version": globals().get("TACTICAL_PRO_VERSION", "TACTICAL_EARLY_V130"), "analysis_level": (tactical_ctx or {}).get("analysis_level_label", "GPS + taktikai input"), "has_own_pdf": bool(own_i.get("pdf_uploaded") or own_i.get("raw_text_len", 0)), "has_opp_pdf": bool(opp_i.get("pdf_uploaded") or opp_i.get("raw_text_len", 0)), "own_pdf_pages": int(own_i.get("pdf_pages", 0) or 0), "opp_pdf_pages": int(opp_i.get("pdf_pages", 0) or 0), "own_pdf_chars": int(own_i.get("raw_text_len", 0) or 0), "opp_pdf_chars": int(opp_i.get("raw_text_len", 0) or 0), "has_own_team_excel": bool(own.get("team_metrics")), "has_opp_team_excel": bool(opp.get("team_metrics")), "has_own_player_excel": bool(own.get("player_tables")), "has_opp_player_excel": bool(opp.get("player_tables")), "own_topics": (own_i.get("topics") or [])[:8], "opp_topics": (opp_i.get("topics") or [])[:8], "own_team_metrics": own.get("team_metrics", {}), "opp_team_metrics": opp.get("team_metrics", {}), "plan_a": (plan or {}).get("plan_a", "KIE - Kiegyensúlyozott"), "plan_b": (plan or {}).get("plan_b", ""), "strategy_framework": (plan or {}).get("strategy_framework", {}), "risks": (plan or {}).get("risks", []), "md_plan": (plan or {}).get("md_plan", []), "player_focus": (plan or {}).get("player_focus", []), "tactical_findings": (plan or {}).get("tactical_findings", []), "team_comparison": (plan or {}).get("team_comparison", {}), "pdf_provider_lines": (pdfi.get("sportsbase_lines") or []), "pdf_provider_findings": (pdfi.get("sportsbase_findings") or []), "pdf_direct_findings_count": len(pdfi.get("sportsbase_findings") or []), "pdf_direct_lines_count": len(pdfi.get("sportsbase_lines") or [])}
+    return {"version": globals().get("TACTICAL_PRO_VERSION", "TACTICAL_EARLY_V130"), "analysis_level": (tactical_ctx or {}).get("analysis_level_label", "GPS + taktikai input"), "has_own_pdf": bool(own_i.get("pdf_uploaded") or own_i.get("raw_text_len", 0)), "has_opp_pdf": bool(opp_i.get("pdf_uploaded") or opp_i.get("raw_text_len", 0)), "own_pdf_pages": int(own_i.get("pdf_pages", 0) or 0), "opp_pdf_pages": int(opp_i.get("pdf_pages", 0) or 0), "own_pdf_chars": int(own_i.get("raw_text_len", 0) or 0), "opp_pdf_chars": int(opp_i.get("raw_text_len", 0) or 0), "has_own_team_excel": bool(own.get("team_metrics")), "has_opp_team_excel": bool(opp.get("team_metrics")), "has_own_player_excel": bool(own.get("player_tables")), "has_opp_player_excel": bool(opp.get("player_tables")), "own_topics": (own_i.get("topics") or [])[:8], "opp_topics": (opp_i.get("topics") or [])[:8], "own_team_metrics": own.get("team_metrics", {}), "opp_team_metrics": opp.get("team_metrics", {}), "plan_a": (plan or {}).get("plan_a", "KIE - Kiegyensúlyozott"), "plan_b": (plan or {}).get("plan_b", ""), "strategy_framework": (plan or {}).get("strategy_framework", {}), "risks": (plan or {}).get("risks", []), "md_plan": (plan or {}).get("md_plan", []), "player_focus": (plan or {}).get("player_focus", []), "tactical_findings": (plan or {}).get("tactical_findings", []), "team_comparison": (plan or {}).get("team_comparison", {}), "own_player_tables": (tactical_ctx or {}).get("own", {}).get("player_tables", {}), "opp_player_tables": (tactical_ctx or {}).get("opponent", {}).get("player_tables", {}), "opponent_player_evaluation": _fpi_build_player_evaluation_v132((tactical_ctx or {}).get("opponent", {}).get("player_tables", {}), side="opp", max_rows=9) if "_fpi_build_player_evaluation_v132" in globals() else [], "own_player_evaluation": _fpi_build_player_evaluation_v132((tactical_ctx or {}).get("own", {}).get("player_tables", {}), side="own", max_rows=9) if "_fpi_build_player_evaluation_v132" in globals() else [], "pdf_provider_lines": (pdfi.get("sportsbase_lines") or []), "pdf_provider_findings": (pdfi.get("sportsbase_findings") or []), "pdf_direct_findings_count": len(pdfi.get("sportsbase_findings") or []), "pdf_direct_lines_count": len(pdfi.get("sportsbase_lines") or [])}
 
 
 # -----------------------------------------------------------------------------
@@ -13713,6 +13818,10 @@ def _build_tactical_executive_context(gps_context: Dict[str, object], tactical_c
         "player_focus": plan.get("player_focus", []),
         "tactical_findings": plan.get("tactical_findings", []),
         "team_comparison": plan.get("team_comparison", []),
+        "own_player_tables": (tactical_ctx or {}).get("own", {}).get("player_tables", {}),
+        "opp_player_tables": (tactical_ctx or {}).get("opponent", {}).get("player_tables", {}),
+        "opponent_player_evaluation": _fpi_build_player_evaluation_v132((tactical_ctx or {}).get("opponent", {}).get("player_tables", {}), side="opp", max_rows=9) if "_fpi_build_player_evaluation_v132" in globals() else [],
+        "own_player_evaluation": _fpi_build_player_evaluation_v132((tactical_ctx or {}).get("own", {}).get("player_tables", {}), side="own", max_rows=9) if "_fpi_build_player_evaluation_v132" in globals() else [],
         "pdf_provider_lines": ((tactical_ctx.get("pdf_insights") or {}).get("sportsbase_lines", []) or []),
         "pdf_provider_findings": ((tactical_ctx.get("pdf_insights") or {}).get("sportsbase_findings", []) or []),
         "pdf_direct_findings_count": len(((tactical_ctx.get("pdf_insights") or {}).get("sportsbase_findings", []) or [])),
@@ -13822,6 +13931,8 @@ def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     }
     plan = _fpi_build_adaptive_match_training_plan(gps_context, tactical_ctx_for_plan)
     executive_ctx = _build_tactical_executive_context(gps_context, tactical_ctx_for_plan, plan)
+    if "_fpi_enrich_tactical_context_v132" in globals():
+        executive_ctx = _fpi_enrich_tactical_context_v132(executive_ctx, own_player_tables, opp_player_tables)
     st.session_state["tactical_pro_context"] = executive_ctx
 
     k1, k2, k3, k4 = st.columns(4)
