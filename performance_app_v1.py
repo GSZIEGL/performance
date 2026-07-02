@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V137_UX_IMPORT_HUB_2026_07_02"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V138_UX_METHOD_CENTER_2026_07_02"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -2573,7 +2573,7 @@ def add_keeper_flag_from_position(df: pd.DataFrame) -> pd.DataFrame:
 def render_keeper_controls_and_apply(df: pd.DataFrame) -> pd.DataFrame:
     """Kapusok kezelése.
     - Ha van poszt, automatikusan felismeri a kapusokat.
-    - Ha nincs poszt / nincs felismerés, oldalsávban rákérdez és a kiválasztott játékosokat kapusként kezeli.
+    - Ha nincs poszt / nincs felismerés, a választók között rákérdez és a kiválasztott játékosokat kapusként kezeli.
     """
     if df is None or df.empty or "player_name" not in df.columns:
         return df
@@ -2586,8 +2586,8 @@ def render_keeper_controls_and_apply(df: pd.DataFrame) -> pd.DataFrame:
         and out["position"].astype(str).str.strip().replace({"": np.nan, "nan": np.nan, "None": np.nan}).notna().any()
     )
     if not has_position_col:
-        st.sidebar.warning("Nincs felismerhető Poszt oszlop. Kérlek add meg, vannak-e kapusok az adatokban.")
-    with st.sidebar.expander("Kapusok és játékpercek", expanded=(not has_position_col)):
+        st.warning("Nincs felismerhető Poszt oszlop. Kérlek add meg, vannak-e kapusok az adatokban.")
+    with st.expander("Kapusok és játékpercek", expanded=(not has_position_col)):
         if has_position_col:
             st.caption("Poszt oszlop alapján automatikus kapusfelismerés aktív. Ezt felülírhatod, ha szükséges.")
             st.write("Felismert kapusok: " + (", ".join(auto_keepers) if auto_keepers else "nincs"))
@@ -9543,8 +9543,8 @@ def render_fpi_landing_page_v100() -> None:
         <div class="fpi-v137-hero">
             <div class="fpi-v137-kicker">FOOTBALL PERFORMANCE INTELLIGENCE</div>
             <div class="fpi-v137-title">Vezetői riport 30 másodperc alatt.</div>
-            <div class="fpi-v137-sub">GPS exportból – és opcionálisan taktikai PDF/Excel anyagokból – azonnal kapsz heti állapotképet, játékoskockázatot, referencia-összevetést és mikrociklus-javaslatot.</div>
-            <div class="fpi-v137-flow"><span>1. GPS / ZIP feltöltés</span><span>2. Heti kontextus</span><span>3. Opcionális taktika</span><span>4. Executive PDF</span></div>
+            <div class="fpi-v137-sub">GPS exportból – és opcionálisan taktikai PDF/Excel anyagokból – azonnal kapsz heti állapotképet, játékoskockázatot, referencia-összevetést, ellenfél-specifikus fókuszokat és mikrociklus-javaslatot.</div>
+            <div class="fpi-v137-flow"><span>1. GPS / ZIP feltöltés</span><span>2. Heti kontextus</span><span>3. Tactical Pro+ input</span><span>4. Executive PDF</span></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -9563,7 +9563,7 @@ def render_fpi_landing_page_v100() -> None:
                 <span>A fő termék a vezetői riport generátor. A haladó app opcionális elemző felület azoknak, akik mélyebbre mennének.</span>
                 <div class="fpi-v137-kpi-grid">
                     <div class="fpi-v137-kpi"><strong>30 mp</strong><span>feltöltéstől riportig</span></div>
-                    <div class="fpi-v137-kpi"><strong>GPS + taktika</strong><span>taktika opcionális</span></div>
+                    <div class="fpi-v137-kpi"><strong>Tactical Pro+</strong><span>ellenfél + játékmodell</span></div>
                     <div class="fpi-v137-kpi"><strong>PDF export</strong><span>vezetői döntéshez</span></div>
                 </div>
             </div>
@@ -9580,7 +9580,10 @@ def render_fpi_landing_page_v100() -> None:
             st.session_state["fpi_app_hub_seen_v137"] = False
             _fpi_set_page_v100("app")
     with cta3:
-        st.download_button("📄 GPS sablon", data=create_sample_input_template_bytes() or b"", file_name="performance_input_sablon.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="landing_template_v137")
+        if st.button("📚 Metodika", use_container_width=True, key="landing_method_v138"):
+            _fpi_set_page_v100("method")
+
+    st.download_button("📄 GPS sablon letöltése", data=create_sample_input_template_bytes() or b"", file_name="performance_input_sablon.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="landing_template_v137")
 
     st.markdown('<div class="fpi-v137-section-title">Mit kapsz a riportban?</div>', unsafe_allow_html=True)
     a, b, c = st.columns(3)
@@ -9589,7 +9592,7 @@ def render_fpi_landing_page_v100() -> None:
     with b:
         st.markdown('<div class="fpi-v137-card"><h3>Játékos-kockázat</h3><p>Magas/közepes jelzések, túl- vagy alulterhelési mintázatok és figyelendő játékosok.</p></div>', unsafe_allow_html=True)
     with c:
-        st.markdown('<div class="fpi-v137-card"><h3>Mikrociklus javaslat</h3><p>Heti edzésszám, játékmodell, ellenfél és GPS-állapot alapján strukturált edzői terv.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="fpi-v137-card"><h3>Tactical Pro+ Intelligence</h3><p>GPS + saját játékmodell + ellenfélanyag + heti periodizáció. A modul nem csak adatot mutat: ellenfél-specifikus edzésfókuszt, taktikai prioritásokat, játékosszintű veszélyeket és mikrociklus-tervet készít elő.</p></div>', unsafe_allow_html=True)
 
     st.markdown('<div class="fpi-v137-section-title">Minta riportok</div>', unsafe_allow_html=True)
     m1, m2, m3, m4 = st.columns(4)
@@ -9617,7 +9620,9 @@ def render_fpi_clean_workspace_v101() -> None:
     """
     _fpi_landing_css_v100()
     _fpi_mapper_contrast_css_v109()
-    _fpi_apply_v118_final_light_controls_patch()
+    # V138: v118 patch már nincs definiálva ebben a fájlban; a v119 patch váltja ki.
+    if "_fpi_apply_v118_final_light_controls_patch" in globals():
+        _fpi_apply_v118_final_light_controls_patch()
     _fpi_apply_v119_all_light_readable_patch()
     user_defaults_clean = _fpi_load_user_defaults_v113()
 
@@ -9639,7 +9644,7 @@ def render_fpi_clean_workspace_v101() -> None:
         unsafe_allow_html=True,
     )
 
-    nav1, nav2, nav3 = st.columns([1.1, 1.3, 4.2])
+    nav1, nav2, nav3, nav4 = st.columns([1.05, 1.25, 1.15, 3.7])
     with nav1:
         if st.button("← Főoldal", use_container_width=True, key="clean_back_landing_v137"):
             _fpi_set_page_v100("landing")
@@ -9648,6 +9653,9 @@ def render_fpi_clean_workspace_v101() -> None:
             st.session_state["fpi_app_hub_seen_v137"] = False
             _fpi_set_page_v100("app")
     with nav3:
+        if st.button("📚 Metodika", use_container_width=True, key="clean_go_method_v138"):
+            _fpi_set_page_v100("method")
+    with nav4:
         st.caption("Fő munkafolyamat: import → heti kontextus → taktikai input → Executive PDF")
 
     st.markdown(
@@ -9755,7 +9763,7 @@ def render_fpi_clean_workspace_v101() -> None:
         st.stop()
 
     df_clean = add_position_group(df_clean)
-    with st.expander("🧤 Kapusok / posztlogika", expanded=False):
+    with st.expander("🧤 Választók: kapusok / posztlogika", expanded=False):
         df_clean = render_keeper_controls_and_apply(df_clean)
     if df_clean.empty or "week" not in df_clean.columns:
         st.warning("Nincs elemzésre alkalmas hétadat.")
@@ -10240,17 +10248,141 @@ def render_fpi_app_hub_v137() -> None:
         if st.button("← Főoldal", use_container_width=True, key="hub_back_landing_v137"):
             _fpi_set_page_v100("landing")
 
+    st.markdown("### Gyors belépési pontok")
+    l1, l2, l3, l4 = st.columns(4)
+    with l1:
+        if st.button("📈 Dashboard", use_container_width=True, key="hub_dashboard_link_v138"):
+            st.session_state["fpi_app_hub_seen_v137"] = True
+            st.rerun()
+    with l2:
+        if st.button("🧠 Intelligence", use_container_width=True, key="hub_intelligence_link_v138"):
+            st.session_state["fpi_app_hub_seen_v137"] = True
+            st.rerun()
+    with l3:
+        if st.button("📚 Metodika Center", use_container_width=True, key="hub_method_link_v138"):
+            _fpi_set_page_v100("method")
+    with l4:
+        if st.button("⚽ Tactical Pro+", use_container_width=True, key="hub_tactical_link_v138"):
+            st.session_state["fpi_app_hub_seen_v137"] = True
+            st.rerun()
+
     a,b,c = st.columns(3)
     with a:
         st.markdown('<div class="fpi-hub-card"><h3>Heti összefoglaló</h3><p>Readiness, risk, fő üzenetek és heti döntéstámogatás.</p></div>', unsafe_allow_html=True)
         st.markdown('<div class="fpi-hub-card"><h3>Benchmark</h3><p>Korosztály, szint, poszt és játékmodell alapján értelmezett referencia.</p></div>', unsafe_allow_html=True)
     with b:
         st.markdown('<div class="fpi-hub-card"><h3>Player Risk</h3><p>Játékosszintű figyelmeztetések, túl- és alulterhelési mintázatok.</p></div>', unsafe_allow_html=True)
-        st.markdown('<div class="fpi-hub-card"><h3>Tactical Pro+</h3><p>Opcionális PDF/Excel inputból taktikai kontextus és meccsfókusz.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="fpi-hub-card"><h3>Tactical Pro+</h3><p>Opcionális PDF/Excel inputból taktikai kontextus, ellenfélveszélyek és meccsfókusz.</p></div>', unsafe_allow_html=True)
     with c:
         st.markdown('<div class="fpi-hub-card"><h3>Mikrociklus</h3><p>Heti edzésszám, readiness és játékmodell alapján javasolt heti terv.</p></div>', unsafe_allow_html=True)
         st.markdown('<div class="fpi-hub-card"><h3>Metodika</h3><p>Readiness, risk, benchmark és Tactical Framework magyarázata.</p></div>', unsafe_allow_html=True)
 
+
+
+
+def render_fpi_methodology_center_v138() -> None:
+    """Rövid, vezetői szemléletű metodikai központ első használathoz."""
+    _fpi_landing_css_v100()
+    _fpi_apply_v119_all_light_readable_patch()
+    st.markdown(
+        """
+        <style>
+        .fpi-method-hero{border-radius:30px;padding:30px 34px;margin:8px 0 20px 0;background:linear-gradient(135deg,#ffffff,#e0f2fe 55%,#ecfdf5);border:1px solid #bfdbfe;box-shadow:0 22px 58px rgba(15,23,42,.14);}
+        .fpi-method-kicker{display:inline-block;padding:7px 12px;border-radius:999px;background:#f0fdfa;border:1px solid #99f6e4;color:#0f766e;font-weight:950;font-size:.8rem;letter-spacing:.06em;margin-bottom:10px;}
+        .fpi-method-title{font-size:2.45rem;line-height:1;font-weight:980;letter-spacing:-.05em;color:#0f172a;margin-bottom:8px;}
+        .fpi-method-sub{color:#475569;font-size:1.03rem;line-height:1.45;max-width:980px;}
+        .fpi-method-pill{display:inline-block;margin:5px 6px 0 0;padding:7px 11px;border-radius:999px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-weight:850;font-size:.86rem;}
+        div[data-testid="stExpander"]{border-radius:18px !important;border:1px solid #dbeafe !important;background:#ffffff !important;margin-bottom:8px !important;}
+        div[data-testid="stExpander"] *{color:#0f172a !important;}
+        </style>
+        <div class="fpi-method-hero">
+            <div class="fpi-method-kicker">FPI METHODOLOGY CENTER</div>
+            <div class="fpi-method-title">Mit számol az FPI, és hogyan kell értelmezni?</div>
+            <div class="fpi-method-sub">Rövid, szakmai áttekintő azokhoz a kérdésekhez, amelyeket egy vezetőedző, erőnléti edző vagy sportigazgató első ránézésre feltenne.</div>
+            <div><span class="fpi-method-pill">GPS terhelés</span><span class="fpi-method-pill">Readiness</span><span class="fpi-method-pill">Risk</span><span class="fpi-method-pill">Benchmark</span><span class="fpi-method-pill">Tactical Pro+</span><span class="fpi-method-pill">Mikrociklus</span></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    n1,n2,n3 = st.columns([1.2,1.6,4])
+    with n1:
+        if st.button("← Főoldal", use_container_width=True, key="method_back_landing_v138"):
+            _fpi_set_page_v100("landing")
+    with n2:
+        if st.button("🚀 Riport készítése", use_container_width=True, type="primary", key="method_go_clean_v138"):
+            _fpi_set_page_v100("clean")
+    with n3:
+        st.caption("Az FPI döntéstámogató rendszer: az eredmények edzői, orvosi és teljesítménydiagnosztikai kontextussal együtt értelmezendők.")
+
+    with st.expander("1. Mi az FPI lényege?", expanded=True):
+        st.markdown("""
+        A **Football Performance Intelligence** a GPS-, benchmark- és opcionálisan taktikai inputokat vezetői döntéstámogatássá alakítja.
+        Nem csak grafikonokat ad, hanem rövid, edzői nyelvű konklúziókat: aktuális állapot, kockázatok, referencia-eltérések és következő heti fókusz.
+        """)
+    with st.expander("2. Mit jelent a Readiness Score?"):
+        st.markdown("""
+        A Readiness Score a játékos vagy csapat aktuális terhelési állapotának becslése. Figyelembe veszi többek között:
+        - elmúlt 3–7 nap terhelését,
+        - 4 hetes trendeket,
+        - Load / össztáv / HSR / sprint / High Efforts értékeket,
+        - meccs- és edzésarányokat,
+        - pulzus/HRV adatot, ha rendelkezésre áll.
+
+        **Fontos:** az alacsonyabb readiness nem automatikusan túlterhelést jelent. Okozhatja túlterhelés, alulterhelés vagy kedvezőtlen terhelési mintázat is.
+        """)
+    with st.expander("3. Mit jelent a Player Risk?"):
+        st.markdown("""
+        A Player Risk nem sérülés-előrejelzés, hanem figyelmeztető besorolás. A rendszer a túl- vagy alulterhelésre, hirtelen terhelésváltozásra és hiányzó sebességi expozícióra figyel.
+
+        **Alacsony:** stabil terhelési profil.  
+        **Közepes:** egy-két figyelmeztető jel, például emelkedő Load vagy gyenge sprint-expozíció.  
+        **Magas:** több kedvezőtlen tényező együtt, például terhelésugrás + rossz trend + kiugró HSR/sprint vagy neuromuszkuláris terhelés.
+        """)
+    with st.expander("4. Milyen benchmarkokat használ?"):
+        st.markdown("""
+        A benchmark-rendszer nem egyetlen általános átlaghoz hasonlít. A referencia a következő tényezők alapján módosul:
+        - korosztály,
+        - bajnoki szint,
+        - poszt,
+        - kapus / mezőnyjátékos logika,
+        - játékmodell.
+
+        A benchmarkok nemzetközi szakirodalmi irányok, gyakorlati teljesítménydiagnosztikai tapasztalatok és saját adatbázis logika alapján kerülnek kialakításra.
+        """)
+    with st.expander("5. Mit tud a Tactical Pro+ modul?"):
+        st.markdown("""
+        A Tactical Pro+ a GPS-állapotot összekapcsolja a saját játékmodellel, ellenfélanyaggal és heti periodizációval.
+        A cél nem hosszú taktikai tanulmány, hanem használható edzői fókusz:
+        - ellenfél kulcsveszélyei,
+        - játékosszintű ellenfélprofilok,
+        - saját csapat heti alapprofilja,
+        - Tactical Framework / stratégiai irány,
+        - edzésfókuszok MD-napokra bontva.
+        """)
+    with st.expander("6. Hogyan készül a mikrociklus-javaslat?"):
+        st.markdown("""
+        A mikrociklus motor az alábbiakat kombinálja:
+        - heti edzésszám,
+        - meccsnap / kiválasztott hét,
+        - readiness és risk állapot,
+        - HSR / sprint / High Efforts trend,
+        - játékmodell,
+        - opcionális ellenfél-specifikus taktikai fókusz.
+
+        Így a terv nem fix 4 edzéses sablon, hanem a megadott heti kontextushoz igazodik.
+        """)
+    with st.expander("7. Hogyan kell szakmailag használni?"):
+        st.markdown("""
+        **Vezetőedző:** gyors heti fő üzenetek, taktikai és terhelési fókusz.  
+        **Erőnléti edző:** risk, readiness, HSR/sprint/Load trendek és expozíció.  
+        **Sportigazgató:** 30 másodperces állapotkép, kockázatok és heti prioritások.  
+        **Utánpótlás:** korosztályos és poszt-specifikus összevetés, alul- és túlterhelés korai jelzése.
+        """)
+    with st.expander("8. Milyen állítást nem tesz az FPI?"):
+        st.markdown("""
+        Az FPI nem diagnózis, nem orvosi döntés és nem garantált sérülés-előrejelzés.
+        A számok döntéstámogató jelzések, amelyeket edzői megfigyeléssel, orvosi információval, wellness/RPE adattal és szakmai kontextussal együtt érdemes értelmezni.
+        """)
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
 if "fpi_active_page_v100" not in st.session_state:
@@ -10263,6 +10395,9 @@ if active_page_v101 == "landing":
 if active_page_v101 == "clean":
     render_fpi_clean_workspace_v101()
     st.stop()
+if active_page_v101 == "method":
+    render_fpi_methodology_center_v138()
+    st.stop()
 
 if active_page_v101 == "app" and not st.session_state.get("fpi_app_hub_seen_v137", False):
     render_fpi_app_hub_v137()
@@ -10270,13 +10405,16 @@ if active_page_v101 == "app" and not st.session_state.get("fpi_app_hub_seen_v137
 
 render_fpi_hero()
 
-top_back_col, top_clean_col, top_title_col = st.columns([1, 2.2, 3.8])
+top_back_col, top_clean_col, top_method_col, top_title_col = st.columns([1, 2.2, 1.4, 3.0])
 with top_back_col:
     if st.button("← Főoldal", use_container_width=True, key="back_to_landing_v100"):
         _fpi_set_page_v100("landing")
 with top_clean_col:
     if st.button("⚡ Input + vezetői export oldal", use_container_width=True, key="full_to_clean_v101", type="primary"):
         _fpi_set_page_v100("clean")
+with top_method_col:
+    if st.button("📚 Metodika", use_container_width=True, key="full_to_method_v138"):
+        _fpi_set_page_v100("method")
 with top_title_col:
     st.caption("Haladó elemző felület / részletes dashboardok / diagnosztika")
 
