@@ -9566,13 +9566,24 @@ def render_fpi_landing_page_v100() -> None:
             _fpi_set_page_v100("method")
 
     st.markdown('<div class="fpi-v137-section-title">Mit kapsz a riportban?</div>', unsafe_allow_html=True)
-    a, b, c = st.columns(3)
-    with a:
-        st.markdown('<div class="fpi-v137-card"><h3>Heti állapotkép</h3><p>Readiness, terhelési kép, trendek és heti kockázati összefoglaló.</p></div>', unsafe_allow_html=True)
-    with b:
-        st.markdown('<div class="fpi-v137-card"><h3>Játékos-kockázat</h3><p>Magas/közepes jelzések, túl- vagy alulterhelési mintázatok és figyelendő játékosok.</p></div>', unsafe_allow_html=True)
-    with c:
-        st.markdown('<div class="fpi-v137-card"><h3>Tactical Pro+ Intelligence Engine</h3><p>GPS + saját játékmodell + ellenfélanyag + heti periodizáció egy rendszerben. Ellenfél-specifikus edzésfókuszt, taktikai prioritásokat, játékosszintű veszélyeket, rest defense / presszing / átmeneti ajánlásokat és mikrociklus-tervet készít elő. Nem csak adatokat mutat: edzői döntéseket strukturál.</p></div>', unsafe_allow_html=True)
+    left_col, right_col = st.columns([1.05, 1.75])
+    with left_col:
+        st.markdown('<div class="fpi-v137-card" style="min-height:96px;margin-bottom:12px;"><h3>Heti állapotkép</h3><p>Readiness, terhelési kép, trendek és heti kockázati összefoglaló.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="fpi-v137-card" style="min-height:96px;"><h3>Játékos-kockázat</h3><p>Magas/közepes jelzések, túl- vagy alulterhelési mintázatok és figyelendő játékosok.</p></div>', unsafe_allow_html=True)
+    with right_col:
+        st.markdown("""
+        <div class="fpi-v137-card" style="min-height:216px;">
+            <h3>Tactical Pro+ Intelligence Engine</h3>
+            <p><b>GPS + játékmodell + ellenfélanyag + heti periodizáció egy rendszerben.</b></p>
+            <ul style="margin:10px 0 0 18px;color:#475569;line-height:1.46;padding-left:0;">
+                <li><b>Ellenfél-specifikus edzésfókusz:</b> mire készüljön a stáb a héten.</li>
+                <li><b>Taktikai prioritások:</b> presszing, rest defense, átmenetek, szélső játék.</li>
+                <li><b>Játékosszintű veszélyek:</b> kulcsemberek, progresszorok, befejezők, gyenge láncszemek.</li>
+                <li><b>Mikrociklus-terv:</b> GPS-állapothoz és meccstervhez igazított napi fókusz.</li>
+            </ul>
+            <p style="margin-top:11px;"><b>Nem csak adatokat mutat: edzői döntéseket strukturál.</b></p>
+        </div>
+        """, unsafe_allow_html=True)
 
     st.markdown('<div class="fpi-v137-section-title">Minta riportok</div>', unsafe_allow_html=True)
     m1, m2, m3, m4 = st.columns(4)
@@ -9620,6 +9631,42 @@ def _fpi_save_user_defaults_v113(data: Dict[str, object]) -> Tuple[bool, str]:
     except Exception as exc:
         return False, f"Nem sikerült menteni az alapbeállításokat: {exc}"
 
+
+
+# =========================================================
+# V140 - Clean workspace section header helper
+# =========================================================
+def _fpi_section_header_v113(title: str, subtitle: str = "", icon: str = "") -> None:
+    """Egységes, olvasható szekciófejléc az import/export munkafolyamatban.
+    A v137/v139 merge során a hívás bent maradt, a definíció kimaradt; ez javítja a NameError-t.
+    """
+    icon_map = {
+        "gps": "📡",
+        "settings": "⚙️",
+        "tactical": "🧠",
+        "export": "📄",
+        "default": "▣",
+    }
+    badge = icon_map.get(str(icon or "").lower(), icon_map["default"])
+    safe_title = html.escape(str(title or ""))
+    safe_sub = html.escape(str(subtitle or ""))
+    st.markdown(
+        f"""
+        <div style="border-radius:22px;padding:16px 19px;margin:18px 0 12px 0;
+                    background:linear-gradient(135deg,#ffffff,#f0fdfa);
+                    border:1px solid #bfdbfe;box-shadow:0 10px 28px rgba(15,23,42,.08);">
+            <div style="display:flex;gap:10px;align-items:center;">
+                <div style="font-size:1.45rem;line-height:1;">{badge}</div>
+                <div>
+                    <div style="font-size:1.22rem;font-weight:950;color:#0f172a;letter-spacing:-.02em;">{safe_title}</div>
+                    <div style="font-size:.93rem;color:#475569;line-height:1.35;margin-top:3px;">{safe_sub}</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def render_fpi_clean_workspace_v101() -> None:
     """V137: fókuszált import/export munkafolyamat.
     A fő felhasználói út: GPS/ZIP import -> minimális heti kontextus -> opcionális taktika -> PDF export.
@@ -9640,6 +9687,8 @@ def render_fpi_clean_workspace_v101() -> None:
         .fpi-work-kicker{display:inline-block;padding:6px 12px;border-radius:999px;background:#f0fdfa;border:1px solid #99f6e4;color:#0f766e;font-size:.78rem;font-weight:950;letter-spacing:.06em;margin-bottom:10px;}
         .fpi-work-title{font-size:2.35rem;line-height:1.04;font-weight:980;letter-spacing:-.045em;color:#0f172a;margin:0 0 8px 0;}
         .fpi-work-sub{color:#475569;font-size:1.02rem;line-height:1.45;max-width:980px;}
+        .fpi-workflow-box{border-radius:20px;padding:14px 18px;background:linear-gradient(135deg,#0f766e,#2563eb);color:#ffffff;box-shadow:0 14px 34px rgba(15,23,42,.16);font-size:1.03rem;font-weight:950;letter-spacing:-.01em;text-align:center;margin-top:2px;}
+        .fpi-workflow-box span{opacity:.95;font-weight:850;}
         .fpi-step-card{border-radius:22px;padding:15px 17px;background:#ffffff;border:1px solid #dbeafe;box-shadow:0 10px 28px rgba(15,23,42,.08);margin-bottom:12px;}
         .fpi-step-card b{color:#0f172a;font-size:1.06rem;}.fpi-step-card span{color:#475569;}
         .fpi-quick-panel{border-radius:22px;padding:18px 20px;background:#ffffff;border:1px solid #dbeafe;box-shadow:0 14px 34px rgba(15,23,42,.09);margin:8px 0 14px 0;}
@@ -9663,7 +9712,7 @@ def render_fpi_clean_workspace_v101() -> None:
         if st.button("📚 Metodika", use_container_width=True, key="clean_go_method_v138"):
             _fpi_set_page_v100("method")
     with nav4:
-        st.caption("Fő munkafolyamat: import → heti kontextus → taktikai input → Executive PDF")
+        st.markdown('<div class="fpi-workflow-box"><span>Fő munkafolyamat:</span> import → heti kontextus → taktikai input → Executive PDF</div>', unsafe_allow_html=True)
 
     st.markdown(
         """
