@@ -9550,26 +9550,8 @@ def render_fpi_landing_page_v100() -> None:
         unsafe_allow_html=True,
     )
 
-    login_col, status_col = st.columns([1.25, 2.75])
-    with login_col:
-        render_landing_login_panel_v103()
-    with status_col:
-        mode_label = "PRO" if is_pro_mode() else "DEMO"
-        mode_color = "#16A34A" if is_pro_mode() else "#2563EB"
-        st.markdown(
-            f"""
-            <div class="fpi-v137-login">
-                <b>Aktuális státusz: <span style="color:{mode_color};font-weight:950;">{mode_label}</span></b><br>
-                <span>A fő termék a vezetői riport generátor. A haladó app opcionális elemző felület azoknak, akik mélyebbre mennének.</span>
-                <div class="fpi-v137-kpi-grid">
-                    <div class="fpi-v137-kpi"><strong>30 mp</strong><span>feltöltéstől riportig</span></div>
-                    <div class="fpi-v137-kpi"><strong>Tactical Pro+</strong><span>ellenfél + játékmodell</span></div>
-                    <div class="fpi-v137-kpi"><strong>PDF export</strong><span>vezetői döntéshez</span></div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    # Belépés / Pro aktiválás – egyszerűen, a fő CTA-k fölött.
+    render_landing_login_panel_v103()
 
     cta1, cta2, cta3 = st.columns([2.2, 1.2, 1.1])
     with cta1:
@@ -9583,8 +9565,6 @@ def render_fpi_landing_page_v100() -> None:
         if st.button("📚 Metodika", use_container_width=True, key="landing_method_v138"):
             _fpi_set_page_v100("method")
 
-    st.download_button("📄 GPS sablon letöltése", data=create_sample_input_template_bytes() or b"", file_name="performance_input_sablon.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="landing_template_v137")
-
     st.markdown('<div class="fpi-v137-section-title">Mit kapsz a riportban?</div>', unsafe_allow_html=True)
     a, b, c = st.columns(3)
     with a:
@@ -9592,7 +9572,7 @@ def render_fpi_landing_page_v100() -> None:
     with b:
         st.markdown('<div class="fpi-v137-card"><h3>Játékos-kockázat</h3><p>Magas/közepes jelzések, túl- vagy alulterhelési mintázatok és figyelendő játékosok.</p></div>', unsafe_allow_html=True)
     with c:
-        st.markdown('<div class="fpi-v137-card"><h3>Tactical Pro+ Intelligence</h3><p>GPS + saját játékmodell + ellenfélanyag + heti periodizáció. A modul nem csak adatot mutat: ellenfél-specifikus edzésfókuszt, taktikai prioritásokat, játékosszintű veszélyeket és mikrociklus-tervet készít elő.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="fpi-v137-card"><h3>Tactical Pro+ Intelligence Engine</h3><p>GPS + saját játékmodell + ellenfélanyag + heti periodizáció egy rendszerben. Ellenfél-specifikus edzésfókuszt, taktikai prioritásokat, játékosszintű veszélyeket, rest defense / presszing / átmeneti ajánlásokat és mikrociklus-tervet készít elő. Nem csak adatokat mutat: edzői döntéseket strukturál.</p></div>', unsafe_allow_html=True)
 
     st.markdown('<div class="fpi-v137-section-title">Minta riportok</div>', unsafe_allow_html=True)
     m1, m2, m3, m4 = st.columns(4)
@@ -9613,6 +9593,33 @@ def render_fpi_landing_page_v100() -> None:
         if sample_full: st.download_button("⬇️ Full report minta", sample_full, "fpi_minta_full_report.pdf", "application/pdf", use_container_width=True, key="sample_full_v137")
 
 
+
+# =========================================================
+# V139 - Session based user defaults fallback
+# =========================================================
+def _fpi_load_user_defaults_v113() -> Dict[str, object]:
+    """Alapbeállítások betöltése jelenleg csak session_state-ből.
+    Supabase/perzisztens tárolás később kerül bevezetésre.
+    """
+    try:
+        data = st.session_state.get("fpi_user_defaults_v113", {})
+        if isinstance(data, dict):
+            return data.copy()
+    except Exception:
+        pass
+    return {}
+
+
+def _fpi_save_user_defaults_v113(data: Dict[str, object]) -> Tuple[bool, str]:
+    """Alapbeállítások mentése ideiglenesen session_state-be.
+    Ez nem tartós szerveroldali mentés; éles verzióban Supabase-be költöztethető.
+    """
+    try:
+        st.session_state["fpi_user_defaults_v113"] = dict(data or {})
+        return True, "Alapbeállítások elmentve erre a munkamenetre."
+    except Exception as exc:
+        return False, f"Nem sikerült menteni az alapbeállításokat: {exc}"
+
 def render_fpi_clean_workspace_v101() -> None:
     """V137: fókuszált import/export munkafolyamat.
     A fő felhasználói út: GPS/ZIP import -> minimális heti kontextus -> opcionális taktika -> PDF export.
@@ -9620,7 +9627,7 @@ def render_fpi_clean_workspace_v101() -> None:
     """
     _fpi_landing_css_v100()
     _fpi_mapper_contrast_css_v109()
-    # V138: v118 patch már nincs definiálva ebben a fájlban; a v119 patch váltja ki.
+    # V139: v118 patch opcionális; ha nincs definiálva, a v119 patch váltja ki.
     if "_fpi_apply_v118_final_light_controls_patch" in globals():
         _fpi_apply_v118_final_light_controls_patch()
     _fpi_apply_v119_all_light_readable_patch()
