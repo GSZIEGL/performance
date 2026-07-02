@@ -9793,25 +9793,203 @@ def _fpi_safe_tactical_parse_player_excel_v107(df2, mapping=None) -> Dict[str, p
     return {}
 
 
-def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Dict[str, object]:
-    """Letisztult, opcionális taktikai import a vezetői riport oldalhoz.
-    Nem kötelező; ha nincs feltöltés, GPS-only contextet ad vissza hiba nélkül.
+# =========================================================
+# V142 - Clean workspace multi tactical upload helpers
+# =========================================================
+def _fpi_clean_read_table_file_v142(uploaded_file) -> Tuple[pd.DataFrame, str]:
+    """Excel/CSV feltöltés biztonságos beolvasása a vezetői riport oldalhoz.
+    Nem igényel később definiált mapper függvényeket, ezért a clean workspace korai hívásakor is működik.
     """
-    _fpi_section_header_v113("3. Taktikai input", "Opcionális: saját és ellenfél PDF-ek. Ha nincs taktikai anyag, a riport GPS-only módban készül.", "tactical")
-    with st.expander("🧠 Taktikai PDF-ek / ellenfélanyag", expanded=False):
-        c1, c2 = st.columns(2)
-        with c1:
-            _, own_state = _fpi_pdf_uploader_v92("Saját csapat taktikai PDF(ek)", "own", "clean_own_tactical_pdf_v141")
-        with c2:
-            _, opp_state = _fpi_pdf_uploader_v92("Ellenfél taktikai PDF(ek)", "opp", "clean_opp_tactical_pdf_v141")
-        st.caption("PDF feltöltés esetén a Tactical Framework aktív: 7 dimenzió + 9 stratégiai profil + ellenfél-specifikus edzésfókusz.")
-
     try:
-        ctx = _fpi_build_pdf_only_context_from_session_v87(gps_context or {})
-        if isinstance(ctx, dict) and _fpi_has_tactical_signal_v95(ctx):
-            return ctx
+        if uploaded_file is None:
+            return pd.DataFrame(), ""
+        name = str(getattr(uploaded_file, "name", "file"))
+        b = uploaded_file.getvalue()
+        low = name.lower()
+        if low.endswith(".csv"):
+            try:
+                return pd.read_csv(io.BytesIO(b)), name
+            except Exception:
+                return pd.read_csv(io.BytesIO(b), sep=";"), name
+        xls = pd.ExcelFile(io.BytesIO(b))
+        best_df, best_sheet, best_score = pd.DataFrame(), "", -1
+        for sh in xls.sheet_names:
+            try:
+                df = pd.read_excel(io.BytesIO(b), sheet_name=sh)
+                df = df.dropna(how="all")
+                score = int(len(df)) + int(sum(pd.to_numeric(df[c], errors="coerce").notna().sum() for c in df.columns))
+                sh_norm = str(sh).lower()
+                if any(x in sh_norm for x in ["data", "stat", "player", "team", "main"]):
+                    score += 100
+                if score > best_score:
+                    best_df, best_sheet, best_score = df, sh, score
+            except Exception:
+                continue
+        return best_df, f"{name} / {best_sheet}" if best_sheet else name
+    except Exception as e:
+        return pd.DataFrame(), f"hiba: {e}"
+
+
+def _fpi_clean_merge_team_excels_v142(files: List[object]) -> Tuple[Dict[str, float], List[Dict[str, object]]]:
+    """Több csapat Excel/CSV összeolvasása. A numerikus oszlopok átlagát adja vissza.
+    A riportlogika később ezekből tud csapatszintű profilt építeni.
+    """
+    frames, diag = [], []
+    for f in files or []:
+        df, src = _fpi_clean_read_table_file_v142(f)
+        ok = isinstance(df, pd.DataFrame) and not df.empty
+        diag.append({"Fájl": str(getattr(f, "name", src)), "Forrás/lap": src, "Státusz": "OK" if ok else "nem olvasható", "Sor": int(len(df)) if ok else 0, "Oszlop": int(len(df.columns)) if ok else 0})
+        if ok:
+            df = df.copy()
+            df["_source_file"] = str(getattr(f, "name", src))
+            frames.append(df)
+    if not frames:
+        return {}, diag
+    merged = pd.concat(frames, ignore_index=True, sort=False)
+    metrics = _fpi_safe_tactical_parse_team_excel_v107(merged, None) or {}
+    return metrics, diag
+
+
+def _fpi_clean_merge_player_excels_v142(files: List[object]) -> Tuple[Dict[str, pd.DataFrame], List[Dict[str, object]]]:
+    """Több játékos Excel/CSV összeolvasása egy közös raw táblába."""
+    frames, diag = [], []
+    for f in files or []:
+        df, src = _fpi_clean_read_table_file_v142(f)
+        ok = isinstance(df, pd.DataFrame) and not df.empty
+        diag.append({"Fájl": str(getattr(f, "name", src)), "Forrás/lap": src, "Státusz": "OK" if ok else "nem olvasható", "Sor": int(len(df)) if ok else 0, "Oszlop": int(len(df.columns)) if ok else 0})
+        if ok:
+            df = df.copy()
+            df["_source_file"] = str(getattr(f, "name", src))
+            frames.append(df)
+    if not frames:
+        return {}, diag
+    merged = pd.concat(frames, ignore_index=True, sort=False)
+    return {"raw": merged}, diag
+
+
+def _fpi_clean_tactical_diagnostics_box_v142(title: str, pdf_state: Dict[str, object], team_diag: List[Dict[str, object]], player_diag: List[Dict[str, object]]) -> None:
+    try:
+        pdf_files = pdf_state.get("files", []) or []
+        pdf_line = f"PDF: {len(pdf_files)} fájl, {int(pdf_state.get('page_count', 0) or 0)} oldal, {int(pdf_state.get('chars', 0) or 0)} karakter"
+        team_ok = sum(1 for x in team_diag if x.get("Státusz") == "OK")
+        player_ok = sum(1 for x in player_diag if x.get("Státusz") == "OK")
+        st.caption(f"{title} – {pdf_line} | Csapat Excel: {team_ok}/{len(team_diag)} OK | Játékos Excel: {player_ok}/{len(player_diag)} OK")
     except Exception:
         pass
+
+
+def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Dict[str, object]:
+    """V142: letisztult, többfájlos taktikai import a vezetői riport oldalhoz.
+    Kezeli: saját/ellenfél több PDF, saját/ellenfél csapat Excel(ek), saját/ellenfél játékos Excel(ek).
+    Ha nincs taktikai anyag, GPS-only contextet ad vissza hiba nélkül.
+    """
+    _fpi_section_header_v113(
+        "3. Taktikai input",
+        "Opcionális, de prémium mód: több saját és ellenfél PDF, csapat Excel és játékos Excel is feltölthető. Az FPI ezeket egy közös taktikai tudásbázissá fűzi össze.",
+        "tactical",
+    )
+    with st.expander("🧠 Taktikai anyagok – saját csapat és ellenfél", expanded=False):
+        st.markdown(
+            """
+            <div class="tactical-readable-box">
+            <b>Mit lehet feltölteni?</b><br/>
+            • Saját és ellenfél taktikai PDF-ekből akár több fájlt is.<br/>
+            • Saját és ellenfél csapatszintű Excel/CSV anyagot.<br/>
+            • Saját és ellenfél játékosszintű Excel/CSV anyagot.<br/>
+            <span style="color:#475569!important;">A több fájlból az app egy közös saját / ellenfél profilt épít.</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        left, right = st.columns(2)
+        with left:
+            st.markdown("#### Saját csapat")
+            _, own_state = _fpi_pdf_uploader_v92("Saját taktikai PDF-ek", "own", "clean_own_tactical_pdfs_v142")
+            own_team_files = st.file_uploader("Saját csapat Excel / CSV", type=["xlsx", "xls", "csv"], accept_multiple_files=True, key="clean_own_team_excels_v142")
+            own_player_files = st.file_uploader("Saját játékos Excel / CSV", type=["xlsx", "xls", "csv"], accept_multiple_files=True, key="clean_own_player_excels_v142")
+        with right:
+            st.markdown("#### Ellenfél")
+            _, opp_state = _fpi_pdf_uploader_v92("Ellenfél taktikai PDF-ek", "opp", "clean_opp_tactical_pdfs_v142")
+            opp_team_files = st.file_uploader("Ellenfél csapat Excel / CSV", type=["xlsx", "xls", "csv"], accept_multiple_files=True, key="clean_opp_team_excels_v142")
+            opp_player_files = st.file_uploader("Ellenfél játékos Excel / CSV", type=["xlsx", "xls", "csv"], accept_multiple_files=True, key="clean_opp_player_excels_v142")
+
+        own_team_metrics, own_team_diag = _fpi_clean_merge_team_excels_v142(own_team_files or [])
+        opp_team_metrics, opp_team_diag = _fpi_clean_merge_team_excels_v142(opp_team_files or [])
+        own_player_tables, own_player_diag = _fpi_clean_merge_player_excels_v142(own_player_files or [])
+        opp_player_tables, opp_player_diag = _fpi_clean_merge_player_excels_v142(opp_player_files or [])
+
+        _fpi_clean_tactical_diagnostics_box_v142("Saját", own_state, own_team_diag, own_player_diag)
+        _fpi_clean_tactical_diagnostics_box_v142("Ellenfél", opp_state, opp_team_diag, opp_player_diag)
+
+        with st.expander("📋 Feltöltött taktikai fájlok ellenőrzése", expanded=False):
+            diag_rows = []
+            for label, rows in [("Saját csapat Excel", own_team_diag), ("Saját játékos Excel", own_player_diag), ("Ellenfél csapat Excel", opp_team_diag), ("Ellenfél játékos Excel", opp_player_diag)]:
+                for r in rows:
+                    rr = dict(r); rr["Típus"] = label; diag_rows.append(rr)
+            if diag_rows:
+                st.dataframe(pd.DataFrame(diag_rows), use_container_width=True)
+            else:
+                st.caption("Nincs Excel/CSV feltöltés. PDF vagy GPS-only módban is készíthető riport.")
+
+    # A PDF context builder továbbra is a közös own/opp PDF state-ből dolgozik.
+    try:
+        ctx = _fpi_build_pdf_only_context_from_session_v87(gps_context or {})
+    except Exception:
+        ctx = None
+
+    has_excel = bool(own_team_metrics or opp_team_metrics or own_player_tables or opp_player_tables)
+    has_pdf = bool((own_state or {}).get("has_files") or (opp_state or {}).get("has_files") or (ctx and _fpi_has_tactical_signal_v95(ctx)))
+
+    if isinstance(ctx, dict):
+        # Frissítsük a PDF-ből épített contextet az aktuális Excel inputokkal.
+        ctx.setdefault("own", {})["team_metrics"] = own_team_metrics
+        ctx.setdefault("own", {})["player_tables"] = own_player_tables
+        ctx.setdefault("opponent", {})["team_metrics"] = opp_team_metrics
+        ctx.setdefault("opponent", {})["player_tables"] = opp_player_tables
+        ctx["own_team_metrics"] = own_team_metrics
+        ctx["opp_team_metrics"] = opp_team_metrics
+        ctx["own_player_tables"] = own_player_tables
+        ctx["opp_player_tables"] = opp_player_tables
+        ctx["has_own_team_excel"] = bool(own_team_metrics)
+        ctx["has_opp_team_excel"] = bool(opp_team_metrics)
+        ctx["has_own_player_excel"] = bool(own_player_tables)
+        ctx["has_opp_player_excel"] = bool(opp_player_tables)
+        ctx["tactical_upload_diag"] = {
+            "own_team": own_team_diag, "own_player": own_player_diag,
+            "opp_team": opp_team_diag, "opp_player": opp_player_diag,
+        }
+        if has_excel:
+            ctx["analysis_level_label"] = "Full Intelligence – GPS + PDF + többfájlos taktikai Excel"
+            st.session_state["tactical_pro_context"] = ctx
+        if _fpi_has_tactical_signal_v95(ctx) or has_excel:
+            return ctx
+
+    if has_excel:
+        # Excel-only taktikai context: PDF nélkül is működjön.
+        own_pdf_insights = {"blocks": {}, "topics": [], "sportsbase_findings": [], "sportsbase_lines": [], "raw_text_len": 0, "pdf_uploaded": False, "pdf_pages": 0}
+        opp_pdf_insights = {"blocks": {}, "topics": [], "sportsbase_findings": [], "sportsbase_lines": [], "raw_text_len": 0, "pdf_uploaded": False, "pdf_pages": 0}
+        tactical_ctx_for_plan = {
+            "analysis_level_label": "Full Intelligence – GPS + többfájlos taktikai Excel",
+            "pdf_insights": {"blocks": {}, "topics": [], "sportsbase_findings": [], "sportsbase_lines": [], "raw_text_len": 0},
+            "team_metrics": opp_team_metrics,
+            "player_tables": opp_player_tables,
+            "own": {"pdf_insights": own_pdf_insights, "team_metrics": own_team_metrics, "player_tables": own_player_tables},
+            "opponent": {"pdf_insights": opp_pdf_insights, "team_metrics": opp_team_metrics, "player_tables": opp_player_tables},
+        }
+        plan = _fpi_safe_build_adaptive_plan_v104(gps_context or {}, tactical_ctx_for_plan)
+        ctx = _build_tactical_executive_context(gps_context or {}, tactical_ctx_for_plan, plan)
+        ctx["analysis_level_label"] = "Full Intelligence – GPS + többfájlos taktikai Excel"
+        ctx["own_team_metrics"] = own_team_metrics
+        ctx["opp_team_metrics"] = opp_team_metrics
+        ctx["own_player_tables"] = own_player_tables
+        ctx["opp_player_tables"] = opp_player_tables
+        ctx["has_own_team_excel"] = bool(own_team_metrics)
+        ctx["has_opp_team_excel"] = bool(opp_team_metrics)
+        ctx["has_own_player_excel"] = bool(own_player_tables)
+        ctx["has_opp_player_excel"] = bool(opp_player_tables)
+        ctx["tactical_upload_diag"] = {"own_team": own_team_diag, "own_player": own_player_diag, "opp_team": opp_team_diag, "opp_player": opp_player_diag}
+        st.session_state["tactical_pro_context"] = ctx
+        return ctx
 
     # Biztonságos GPS-only fallback
     return {
