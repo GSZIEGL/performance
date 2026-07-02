@@ -9667,6 +9667,164 @@ def _fpi_section_header_v113(title: str, subtitle: str = "", icon: str = "") -> 
         unsafe_allow_html=True,
     )
 
+
+# =========================================================
+# V141 - Clean workspace hard NameError fallbacks
+# =========================================================
+def _fpi_idx_v113(options, value, default: int = 0) -> int:
+    """Biztonságos selectbox-index segédfüggvény.
+    A vezetői riport oldalon több választó használja; merge során kimaradt, ezért NameError-t okozott.
+    """
+    try:
+        opts = list(options or [])
+        return opts.index(value) if value in opts else int(default)
+    except Exception:
+        return int(default or 0)
+
+
+def _fpi_simple_pdf_blocks_v141(text: str) -> Dict[str, list]:
+    txt = (text or "").lower()
+    kw = {
+        "pressing": ["pressing", "presszing", "letámadás", "letamadas", "ppda"],
+        "build_up": ["build-up", "build up", "labdakihozatal", "építkezés", "epitkezes"],
+        "direct_play": ["direct", "direkt", "hosszú labda", "hosszu labda"],
+        "transition_attack": ["transition", "átmenet", "atmenet", "kontra", "counter"],
+        "transition_defense": ["rest defense", "visszarendeződés", "visszarendezodes", "átmeneti védekezés"],
+        "wide_play": ["wide", "szélső", "szelso", "beadás", "beadas", "flank", "wing"],
+        "central_play": ["half-space", "félterület", "felterulet", "centrum", "central"],
+        "set_pieces": ["set piece", "pontrúgás", "pontrugas", "szöglet", "szoglet", "free kick"],
+        "chance_creation": ["xg", "helyzet", "shot", "lövés", "loves", "box entry"],
+        "key_players": ["key player", "kulcsjátékos", "kulcsjatekos", "veszélyes játékos", "creator", "playmaker"],
+        "weakness_risk": ["weakness", "gyengeség", "gyengeseg", "sebezhető", "risk", "kockázat"],
+    }
+    blocks = {}
+    for k, words in kw.items():
+        hits = [w for w in words if w in txt]
+        if hits:
+            blocks[k] = hits[:6]
+    return blocks
+
+
+def _fpi_tactical_pdf_insights(text: str) -> Dict[str, object]:
+    """Korai, könnyű PDF-insight fallback a clean import/export oldalhoz.
+    A részletes legacy függvény a fájl későbbi részében van, de a page routing előtt még nem létezik.
+    """
+    text = text or ""
+    blocks = _fpi_simple_pdf_blocks_v141(text)
+    topics = [{"Téma": k, "Találatok": ", ".join(v)} for k, v in blocks.items()]
+    return {
+        "blocks": blocks,
+        "topics": topics,
+        "sportsbase_findings": topics[:8],
+        "sportsbase_lines": [],
+        "raw_text_len": len(text),
+    }
+
+
+def _fpi_safe_tactical_pdf_insights_v105(text: str, uploaded: bool = False, pages: Optional[list] = None) -> Dict[str, object]:
+    data = _fpi_tactical_pdf_insights(text or "")
+    data["pdf_uploaded"] = bool(uploaded or text)
+    data["pdf_pages"] = len(pages or [])
+    data["raw_text_len"] = len(text or "")
+    return data
+
+
+def _fpi_safe_merge_tactical_pdf_insights_v104(own: Optional[Dict[str, object]], opp: Optional[Dict[str, object]]) -> Dict[str, object]:
+    own = own or {}; opp = opp or {}
+    blocks = {}
+    for src in (own.get("blocks") or {}, opp.get("blocks") or {}):
+        if isinstance(src, dict):
+            for k, v in src.items():
+                blocks.setdefault(k, [])
+                if isinstance(v, list):
+                    blocks[k].extend(v)
+                elif v:
+                    blocks[k].append(v)
+    topics = []
+    for src in (own.get("topics") or [], opp.get("topics") or [], own.get("sportsbase_findings") or [], opp.get("sportsbase_findings") or []):
+        if isinstance(src, list):
+            topics.extend(src)
+    return {
+        "blocks": blocks,
+        "topics": topics[:20],
+        "sportsbase_findings": topics[:12],
+        "sportsbase_lines": (own.get("sportsbase_lines") or []) + (opp.get("sportsbase_lines") or []),
+        "raw_text_len": int(own.get("raw_text_len", 0) or 0) + int(opp.get("raw_text_len", 0) or 0),
+        "pdf_uploaded": bool(own.get("pdf_uploaded") or opp.get("pdf_uploaded")),
+        "pdf_pages": int(own.get("pdf_pages", 0) or 0) + int(opp.get("pdf_pages", 0) or 0),
+    }
+
+
+def _fpi_safe_build_adaptive_plan_v104(gps_context: Dict[str, object], tactical_ctx: Dict[str, object]) -> Dict[str, object]:
+    try:
+        return _fpi_build_adaptive_match_training_plan(gps_context or {}, tactical_ctx or {})
+    except Exception as exc:
+        return {
+            "analysis_level": "GPS / alap taktikai fallback",
+            "plan_a": "KIE - stabil, kontrollált heti terv",
+            "risks": ["A taktikai terv fallback módban készült.", str(exc)[:120]],
+            "md_plan": [("MD-4", "Volumen + saját játékmodell", "Stabil heti terhelés."), ("MD-3", "Intenzitás", "Kontrollált HSR/sprint inger."), ("MD-2", "Taktikai nap", "Ellenfél-specifikus fókusz."), ("MD-1", "Aktiváció", "Frissítés és pontrúgások.")],
+            "player_focus": [], "tactical_findings": [], "team_comparison": {}, "strategy_framework": {}, "plan_b": ""
+        }
+
+
+def _fpi_safe_tactical_parse_team_excel_v107(df2, mapping=None) -> Dict[str, float]:
+    """Korai fallback: ha van taktikai Excel, legalább a numerikus oszlopátlagokat adja vissza."""
+    try:
+        if not isinstance(df2, pd.DataFrame) or df2.empty:
+            return {}
+        out = {}
+        for c in df2.columns:
+            vals = pd.to_numeric(df2[c], errors="coerce").dropna()
+            if len(vals):
+                key = str(c).strip().lower().replace(" ", "_")[:40]
+                out[key] = float(vals.mean())
+        return out
+    except Exception:
+        return {}
+
+
+def _fpi_safe_tactical_parse_player_excel_v107(df2, mapping=None) -> Dict[str, pd.DataFrame]:
+    try:
+        if isinstance(df2, pd.DataFrame) and not df2.empty:
+            return {"raw": df2.copy()}
+    except Exception:
+        pass
+    return {}
+
+
+def _fpi_clean_tactical_import_v102(gps_context: Dict[str, object]) -> Dict[str, object]:
+    """Letisztult, opcionális taktikai import a vezetői riport oldalhoz.
+    Nem kötelező; ha nincs feltöltés, GPS-only contextet ad vissza hiba nélkül.
+    """
+    _fpi_section_header_v113("3. Taktikai input", "Opcionális: saját és ellenfél PDF-ek. Ha nincs taktikai anyag, a riport GPS-only módban készül.", "tactical")
+    with st.expander("🧠 Taktikai PDF-ek / ellenfélanyag", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            _, own_state = _fpi_pdf_uploader_v92("Saját csapat taktikai PDF(ek)", "own", "clean_own_tactical_pdf_v141")
+        with c2:
+            _, opp_state = _fpi_pdf_uploader_v92("Ellenfél taktikai PDF(ek)", "opp", "clean_opp_tactical_pdf_v141")
+        st.caption("PDF feltöltés esetén a Tactical Framework aktív: 7 dimenzió + 9 stratégiai profil + ellenfél-specifikus edzésfókusz.")
+
+    try:
+        ctx = _fpi_build_pdf_only_context_from_session_v87(gps_context or {})
+        if isinstance(ctx, dict) and _fpi_has_tactical_signal_v95(ctx):
+            return ctx
+    except Exception:
+        pass
+
+    # Biztonságos GPS-only fallback
+    return {
+        "analysis_level_label": "GPS-only",
+        "pdf_insights": {"blocks": {}, "topics": [], "sportsbase_findings": [], "sportsbase_lines": [], "raw_text_len": 0},
+        "team_metrics": {},
+        "player_tables": {},
+        "own": {"pdf_insights": {}, "team_metrics": {}, "player_tables": {}},
+        "opponent": {"pdf_insights": {}, "team_metrics": {}, "player_tables": {}},
+        "has_own_pdf": False,
+        "has_opp_pdf": False,
+    }
+
 def render_fpi_clean_workspace_v101() -> None:
     """V137: fókuszált import/export munkafolyamat.
     A fő felhasználói út: GPS/ZIP import -> minimális heti kontextus -> opcionális taktika -> PDF export.
