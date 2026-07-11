@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V145_MATCH_SPECIFIC_COACHING_ENGINE_2026_07_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V146_COACH_INTELLIGENCE_ENGINE_2026_07_11"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7374,6 +7374,9 @@ def build_fpi_product_pdf_bytes(
         text = pdf_safe_text(v).replace("\r", "")
         text = re.sub(r"(?i)<br\s*/?>", "\n", text)
         text = re.sub(r"(?i)</?b>", "", text)
+        text = re.sub(r"(?is)\{\s*['\"]Téma['\"].*?\}", "", text)
+        text = re.sub(r"(?is)\{\s*['\"]Tema['\"].*?\}", "", text)
+        text = re.sub(r"(?is)\{\s*['\"]Bizonyíték['\"].*?\}", "", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 
@@ -7443,18 +7446,34 @@ def build_fpi_product_pdf_bytes(
 
         has_tactical_signal = _fpi_has_tactical_signal_v95(tactical_context)
         tactical_plan = tactical_context.get("plan_a", "KIE – kiegyensúlyozott") if has_tactical_signal else "GPS-only – erőnléti fókuszú mikrociklus"
-        fitness_msgs = _fpi_fitness_messages_v145(
-            ctx, priorities, readiness, week, 5 if not has_tactical_signal else 3
-        )
-        tactical_msgs = _fpi_top_tactical_messages_v82(
-            tactical_context,
-            5 if not has_tactical_signal else 3,
-            gps_context=ctx,
-            readiness=readiness,
-            priorities=priorities,
-            week=week,
-        )
-        md_rows_simple = _fpi_contextual_md_plan_rows_v145(
+        if has_tactical_signal:
+            fitness_insights_v146 = _fpi_contextual_gps_only_insights_v146(
+                ctx, priorities, readiness, week, 5
+            )
+            coach_blocks_v146 = _fpi_coach_blocks_v146(
+                tactical_context, ctx, readiness, priorities, week
+            )
+            tactical_insights_v146 = coach_blocks_v146["tactical"]
+            match_plan_insights_v146 = coach_blocks_v146["plan"]
+            team_tactical_insights_v146 = coach_blocks_v146["team"]
+        else:
+            fitness_insights_v146 = _fpi_contextual_gps_only_insights_v146(
+                ctx, priorities, readiness, week, 7
+            )
+            tactical_insights_v146 = []
+            match_plan_insights_v146 = []
+            team_tactical_insights_v146 = []
+
+        fitness_msgs = [
+            _fpi_render_insight_text_v146(x) for x in fitness_insights_v146[:5 if not has_tactical_signal else 3]
+        ]
+        tactical_msgs = [
+            _fpi_render_insight_text_v146(x) for x in tactical_insights_v146
+        ]
+        team_tactical_msgs = [
+            _fpi_render_insight_text_v146(x) for x in team_tactical_insights_v146
+        ]
+        md_rows_simple = _fpi_contextual_md_plan_rows_v146(
             tactical_context,
             gps_context=ctx,
             readiness=readiness,
@@ -7463,27 +7482,26 @@ def build_fpi_product_pdf_bytes(
         )
         risk_rows_simple = _fpi_compact_player_risk_rows_v82(risk_df, 12)
 
-        # 1) felső döntési sáv: blokkonként eltérő, meccsspecifikus információ
+        # 1) felső döntési sáv: több taktikai megállapítás és konkrét meccsterv
         opp_eval_exec = (tactical_context or {}).get("opponent_player_evaluation", []) if isinstance(tactical_context, dict) else []
-        executive_blocks_v145 = _fpi_build_executive_blocks_v145(
-            tactical_context, ctx, readiness, priorities, week
-        )
-        team_tactical_msgs = executive_blocks_v145["team_messages"]
 
         tactical_findings_text = "\n\n".join(
-            [f"• {x}" for x in executive_blocks_v145["findings"]]
+            [f"• {_fpi_render_insight_text_v146(x)}" for x in tactical_insights_v146[:5]]
         ) or "• Nincs elegendő taktikai input; a riport GPS-only módban készült."
 
         opponent_focus_lines = []
         for row in opp_eval_exec[:3]:
-            name = str(row.get("Játékos", "Ismeretlen játékos"))
-            role = _fpi_extract_coach_text_v145(row.get("Szerep", ""), 70)
-            eval_text = _fpi_extract_coach_text_v145(row.get("Értelmezés", ""), 150)
-            opponent_focus_lines.append(f"• {name} – {role}: {eval_text}")
+            row_insight = _fpi_normalize_any_insight_v146(row)
+            name = str(row.get("Játékos", "Ismeretlen játékos")) if isinstance(row, dict) else "Ismeretlen játékos"
+            role = _fpi_extract_coach_text_v145(row.get("Szerep", ""), 70) if isinstance(row, dict) else ""
+            eval_text = _fpi_extract_coach_text_v145(row.get("Értelmezés", ""), 150) if isinstance(row, dict) else ""
+            clean_line = _fpi_strip_raw_repr_v146(f"{name} – {role}: {eval_text}")
+            if clean_line:
+                opponent_focus_lines.append(f"• {clean_line}")
         opponent_focus_text = "\n\n".join(opponent_focus_lines) or "• Nincs ellenfél-játékos Excel vagy azonosítható játékosprofil."
 
         match_plan_text = "\n\n".join(
-            [f"• {x}" for x in executive_blocks_v145["plan"]]
+            [f"• {_fpi_render_insight_text_v146(x)}" for x in match_plan_insights_v146[:6]]
         ) or f"• {_fpi_hu_plain_text_v144(tactical_plan)}"
 
         fast_rows = [[P("Taktikai megállapítások", head), P("Ellenfél játékosok", head), P("Meccsterv", head)]]
@@ -7504,6 +7522,7 @@ def build_fpi_product_pdf_bytes(
         story.append(Spacer(1, 0.18*cm))
 
         # 3) fő edzői üzenetek: külön erőnléti és valódi csapatszintű taktikai blokk
+        story.append(PageBreak())
         story.append(section("Fő edzői üzenetek", "#DCFCE7"))
         msg_rows = [[P("Erőnléti üzenet", head), P("Csapatszintű taktikai üzenet", head)]]
         max_len = max(len(fitness_msgs), len(team_tactical_msgs), 3)
@@ -7511,8 +7530,8 @@ def build_fpi_product_pdf_bytes(
             fm = fitness_msgs[i] if i < len(fitness_msgs) else ""
             tm = team_tactical_msgs[i] if i < len(team_tactical_msgs) else ""
             msg_rows.append([
-                P(_fpi_extract_coach_text_v145(fm, 330), small),
-                P(_fpi_extract_coach_text_v145(tm, 330), small),
+                P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(fm, 330)), small),
+                P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(tm, 330)), small),
             ])
         story.append(table(msg_rows, [13.8*cm, 13.9*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
         story.append(Spacer(1, 0.18*cm))
@@ -7526,9 +7545,9 @@ def build_fpi_product_pdf_bytes(
                 op_rows.append([
                     P(_fpi_extract_coach_text_v145(r.get("Játékos", ""), 60), small),
                     P(_fpi_extract_coach_text_v145(r.get("Szerep", ""), 90), small),
-                    P(_fpi_extract_coach_text_v145(r.get("Bizonyíték", ""), 180), small),
-                    P(_fpi_extract_coach_text_v145(r.get("Értelmezés", ""), 210), small),
-                    P(_fpi_extract_coach_text_v145(r.get("Javaslat", ""), 230), small),
+                    P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(r.get("Bizonyíték", ""), 180)), small),
+                    P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(r.get("Értelmezés", ""), 210)), small),
+                    P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(r.get("Javaslat", ""), 230)), small),
                 ])
             story.append(table(op_rows, [3.4*cm, 4.4*cm, 7.0*cm, 6.2*cm, 6.7*cm], header_bg="#991B1B", row_bgs=[colors.HexColor("#FEF2F2"), colors.white]))
             story.append(Spacer(1, 0.18*cm))
@@ -12170,6 +12189,490 @@ def _fpi_build_executive_blocks_v145(
     }
 
 
+
+# =========================================================
+# V146 - Coach Intelligence Engine
+# Egységes insight-, prioritás-, ismétlés- és narratívamotor
+# =========================================================
+@dataclass
+class FPIInsightV146:
+    topic: str
+    title: str
+    finding: str
+    recommendation: str
+    source: str = ""
+    priority: int = 50
+    block: str = ""
+    day: str = ""
+
+
+def _fpi_normalize_any_insight_v146(value: object) -> Optional[FPIInsightV146]:
+    """A PDF-generátorba nyers dict/list soha ne kerülhessen."""
+    if value is None:
+        return None
+    if isinstance(value, FPIInsightV146):
+        return value
+    if isinstance(value, dict):
+        topic = str(value.get("Téma") or value.get("Tema") or value.get("topic") or "Taktikai megállapítás")
+        finding = str(
+            value.get("Edzői következtetés")
+            or value.get("Edzöi következtetés")
+            or value.get("Következtetés")
+            or value.get("Értelmezés")
+            or value.get("Megállapítás")
+            or value.get("finding")
+            or ""
+        )
+        recommendation = str(
+            value.get("Javaslat")
+            or value.get("Ajánlás")
+            or value.get("Teendő")
+            or value.get("recommendation")
+            or ""
+        )
+        source = str(value.get("Bizonyíték") or value.get("Forrás") or value.get("source") or "")
+        if not finding and source:
+            finding = source
+        if not finding and not recommendation:
+            return None
+        return FPIInsightV146(
+            topic=_fpi_hu_plain_text_v144(topic),
+            title=_fpi_hu_plain_text_v144(topic),
+            finding=_fpi_extract_coach_text_v145(finding, 420),
+            recommendation=_fpi_extract_coach_text_v145(recommendation, 420),
+            source=_fpi_extract_coach_text_v145(source, 260),
+            priority=int(value.get("priority", 50) or 50),
+            block=str(value.get("block", "")),
+            day=str(value.get("day", "")),
+        )
+    text = _fpi_extract_coach_text_v145(value, 420)
+    if not text:
+        return None
+    return FPIInsightV146(
+        topic=_fpi_fitness_topic_v144(text),
+        title="Edzői megállapítás",
+        finding=text,
+        recommendation="",
+    )
+
+
+def _fpi_strip_raw_repr_v146(text: object) -> str:
+    """Utolsó védelmi vonal: sem dict-, sem listarepr nem jelenhet meg."""
+    value = str(text or "")
+    value = re.sub(r"(?is)\{\s*['\"]Téma['\"].*?\}", "", value)
+    value = re.sub(r"(?is)\{\s*['\"]Tema['\"].*?\}", "", value)
+    value = re.sub(r"(?is)\{\s*['\"]Bizonyíték['\"].*?\}", "", value)
+    value = re.sub(r"(?is)\[\s*\{\s*['\"]Téma['\"].*?\}\s*\]", "", value)
+    value = value.replace("{", "").replace("}", "")
+    return _fpi_hu_plain_text_v144(value).strip()
+
+
+def _fpi_render_insight_text_v146(insight: FPIInsightV146, include_source: bool = False) -> str:
+    parts = []
+    if insight.title:
+        parts.append(f"{insight.title}:")
+    if insight.finding:
+        parts.append(_fpi_strip_raw_repr_v146(insight.finding))
+    if insight.recommendation:
+        parts.append(_fpi_strip_raw_repr_v146(insight.recommendation))
+    if include_source and insight.source:
+        parts.append(f"Alapja: {_fpi_strip_raw_repr_v146(insight.source)}")
+    return " ".join(x for x in parts if x).strip()
+
+
+def _fpi_contextual_gps_only_insights_v146(
+    gps_context: Dict[str, object],
+    priorities: List[dict],
+    readiness: int,
+    week: Optional[str],
+    limit: int = 6,
+) -> List[FPIInsightV146]:
+    """GPS-only esetben is több száz kombinációs út, témánként egyedi hozzáadott értékkel."""
+    ctx = gps_context or {}
+    seed = _fpi_context_seed_v144({}, week, readiness)
+    priority_text = " ".join(
+        str(p.get("Teendő", p.get("Cím", p.get("title", ""))))
+        for p in (priorities or []) if isinstance(p, dict)
+    ).lower()
+
+    pool: List[FPIInsightV146] = []
+
+    if readiness < 50:
+        pool.extend([
+            FPIInsightV146("readiness", "Készenlét", "A csapat frissessége jelenleg alacsony.", "A hét első felében csökkentsük a teljes volument, az intenzív ingereket pedig rövid, teljes pihenőkkel tagolt blokkokban adjuk.", priority=95),
+            FPIInsightV146("regeneracio", "Regeneráció", "A terhelési állapot alapján a visszatöltés fontosabb a további volumenhalmozásnál.", "A következő erősebb nap előtt ellenőrizzük az egyéni reakciókat, és a magas kockázatú játékosoknál csökkentsük az ismétlésszámot.", priority=92),
+        ])
+    elif readiness < 65:
+        pool.extend([
+            FPIInsightV146("readiness", "Készenlét", "A csapat terhelhető, de a frissesség nem optimális.", "A fő terhelési nap maradhat, de az azt követő napon legyen egyértelmű visszalépés volumenben és gyorsításokban.", priority=84),
+            FPIInsightV146("regeneracio", "Frissülés", "A hét szerkezete megfelelő lehet, ha az intenzív és regeneráló napok világosan elkülönülnek.", "Ne tegyünk két hasonló neuromuszkuláris terhelésű napot egymás mellé.", priority=78),
+        ])
+    else:
+        pool.extend([
+            FPIInsightV146("readiness", "Készenlét", "A csapat aktuális frissessége megfelelő alapot ad a tervezett heti fő ingerhez.", "A minőséget részesítsük előnyben: a fő terhelési napon legyen magas a végrehajtási intenzitás, de ne nőjön feleslegesen az ismétlésszám.", priority=76),
+            FPIInsightV146("periodizacio", "Heti felépítés", "A jelenlegi állapot mellett jól elkülöníthető a fő terhelési és az élező nap.", "A legnagyobb terhelés ne kerüljön túl közel a mérkőzéshez, az utolsó 48 órában már a frissesség visszaépítése legyen a cél.", priority=74),
+        ])
+
+    if any(x in priority_text for x in ["sprint", "hsr", "sebess"]):
+        pool.extend([
+            FPIInsightV146("sebesseg", "Sebességi inger", "A nagy sebességű futások és sprintek mennyisége elmarad a kívánt heti zónától.", "Egy célzott sebességi blokk indokolt: kevés ismétlés, hosszú pihenő, teljes technikai kontroll.", priority=93),
+            FPIInsightV146("sebesseg", "Sprintminőség", "A hiány nem pusztán volumenprobléma, hanem a maximális sebességhez közeli expozíció hiányát is jelezheti.", "A sprintblokkban a játékosok érjék el a saját csúcssebességük magas hányadát, ne csak több közepes tempójú futást végezzenek.", priority=90),
+        ])
+    else:
+        pool.extend([
+            FPIInsightV146("sebesseg", "Sebességi egyensúly", "A heti sebességi terhelés megfelelőnek tűnik.", "A következő héten a sprintmennyiség növelése helyett a jó minőségű, teljesen kipihent végrehajtást tartsuk meg.", priority=69),
+        ])
+
+    if any(x in priority_text for x in ["load", "terhel", "volumen", "táv"]):
+        pool.extend([
+            FPIInsightV146("terheles", "Terheléseloszlás", "A heti terhelés eloszlása egyenetlen vagy túlzottan egy napra koncentrálódik.", "Osszuk szét a volument úgy, hogy a fő nap után ne maradjon tartós fáradtság a meccs közelében.", priority=88),
+            FPIInsightV146("volumen", "Heti volumen", "Az össztáv önmagában megfelelő lehet, de a terhelés minőségét az intenzitási összetétel dönti el.", "A következő héten külön ellenőrizzük a HSR-, sprint- és gyorsítási részt, ne csak az összmétert.", priority=82),
+        ])
+    else:
+        pool.extend([
+            FPIInsightV146("volumen", "Heti volumen", "A heti összterhelés stabil alapot ad.", "A következő lépés nem feltétlenül több munka, hanem pontosabb napok közötti elosztás és jobb egyéni differenciálás.", priority=67),
+        ])
+
+    pool.extend([
+        FPIInsightV146("trend", "Négyhetes trend", "A heti adatokat a közelmúlt terhelési mintájához kell viszonyítani.", "Kerüljük a hirtelen ugrást; a következő héten legfeljebb egy fő terhelési tényezőt emeljünk számottevően.", priority=72),
+        FPIInsightV146("gyorsulas", "Neuromuszkuláris terhelés", "A gyorsítások, lassítások és irányváltások olyan terhelést adnak, amelyet az össztáv nem mutat meg.", "Kis területű játékoknál külön ellenőrizzük a fékezések számát, és ne ugyanazon a napon halmozzuk a sprintet és a sok irányváltást.", priority=71),
+        FPIInsightV146("egyeni", "Egyéni eltérések", "A csapatátlag elfedheti a szélsőséges játékosprofilokat.", "A magas kockázatú vagy alulexponált játékosok kapjanak egyéni módosítást, ne csak a teljes csapatra készüljön közös terhelési döntés.", priority=83),
+        FPIInsightV146("meccsterheles", "Meccsterhelés", "Az edzés–meccs arány akkor hasznos, ha külön vizsgáljuk a teljes volument és a nagy intenzitású részt.", "A következő mikrociklusban azt a területet pótoljuk, amely az edzésen aránytalanul elmaradt a meccsigénytől.", priority=80),
+    ])
+
+    rotated = _fpi_rotate_v144(pool, seed)
+    selected: List[FPIInsightV146] = []
+    used_topics = set()
+    for item in sorted(rotated, key=lambda x: x.priority, reverse=True):
+        if item.topic in used_topics:
+            continue
+        selected.append(item)
+        used_topics.add(item.topic)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _fpi_specific_match_plan_v146(
+    tactical_context: Optional[Dict[str, object]],
+    gps_context: Optional[Dict[str, object]],
+    readiness: int,
+    priorities: Optional[List[dict]],
+    week: Optional[str],
+    limit: int = 6,
+) -> List[FPIInsightV146]:
+    """Hol védekezzünk, hol támadjunk, kit keressünk, kire vigyázzunk."""
+    ctx = tactical_context or {}
+    opponent = _fpi_opponent_name_v145(ctx)
+    features = _fpi_tactical_features_v144(ctx)
+    seed = _fpi_context_seed_v144(ctx, week, readiness)
+
+    opp_players = ctx.get("opponent_player_evaluation", []) or []
+    own_players = ctx.get("own_player_evaluation", []) or []
+
+    player_threats = []
+    for row in opp_players:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("Játékos", "")).strip()
+        role = _fpi_extract_coach_text_v145(row.get("Szerep", ""), 80)
+        eval_text = _fpi_extract_coach_text_v145(row.get("Értelmezés", ""), 170)
+        suggestion = _fpi_extract_coach_text_v145(row.get("Javaslat", ""), 180)
+        if name:
+            player_threats.append((name, role, eval_text, suggestion))
+
+    own_targets = []
+    for row in own_players:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("Játékos", "")).strip()
+        role = _fpi_extract_coach_text_v145(row.get("Szerep", ""), 80)
+        eval_text = _fpi_extract_coach_text_v145(row.get("Értelmezés", ""), 160)
+        if name:
+            own_targets.append((name, role, eval_text))
+
+    pool: List[FPIInsightV146] = []
+
+    if features["mid_block"]:
+        pool.append(FPIInsightV146(
+            "vedekezesi_zona", "Hol védekezzünk?",
+            f"{opponent} ellen a középső blokk tűnik a legjobb kiindulási pontnak.",
+            "A csapat a középső harmadban zárja a belső passzsávokat, majd az oldalvonal közelében támadja meg agresszíven a labdást.",
+            priority=95,
+        ))
+    elif features["high_press"]:
+        pool.append(FPIInsightV146(
+            "vedekezesi_zona", "Hol védekezzünk?",
+            f"{opponent} első építési vonalát már a saját térfelén érdemes nyomás alá helyezni.",
+            "A magas letámadás csak visszapassz, rossz átvétel vagy oldalvonal mellé szorult labdás esetén induljon, hogy ne nyíljon meg a középső terület.",
+            priority=95,
+        ))
+    else:
+        pool.append(FPIInsightV146(
+            "vedekezesi_zona", "Hol védekezzünk?",
+            f"{opponent} ellen a stabil középső zóna védelme élvezzen elsőbbséget.",
+            "Ne húzzuk szét a blokkot felesleges egyéni kilépésekkel; a labdát tereljük az előre kijelölt oldalra.",
+            priority=88,
+        ))
+
+    if features["wide"]:
+        pool.append(FPIInsightV146(
+            "tamadasi_zona", "Hol támadjunk?",
+            f"{opponent} oldali védekezését létszámfölénnyel és gyors visszaforgatással érdemes bontani.",
+            "Az első oldali kombináció után keressük a félterületi visszagurítást vagy a túloldali szélsőt, ne az első beadást erőltessük.",
+            priority=93,
+        ))
+    elif features["central"] or features["possession"]:
+        pool.append(FPIInsightV146(
+            "tamadasi_zona", "Hol támadjunk?",
+            f"{opponent} középpályás és védősora közötti terület lehet a fő célzóna.",
+            "A támadó középpályás vagy visszalépő csatár kapjon labdát a vonalak között, majd egyérintős kapcsolattal indítsuk a mélységi futást.",
+            priority=93,
+        ))
+    else:
+        pool.append(FPIInsightV146(
+            "tamadasi_zona", "Hol támadjunk?",
+            f"{opponent} rendezetlen oldalát azonnali oldalváltással vagy gyors átmenettel érdemes keresni.",
+            "Labdaszerzés után az első előrepassz a védők mögötti szélső területre menjen, ha a labdás nincs nyomás alatt.",
+            priority=88,
+        ))
+
+    if player_threats:
+        name, role, eval_text, suggestion = player_threats[0]
+        pool.append(FPIInsightV146(
+            "veszelyes_jatekos", "Kire vigyázzunk?",
+            f"{name} ({role}) az ellenfél egyik legfontosabb veszélyforrása. {eval_text}",
+            suggestion or "Ne engedjük szabadon labdát átvenni a veszélyes zónában; a közeli biztosító játékos készüljön a második akcióra is.",
+            priority=99,
+        ))
+    if len(player_threats) > 1:
+        name, role, eval_text, suggestion = player_threats[1]
+        pool.append(FPIInsightV146(
+            "masodik_veszely", "Második veszélyforrás",
+            f"{name} ({role}) más típusú veszélyt jelent. {eval_text}",
+            suggestion or "Az ő oldalán vagy zónájában előre rögzítsük, ki lép ki és ki biztosít mögötte.",
+            priority=92,
+        ))
+
+    if own_targets:
+        name, role, eval_text = own_targets[0]
+        pool.append(FPIInsightV146(
+            "sajat_kulcsember", "Kit keressünk?",
+            f"{name} ({role}) lehet a saját játék egyik fő kapcsolópontja. {eval_text}",
+            "A labdakihozatal és a támadó átmenet első vagy második passzában tudatosan keressük, ne csak véletlenszerűen jusson labdához.",
+            priority=94,
+        ))
+    else:
+        pool.append(FPIInsightV146(
+            "sajat_kulcsember", "Kit keressünk?",
+            "A saját progresszív vagy kreatív játékost a vonalak között, illetve az első ellenfél-sor mögött kell labdához juttatni.",
+            "Az első építési fázisban legyen előre rögzített passzút hozzá, hogy ne csak oldalirányú labdajáratás történjen.",
+            priority=80,
+        ))
+
+    if features["transition"]:
+        pool.append(FPIInsightV146(
+            "elso_tamado_gondolat", "Első támadó gondolat",
+            f"{opponent} labdavesztése után azonnal a védők mögötti területet vagy a gyenge oldalt keressük.",
+            "Ha az első előrepassz nem tiszta, egy biztosító passzal tartsuk meg a labdát, majd gyors oldalváltással folytassuk.",
+            priority=91,
+        ))
+
+    if features["set_piece"]:
+        pool.append(FPIInsightV146(
+            "pontrugas", "Pontrúgásfókusz",
+            f"{opponent} pontrúgásainál a második labda és a hosszú oldal külön figyelmet igényel.",
+            "Legyen kijelölt játékos a lepattanóra és egy biztosító a gyors ellentámadás megállítására.",
+            priority=84,
+        ))
+
+    if readiness < 60:
+        pool.append(FPIInsightV146(
+            "allapothoz_igazitva", "Állapothoz igazítva",
+            "A jelenlegi fizikai állapot nem indokol egész mérkőzésen folyamatos magas nyomást.",
+            "Az intenzív letámadást rövid, előre kijelölt szakaszokhoz kössük, a köztes időszakokban stabilabb blokkban védekezzünk.",
+            priority=90,
+        ))
+
+    rotated = _fpi_rotate_v144(pool, seed)
+    selected, used_topics = [], set()
+    for item in sorted(rotated, key=lambda x: x.priority, reverse=True):
+        if item.topic in used_topics:
+            continue
+        selected.append(item)
+        used_topics.add(item.topic)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _fpi_tactical_findings_v146(
+    tactical_context: Optional[Dict[str, object]],
+    gps_context: Optional[Dict[str, object]],
+    readiness: int,
+    priorities: Optional[List[dict]],
+    week: Optional[str],
+    limit: int = 6,
+) -> List[FPIInsightV146]:
+    ctx = tactical_context or {}
+    features = _fpi_tactical_features_v144(ctx)
+    opponent = _fpi_opponent_name_v145(ctx)
+    seed = _fpi_context_seed_v144(ctx, week, readiness)
+    pool: List[FPIInsightV146] = []
+
+    raw_sources = []
+    for key in ["risks", "tactical_findings", "pdf_provider_findings", "own_topics", "opp_topics"]:
+        raw_sources.extend(ctx.get(key, []) or [])
+    for raw in raw_sources:
+        insight = _fpi_normalize_any_insight_v146(raw)
+        if insight and insight.finding:
+            insight.title = insight.title or "Taktikai megállapítás"
+            insight.priority = max(insight.priority, 70)
+            pool.append(insight)
+
+    if features["transition"]:
+        pool.append(FPIInsightV146(
+            "atmenet", "Átmeneti veszély",
+            f"{opponent} gyorsan próbál előre játszani labdaszerzés után.",
+            "A labda mögötti biztosítás és az első előrepassz zárása fontosabb, mint az azonnali, szervezetlen visszatámadás.",
+            priority=94,
+        ))
+    if features["wide"]:
+        pool.append(FPIInsightV146(
+            "szelso", "Szélső veszély",
+            f"{opponent} oldali akciói és beadásai kiemelt veszélyt jelenthetnek.",
+            "A beadási helyzet előtt kell nyomást gyakorolni; a hosszú oldal és a tizenhatos előtti lepattanó külön felelőst kapjon.",
+            priority=92,
+        ))
+    if features["central"]:
+        pool.append(FPIInsightV146(
+            "kozepso", "Vonalak közötti játék",
+            f"{opponent} a középpályás és védősor közötti területet is keresi.",
+            "A védekező középpályás adjon nyomást, a belső védő biztosítson mögötte, hogy egyetlen kilépéssel ne nyíljon meg a kapu felé vezető út.",
+            priority=90,
+        ))
+    if features["build_up"]:
+        pool.append(FPIInsightV146(
+            "labdakihozatal", "Labdakihozatal",
+            f"{opponent} első nyomásának kijátszásához szükség lehet a kapus és a harmadik ember bevonására.",
+            "Ne minden játékos kérje lábra a labdát; legyen előre rögzített mélységi mozgás, amely hátrahúzza az ellenfél védelmét.",
+            priority=86,
+        ))
+    if features["second_ball"]:
+        pool.append(FPIInsightV146(
+            "masodik_labda", "Második labdák",
+            f"{opponent} direkt játékánál a párharc utáni terület fontosabb lehet, mint maga az első fejpárbaj.",
+            "A középpályás sor gyorsan zárjon a labda várható helyére, hogy a lepattanó ne maradjon az ellenfélnél.",
+            priority=88,
+        ))
+    if features["set_piece"]:
+        pool.append(FPIInsightV146(
+            "pontrugas", "Pontrúgások",
+            f"{opponent} pontrúgásai után a második szituáció is veszélyes lehet.",
+            "A felszabadítás után a csapat együtt lépjen ki, és a lepattanóra kijelölt játékos ne hagyja szabadon az újabb beadást.",
+            priority=84,
+        ))
+
+    rotated = _fpi_rotate_v144(pool, seed)
+    selected, used_topics, accepted_texts = [], set(), []
+    for item in sorted(rotated, key=lambda x: x.priority, reverse=True):
+        if item.topic in used_topics:
+            continue
+        rendered = _fpi_render_insight_text_v146(item)
+        if _fpi_is_near_duplicate_v145(rendered, accepted_texts, 0.70):
+            continue
+        selected.append(item)
+        used_topics.add(item.topic)
+        accepted_texts.append(rendered)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _fpi_contextual_md_plan_rows_v146(
+    tactical_context: Optional[Dict[str, object]],
+    gps_context: Optional[Dict[str, object]],
+    readiness: int,
+    priorities: Optional[List[dict]],
+    week: Optional[str],
+) -> List[Tuple[str, str, str]]:
+    rows = _fpi_contextual_md_plan_rows_v145(
+        tactical_context, gps_context, readiness, priorities, week
+    )
+    result = []
+    for day, fitness_goal, tactical_goal in rows:
+        tactical_text = _fpi_strip_raw_repr_v146(tactical_goal)
+        low = tactical_text.lower()
+        if "labdakihozatal" in low or "épít" in low:
+            title = "Játékfelépítés"
+        elif "átmenet" in low or "labdaszerzés" in low or "labdavesztés" in low:
+            title = "Átmenetek"
+        elif "blokk" in low or "védekez" in low:
+            title = "Védekezés"
+        elif "szélső" in low or "beadás" in low or "oldali" in low:
+            title = "Szélső játék"
+        elif "pontrúgás" in low or "szöglet" in low:
+            title = "Pontrúgások"
+        elif "letámadás" in low:
+            title = "Letámadás"
+        elif "aktiváció" in low or "aktiv" in low:
+            title = "Aktiváció"
+        else:
+            title = "Meccsterv"
+        result.append((day, fitness_goal, f"{title}: {tactical_text}"))
+    return result
+
+
+def _fpi_coach_blocks_v146(
+    tactical_context: Optional[Dict[str, object]],
+    gps_context: Optional[Dict[str, object]],
+    readiness: int,
+    priorities: Optional[List[dict]],
+    week: Optional[str],
+) -> Dict[str, List[FPIInsightV146]]:
+    tactical = _fpi_tactical_findings_v146(
+        tactical_context, gps_context, readiness, priorities, week, 7
+    )
+    plan = _fpi_specific_match_plan_v146(
+        tactical_context, gps_context, readiness, priorities, week, 7
+    )
+
+    # Lágy deduplikáció: azonos gondolat más mélységben megmaradhat,
+    # az 1:1 vagy nagyon közeli ismétlés viszont ne.
+    used_texts = [_fpi_render_insight_text_v146(x) for x in tactical]
+    clean_plan = []
+    for item in plan:
+        rendered = _fpi_render_insight_text_v146(item)
+        if _fpi_is_near_duplicate_v145(rendered, used_texts, 0.82):
+            continue
+        clean_plan.append(item)
+        used_texts.append(rendered)
+
+    # Csapatszintű edzői üzenetek a taktikai és meccstervi elemek mélyebb,
+    # de nem szó szerinti alkalmazási szintjéből.
+    team_messages = []
+    for item in tactical + clean_plan:
+        title = item.title
+        finding = item.finding
+        recommendation = item.recommendation
+        if recommendation:
+            team_messages.append(FPIInsightV146(
+                topic=f"team_{item.topic}",
+                title=title,
+                finding=finding,
+                recommendation=f"Pályán használható feladat: {recommendation}",
+                priority=item.priority,
+            ))
+        if len(team_messages) >= 5:
+            break
+
+    return {
+        "tactical": tactical,
+        "plan": clean_plan[:6],
+        "team": team_messages[:4],
+    }
+
+
 # =========================================================
 # V143 - Methodology content + PDF export
 # =========================================================
@@ -12241,8 +12744,11 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
             "A taktikai üzenetek a saját játékmodellből, az ellenfél erősségeiből és gyengeségeiből, a javasolt stratégiai profilból, az ellenfél játékosértékeléséből és a csapat aktuális fizikai állapotából állnak össze.",
             "A rendszer az adott hét, ellenfél, saját játékmodell, stratégiai profil, játékosértékelés és terhelési állapot alapján állítja össze az üzeneteket. A taktikai célok naponta is változnak: más feladat készül a fő terhelési napra, az átmeneti napra, a meccstervi napra és az aktivációra.",
             "Az üzenetek tudásbázisból és szakmai szabályokból épülnek fel. A rendszer témánként választ, majd hasonlóságvizsgálattal kiszűri, hogy ugyanaz a motívum több blokkban vagy három egymást követő sorban megismétlődjön.",
-            "A felső vezetői blokk, a meccsterv, a csapatszintű taktikai üzenet és az ellenfél játékosfókusz eltérő információt kap. Így a riport nem ugyanazt az állítást ismétli több címszó alatt.",
-            "A szövegmotor nem szabadon kitalált állításokat készít: kizárólag az elérhető GPS- és taktikai inputokból, valamint előre meghatározott szakmai szabályokból dolgozik. A cél az, hogy fél év riportjait visszanézve mérkőzésenként eltérő, visszakereshető és edzésre vihető javaslatok jelenjenek meg.",
+            "A felső vezetői blokk, a meccsterv, a csapatszintű taktikai üzenet, a napi taktikai cél és az ellenfél játékosfókusz eltérő információs mélységet kap. Ugyanaz a téma megjelenhet több helyen, ha más döntési szintet szolgál, de az egy az egyben ismétlődő mondatokat a rendszer kiszűri.",
+            "A meccsterv konkrét kérdésekre válaszol: hol védekezzünk, hol támadjunk, kit keressünk, kire vigyázzunk, mi legyen az első támadó gondolat, és mely játékhelyzeteket kell edzésen gyakorolni.",
+            "GPS-only módban ugyanaz a tudás- és kombinációs motor dolgozik, csak taktikai input nélkül. A rendszer a készenlét, kockázat, össztáv, terhelési pont, nagy sebességű futások, sprintek, nagy intenzitású akciók, gyorsítások, lassítások, négyhetes trend, edzés–meccs arány és heti periodizáció alapján állít össze többféle erőnléti üzenetet.",
+            "Az erőnléti és taktikai üzenetek témánként, prioritás szerint és kontextusfüggően készülnek. Fél év riportjait visszanézve nem ugyanazok a mondatok ismétlődnek, hanem az adott hét és mérkőzés saját problémái, döntési pontjai és pályán használható feladatai kerülnek előtérbe.",
+            "A szövegmotor nem szabadon kitalált állításokat készít: kizárólag az elérhető GPS- és taktikai inputokból, valamint előre meghatározott szakmai szabályokból dolgozik.",
         ],
     ),
     (
