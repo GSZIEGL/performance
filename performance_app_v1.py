@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V148_READABLE_JUSTIFIED_PDFS_GPS_EXPORT_2026_07_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V149_READABLE_HIGHLIGHTS_FLEXIBLE_HISTORY_2026_07_11"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -2901,12 +2901,20 @@ def team_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
                 ))
 
     if not insights:
-        insights.append(Insight(
-            "Stabil hét", "INFORMÁCIÓ",
-            "Nem látható kiemelt negatív eltérés az aktuális hét fő mutatóiban.",
-            "A csapat terhelési profilja stabilnak tűnik az elérhető adatok alapján.",
-            "Érdemes tovább figyelni a sprint- és intenzitási trendeket, különösen meccs előtti héten.",
-        ))
+        if len(weeks) <= 1:
+            insights.append(Insight(
+                "Aktuális heti alapállapot", "INFORMÁCIÓ",
+                "Az egyetlen feltöltött hét fő mutatóiban nem látható kiemelt negatív eltérés.",
+                "A rendszer teljes értékű heti állapotképet készít, de többhetes trendet csak további hetek feltöltése után számol.",
+                "A következő hetek adataival automatikusan megjelenik a heti változás és a gördülő trendértékelés.",
+            ))
+        else:
+            insights.append(Insight(
+                "Stabil hét", "INFORMÁCIÓ",
+                "Nem látható kiemelt negatív eltérés az aktuális hét fő mutatóiban.",
+                "A csapat terhelési profilja stabilnak tűnik az elérhető adatok alapján.",
+                "Érdemes tovább figyelni a sprint- és intenzitási trendeket, különösen meccs előtti héten.",
+            ))
 
     return sorted(insights, key=lambda x: SEVERITY_RANK.get(x.severity, 9))[:8]
 
@@ -3598,8 +3606,20 @@ def score_to_color(score: float) -> str:
 
 def trend_label(values: List[float], tolerance: float = 0.03) -> str:
     clean = [v for v in values if pd.notna(v)]
-    if len(clean) < 3:
-        return "nincs elég adat"
+    if len(clean) == 0:
+        return "nincs adat"
+    if len(clean) == 1:
+        return "egyhetes alapállapot"
+    if len(clean) == 2:
+        first, last = clean[0], clean[-1]
+        if first == 0:
+            return "kéthetes összevetés"
+        change = (last - first) / abs(first)
+        if change > tolerance:
+            return "kéthetes emelkedés"
+        if change < -tolerance:
+            return "kéthetes csökkenés"
+        return "kéthetes stabilitás"
     first, last = clean[0], clean[-1]
     if first == 0:
         return "nincs elég adat"
@@ -7361,19 +7381,20 @@ def build_fpi_product_pdf_bytes(
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=0.9*cm, leftMargin=0.9*cm, topMargin=0.7*cm, bottomMargin=0.7*cm)
     styles = getSampleStyleSheet()
-    title = ParagraphStyle("FPI58Title", parent=styles["Title"], fontName=font_bold, fontSize=20, leading=23, textColor=colors.HexColor("#0F172A"))
-    sub = ParagraphStyle("FPI58Sub", parent=styles["Normal"], fontName=font_name, fontSize=8.8, leading=11, textColor=colors.HexColor("#334155"))
-    h2 = ParagraphStyle("FPI58H2", parent=styles["Heading2"], fontName=font_bold, fontSize=11.2, leading=14, textColor=colors.HexColor("#0F172A"))
-    body = ParagraphStyle("FPI58Body", parent=styles["Normal"], fontName=font_name, fontSize=8.0, leading=10.2, textColor=colors.HexColor("#111827"))
-    small = ParagraphStyle("FPI58Small", parent=styles["Normal"], fontName=font_name, fontSize=6.6, leading=7.9, textColor=colors.HexColor("#111827"))
-    head = ParagraphStyle("FPI58Head", parent=styles["Normal"], fontName=font_bold, fontSize=9.0, leading=8.8, alignment=1, textColor=colors.white)
-    white_big = ParagraphStyle("FPI58WhiteBig", parent=styles["Normal"], fontName=font_bold, fontSize=16, leading=18, alignment=1, textColor=colors.white)
-    white_small = ParagraphStyle("FPI58WhiteSmall", parent=styles["Normal"], fontName=font_name, fontSize=7.0, leading=8.5, alignment=1, textColor=colors.white)
+    title = ParagraphStyle("FPI58Title", parent=styles["Title"], fontName=font_bold, fontSize=22, leading=26, textColor=colors.HexColor("#0F172A"))
+    sub = ParagraphStyle("FPI58Sub", parent=styles["Normal"], fontName=font_name, fontSize=10.2, leading=13.2, textColor=colors.HexColor("#334155"), alignment=4)
+    h2 = ParagraphStyle("FPI58H2", parent=styles["Heading2"], fontName=font_bold, fontSize=14.0, leading=17.0, textColor=colors.HexColor("#0F172A"))
+    body = ParagraphStyle("FPI58Body", parent=styles["Normal"], fontName=font_name, fontSize=10.6, leading=14.0, textColor=colors.HexColor("#111827"), alignment=4)
+    small = ParagraphStyle("FPI58Small", parent=styles["Normal"], fontName=font_name, fontSize=9.4, leading=12.4, textColor=colors.HexColor("#111827"), alignment=4)
+    head = ParagraphStyle("FPI58Head", parent=styles["Normal"], fontName=font_bold, fontSize=10.7, leading=13.0, alignment=1, textColor=colors.white)
+    white_big = ParagraphStyle("FPI58WhiteBig", parent=styles["Normal"], fontName=font_bold, fontSize=17, leading=20, alignment=1, textColor=colors.white)
+    white_small = ParagraphStyle("FPI58WhiteSmall", parent=styles["Normal"], fontName=font_name, fontSize=8.4, leading=10.5, alignment=1, textColor=colors.white)
+    callout = ParagraphStyle("FPI58Callout", parent=body, fontName=font_bold, fontSize=11.4, leading=14.7, textColor=colors.HexColor("#0F172A"), alignment=4)
+    player_label = ParagraphStyle("FPI58PlayerLabel", parent=h2, fontName=font_bold, fontSize=13.0, leading=16.0, textColor=colors.HexColor("#FFFFFF"), alignment=0)
 
     def clean(v: object) -> str:
         text = pdf_safe_text(v).replace("\r", "")
         text = re.sub(r"(?i)<br\s*/?>", "\n", text)
-        text = re.sub(r"(?i)</?b>", "", text)
         text = re.sub(r"(?is)\{\s*['\"]Téma['\"].*?\}", "", text)
         text = re.sub(r"(?is)\{\s*['\"]Tema['\"].*?\}", "", text)
         text = re.sub(r"(?is)\{\s*['\"]Bizonyíték['\"].*?\}", "", text)
@@ -7381,7 +7402,16 @@ def build_fpi_product_pdf_bytes(
         return text.strip()
 
     def P(v, style=body):
-        return Paragraph(html.escape(clean(v)).replace("\n", "<br/>"), style)
+        escaped = html.escape(clean(v)).replace("\n", "<br/>")
+        # Csak a saját kiemelőmotor által létrehozott alap ReportLab tageket engedjük vissza.
+        escaped = (
+            escaped
+            .replace("&lt;b&gt;", "<b>")
+            .replace("&lt;/b&gt;", "</b>")
+            .replace("&lt;i&gt;", "<i>")
+            .replace("&lt;/i&gt;", "</i>")
+        )
+        return Paragraph(escaped, style)
 
     def section(text: str, color: str = "#DBEAFE"):
         t = Table([[P(text, h2)]], colWidths=[27.7*cm])
@@ -7402,8 +7432,8 @@ def build_fpi_product_pdf_bytes(
             ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#CBD5E1")),
             ("VALIGN", (0,0), (-1,-1), "TOP"),
             ("ROWBACKGROUNDS", (0,1), (-1,-1), row_bgs),
-            ("LEFTPADDING", (0,0), (-1,-1), 4), ("RIGHTPADDING", (0,0), (-1,-1), 4),
-            ("TOPPADDING", (0,0), (-1,-1), 3), ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+            ("LEFTPADDING", (0,0), (-1,-1), 7), ("RIGHTPADDING", (0,0), (-1,-1), 7),
+            ("TOPPADDING", (0,0), (-1,-1), 6), ("BOTTOMPADDING", (0,0), (-1,-1), 6),
         ]))
         return t
 
@@ -7427,9 +7457,16 @@ def build_fpi_product_pdf_bytes(
     }
 
     def add_cover():
+        data_horizon_v149 = _fpi_data_horizon_v149(df)
         story.append(P("Football Performance Intelligence", title))
         story.append(P(f"{label_prefix}{report_names.get(report_type, 'Riport')} | Hét: {format_week_label(str(week))} | Heti típus: {week_type_label_v126} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
         story.append(P(_fpi_pdf_match_context_line_v122(demo_label), sub))
+        story.append(P(
+            f"<b>Adathorizont:</b> {data_horizon_v149['mode']} | "
+            f"{data_horizon_v149['weeks']} hét | {data_horizon_v149['sessions']} edzés/meccsnap | "
+            f"{data_horizon_v149['players']} játékos. {data_horizon_v149['trend_label']}",
+            sub,
+        ))
         story.append(Spacer(1, 0.25*cm))
         kpis = [
             kpi("READINESS", f"{readiness}/100", score_to_label(readiness), "#166534" if readiness >= 75 else "#1E3A8A" if readiness >= 60 else "#991B1B"),
@@ -7504,7 +7541,27 @@ def build_fpi_product_pdf_bytes(
             [f"• {_fpi_emphasize_message_v148(_fpi_render_insight_text_v146(x))}" for x in match_plan_insights_v146[:6]]
         ) or f"• {_fpi_hu_plain_text_v144(tactical_plan)}"
 
-        fast_rows = [[P("Taktikai megállapítások", head), P("Ellenfél játékosok", head), P("Meccsterv", head)]]
+        key_headline_v149 = _fpi_key_headline_v149(
+            tactical_insights_v146,
+            match_plan_insights_v146,
+            fitness_insights_v146,
+        )
+        headline_box_v149 = Table(
+            [[P(f"<b>KULCSÜZENET:</b> {pdf_safe_text(key_headline_v149)}", callout)]],
+            colWidths=[27.7*cm],
+        )
+        headline_box_v149.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#FEF3C7")),
+            ("BOX", (0,0), (-1,-1), 1.0, colors.HexColor("#F59E0B")),
+            ("LEFTPADDING", (0,0), (-1,-1), 10),
+            ("RIGHTPADDING", (0,0), (-1,-1), 10),
+            ("TOPPADDING", (0,0), (-1,-1), 8),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+        ]))
+        story.append(headline_box_v149)
+        story.append(Spacer(1, 0.20*cm))
+
+        fast_rows = [[P("TAKTIKAI MEGÁLLAPÍTÁSOK", head), P("ELLENFÉL-KULCSEMBEREK", head), P("KONKRÉT MECCSTERV", head)]]
         fast_rows.append([
             P(tactical_findings_text, body),
             P(opponent_focus_text, body),
@@ -7568,7 +7625,13 @@ def build_fpi_product_pdf_bytes(
         story.append(section("3. Játékosszintű fókusz", "#FEE2E2"))
 
         if opp_eval_exec:
-            story.append(P("Ellenfél kulcsemberei és támadható pontjai", head))
+            story.append(_fpi_player_group_banner_v149(
+                "A. ELLENFÉL JÁTÉKOSAI – KULCSEMBEREK ÉS TÁMADHATÓ PONTOK",
+                "#991B1B",
+                P,
+                player_label,
+            ))
+            story.append(Spacer(1, 0.14*cm))
             op_rows = [[
                 P("Játékos", head),
                 P("Szerep", head),
@@ -7578,7 +7641,7 @@ def build_fpi_product_pdf_bytes(
             ]]
             for r in opp_eval_exec[:5]:
                 op_rows.append([
-                    P(_fpi_extract_coach_text_v145(r.get("Játékos", ""), 60), small),
+                    P(f"<b>{pdf_safe_text(_fpi_extract_coach_text_v145(r.get('Játékos', ''), 60))}</b>", body),
                     P(_fpi_extract_coach_text_v145(r.get("Szerep", ""), 90), small),
                     P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(r.get("Bizonyíték", ""), 180)), small),
                     P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(r.get("Értelmezés", ""), 210)), small),
@@ -7592,10 +7655,17 @@ def build_fpi_product_pdf_bytes(
             ))
             story.append(Spacer(1, 0.20*cm))
 
-        story.append(P("Saját játékosok terhelési kockázata", head))
+        story.append(Spacer(1, 0.22*cm))
+        story.append(_fpi_player_group_banner_v149(
+            "B. SAJÁT JÁTÉKOSOK – TERHELÉSI ÁLLAPOT ÉS KOCKÁZAT",
+            "#1E3A8A",
+            P,
+            player_label,
+        ))
+        story.append(Spacer(1, 0.14*cm))
         rr = [[P(c, head) for c in risk_rows_simple[0]]]
         for row in risk_rows_simple[1:]:
-            rr.append([P(x, small) for x in row])
+            rr.append([P(x, body) for x in row])
         story.append(table(
             rr,
             [6.4*cm, 4.2*cm, 17.1*cm],
@@ -12884,6 +12954,77 @@ def _fpi_gps_only_download_bytes_v148(
     )
 
 
+
+# =========================================================
+# V149 - Adathorizont és rugalmas trendkezelés
+# =========================================================
+def _fpi_data_horizon_v149(df: pd.DataFrame) -> Dict[str, object]:
+    if df is None or df.empty:
+        return {
+            "weeks": 0,
+            "sessions": 0,
+            "players": 0,
+            "mode": "Nincs adat",
+            "trend_available": False,
+            "trend_label": "Nincs értékelhető trend",
+        }
+    weeks = int(df["week"].dropna().nunique()) if "week" in df.columns else 0
+    sessions = 0
+    if "session_date" in df.columns:
+        sessions = int(df["session_date"].dropna().nunique())
+    elif "start_time" in df.columns:
+        sessions = int(pd.to_datetime(df["start_time"], errors="coerce").dropna().dt.date.nunique())
+    players = int(df["player_name"].dropna().nunique()) if "player_name" in df.columns else 0
+
+    if weeks <= 1:
+        mode = "Egyhetes állapotkép"
+        trend_label_text = "A rendszer az aktuális hetet értékeli; többhetes trendet még nem állít."
+    elif weeks == 2:
+        mode = "Kéthetes összevetés"
+        trend_label_text = "Rövid összevetés készül; a négyhetes trend még előzetes."
+    elif weeks == 3:
+        mode = "Rövid trend"
+        trend_label_text = "Három hét alapján irányjelző trend készül."
+    else:
+        mode = "Többhetes trend"
+        trend_label_text = "A rendszer gördülő négyhetes trendeket és heti változásokat is értékel."
+
+    return {
+        "weeks": weeks,
+        "sessions": sessions,
+        "players": players,
+        "mode": mode,
+        "trend_available": weeks >= 2,
+        "trend_label": trend_label_text,
+    }
+
+
+def _fpi_key_headline_v149(
+    tactical_insights: List[FPIInsightV146],
+    match_plan_insights: List[FPIInsightV146],
+    fitness_insights: List[FPIInsightV146],
+) -> str:
+    candidates = []
+    for collection in [match_plan_insights, tactical_insights, fitness_insights]:
+        for item in collection or []:
+            if item.title and item.finding:
+                candidates.append(f"{item.title}: {item.finding}")
+    return _fpi_clean_sentence_v82(candidates[0], 210) if candidates else "A hét legfontosabb szakmai fókusza a rendelkezésre álló adatok alapján készült."
+
+
+def _fpi_player_group_banner_v149(text: str, color: str, P, player_label):
+    table_obj = Table([[P(text, player_label)]], colWidths=[27.7*cm])
+    table_obj.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor(color)),
+        ("BOX", (0,0), (-1,-1), 0.6, colors.HexColor(color)),
+        ("LEFTPADDING", (0,0), (-1,-1), 10),
+        ("RIGHTPADDING", (0,0), (-1,-1), 10),
+        ("TOPPADDING", (0,0), (-1,-1), 7),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 7),
+    ]))
+    return table_obj
+
+
 # =========================================================
 # V143 - Methodology content + PDF export
 # =========================================================
@@ -12955,7 +13096,9 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
             "A taktikai üzenetek a saját játékmodellből, az ellenfél erősségeiből és gyengeségeiből, a javasolt stratégiai profilból, az ellenfél játékosértékeléséből és a csapat aktuális fizikai állapotából állnak össze.",
             "A rendszer az adott hét, ellenfél, saját játékmodell, stratégiai profil, játékosértékelés és terhelési állapot alapján állítja össze az üzeneteket. A taktikai célok naponta is változnak: más feladat készül a fő terhelési napra, az átmeneti napra, a meccstervi napra és az aktivációra.",
             "Az üzenetek tudásbázisból és szakmai szabályokból épülnek fel. A rendszer témánként választ, majd hasonlóságvizsgálattal kiszűri, hogy ugyanaz a motívum több blokkban vagy három egymást követő sorban megismétlődjön.",
-            "Az Executive Summary olvashatóbb, nagyobb betűméretű és sorkizárt törzsszöveget használ. A fontos üzenetek rövid címsorral vagy félkövér kiemeléssel jelennek meg, így a lényeg gyors átfutással is felismerhető.",
+            "Az Executive Summary nagyobb betűméretű, sorkizárt törzsszöveget, hangsúlyos kulcsüzenet-dobozt, félkövér alcímeket és tágabb cellaközöket használ. A vezetői lényeg így a teljes mondatok végigolvasása nélkül is gyorsan felismerhető.",
+            "A játékosszintű oldal egyértelműen két részre válik: ellenfél-játékosok meccstervi értékelése, illetve saját játékosok terhelési állapota és kockázata.",
+            "A rendszer egyetlen edzés- vagy meccsfájlt, több külön Excel/CSV fájlt és ZIP-ben nagyobb fájlcsomagot is kezel. Egyhetes adatokból teljes heti állapotképet készít, de nem állít nem létező többhetes trendet. Két-három hétből rövid összevetést, négy vagy több hétből gördülő trendeket számol.",
             "Az első döntési pont saját oldalon vagy – szükség esetén – két oldalon jelenik meg. A heti ciklusterv és a fő edzői üzenetek közös oldalon kezdődnek; ha a tartalom nem fér el kulturáltan, a dokumentum automatikusan új oldalra tör.",
             "A GPS-only riport minden esetben külön letölthető, akkor is, ha taktikai anyagok is rendelkezésre állnak. Így ugyanabból a feltöltésből integrált Executive Summary és önálló GPS teljesítményriport is készül.",
             "A heti ciklusterv minden naphoz erőnléti fókuszt, taktikai fókuszt és rövid edzői megjegyzést rendel. Így a terv nemcsak azt mondja meg, mi legyen a cél, hanem azt is, hogyan és milyen terhelési logikával valósítsuk meg.",
