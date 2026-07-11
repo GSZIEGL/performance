@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V138_UX_METHOD_CENTER_2026_07_02"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V143_UNIVERSAL_GPS_METHOD_PDF_2026_07_11"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -1464,23 +1464,23 @@ _fpi_apply_v119_all_light_readable_patch()
 # Oszlopmapping
 # -----------------------------------------------------------------------------
 STANDARD_COLUMNS = {
-    "player_name": ["Játékos neve", "Player", "Player Name", "Name", "name", "Név", "Nev", "Játékos", "Jatekos", "Athlete", "Athlete Name", "Player full name", "Full Name"],
-    "session_type": ["Típus", "Type", "Session Type", "Edzés/Meccs", "SessionType", "Activity Type", "Drill Type", "Event Type", "Training/Match"],
-    "session_name": ["Szakasz neve", "Session", "Session Name", "Activity", "Drill", "Exercise", "Event", "Session title"],
-    "position": ["Poszt", "Position", "Player Position", "Role", "Playing Position", "Post", "Pos"],
-    "start_time": ["Kezdési idő", "Start Time", "Start", "Dátum", "Date", "Session Date", "Day", "Datum", "Kezdés", "Start date", "StartTime", "Split"],
+    "player_name": ["Játékos neve", "Player", "Player Name", "Name", "name", "Név", "Nev", "Játékos", "Jatekos", "Athlete", "Athlete Name", "athlete_name", "Player full name", "Full Name"],
+    "session_type": ["Típus", "Type", "Session Type", "Edzés/Meccs", "SessionType", "Activity Type", "Drill Type", "Event Type", "Training/Match", "Tags", "day_name"],
+    "session_name": ["Szakasz neve", "Session", "Session Name", "Activity", "Drill", "Exercise", "Event", "Session title", "Session Title", "activity_name", "Split Name"],
+    "position": ["Poszt", "Position", "Player Position", "Role", "Playing Position", "Post", "Pos", "position_name"],
+    "start_time": ["Kezdési idő", "Start Time", "Start", "Dátum", "Date", "Session Date", "Day", "Datum", "Kezdés", "Start date", "StartTime", "Split", "date", "start_time", "Split Start Time"],
     "end_time": ["Befejezési idő", "End Time", "End", "Finish", "Befejezés", "EndTime"],
-    "duration": ["Időtartam", "Duration", "Time", "Minutes", "Idő", "Időtartam [perc]", "Duration [min]", "Duration min"],
+    "duration": ["Időtartam", "Duration", "Time", "Minutes", "Idő", "Időtartam [perc]", "Duration [min]", "Duration min", "Duration (mm:ss)", "total_duration"],
     "match_minutes": ["Játékperc", "Játékpercek", "Meccsperc", "Meccspercek", "Minutes played", "Minutes Played", "Playing Time", "Match Minutes", "Match minutes", "Player minutes", "On pitch minutes"],
-    "total_distance": ["Teljes táv [m]", "Tel\xadjes táv [m]", "Total Distance", "Distance", "Össztáv", "Total distance (m)", "Total Dist", "Dist Total", "Distance [m]", "TD", "Total Distance m"],
-    "distance_per_min": ["Táv/perc [m/min]", "Distance/min", "Distance Per Min", "m/min", "Distance per minute", "m per min", "m/minute", "Rel Distance"],
-    "max_speed": ["Maximális sebesség [km/h]", "Max Speed", "Maximum Speed", "Top Speed", "Peak Speed", "Max Velocity", "Vmax"],
+    "total_distance": ["Teljes táv [m]", "Tel\xadjes táv [m]", "Total Distance", "Distance", "Össztáv", "Total distance (m)", "Total Dist", "Dist Total", "Distance [m]", "TD", "Total Distance m", "total_distance", "Distance (km)"],
+    "distance_per_min": ["Táv/perc [m/min]", "Distance/min", "Distance Per Min", "m/min", "Distance per minute", "m per min", "m/minute", "Rel Distance", "Distance Per Min (m/min)", "meterage_per_minute"],
+    "max_speed": ["Maximális sebesség [km/h]", "Max Speed", "Maximum Speed", "Top Speed", "Peak Speed", "Max Velocity", "Vmax", "Top Speed (km/h)", "max_vel"],
     "avg_speed": ["Átlagsebesség [km/h]", "Average Speed", "Avg Speed", "Mean Speed"],
     "sprints": ["Sprintek", "Sprints", "Sprint Count", "Number of Sprints", "Sprint #", "Sprint efforts", "Sprints count  ()", "Sprints count"],
     "speed_zone_3": ["Táv a sebesség célzónában 3 [m] (14.40 - 19.79 km/h)"],
-    "speed_zone_4": ["Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)", "Distance(4+5)  (m)", "Distance(4+5)", "Distance 4+5", "HSR Distance"],
-    "speed_zone_5": ["Táv a sebesség célzónában 5 [m] (25.00- km/h)", "Total sprints distance  (m)", "Total sprints distance", "Sprint distance", "Sprint Distance"],
-    "training_load": ["Edzési terhelési pontérték", "Terhelési pont", "Player Load", "Load", "Training Load", "Total Load", "Workload", "Load Score"],
+    "speed_zone_4": ["Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)", "Distance(4+5)  (m)", "Distance(4+5)", "Distance 4+5", "HSR Distance", "velocity2_band3_total_distance"],
+    "speed_zone_5": ["Táv a sebesség célzónában 5 [m] (25.00- km/h)", "Total sprints distance  (m)", "Total sprints distance", "Sprint distance", "Sprint Distance", "Sprint Distance (m)", "velocity2_band4_total_distance"],
+    "training_load": ["Edzési terhelési pontérték", "Terhelési pont", "Player Load", "Load", "Training Load", "Total Load", "Workload", "Load Score", "total_player_load", "HMLD"],
     "cardio_load": ["Kardióterhelés", "Cardio Load"],
     "recovery_hours": ["Regenerálódási idő [h]", "Recovery Time", "Recovery"],
     "muscle_load": ["Izomterhelés", "Muscle Load", "Muscular Load", "Mechanical Load"],
@@ -1489,10 +1489,10 @@ STANDARD_COLUMNS = {
     "hrv": ["HRV (RMSSD)", "HRV", "RMSSD", "HRV RMSSD"],
     "acc_low": ["Gyorsulások száma (2.00 - 2.49 m/s²)"],
     "acc_mid": ["Gyorsulások száma (2.50 - 2.99 m/s²)"],
-    "acc_high": ["Gyorsulások száma (3.00 - 50.00 m/s²)", "Total Accelerations  ()", "Total Accelerations", "Accelerations (2+3)  ()", "Accelerations (2+3)"],
+    "acc_high": ["Gyorsulások száma (3.00 - 50.00 m/s²)", "Total Accelerations  ()", "Total Accelerations", "Accelerations (2+3)  ()", "Accelerations (2+3)", "Accelerations", "gen2_acceleration_band3plus_total_effort_count"],
     "dec_low": ["Gyorsulások száma (-2.49 - -2.00 m/s²)"],
     "dec_mid": ["Gyorsulások száma (-2.99 - -2.50 m/s²)"],
-    "dec_high": ["Gyorsulások száma (-50.00 - -3.00 m/s²)", "Total Decelerations  ()", "Total Decelerations", "Decelerations (2+3)  ()", "Decelerations (2+3)"],
+    "dec_high": ["Gyorsulások száma (-50.00 - -3.00 m/s²)", "Total Decelerations  ()", "Total Decelerations", "Decelerations (2+3)  ()", "Decelerations (2+3)", "Decelerations"],
     "high_efforts": ["High Efforts", "High Effort", "High efforts", "Nagy intenzitású erőfeszítések", "Nagy intenzitású akciók", "Explosive Efforts", "Explosive efforts", "High Intensity Efforts", "HIE", "Efforts High", "HI Efforts"],
 }
 
@@ -7437,21 +7437,6 @@ def build_fpi_product_pdf_bytes(
     def add_executive_page():
         story.append(section("1. Vezetői oldal – heti meccs- és edzésterv", "#DBEAFE"))
 
-        if demo_label:
-            match_warnings = [_fpi_demo_week_check_text_v122()]
-            match_context_text = _fpi_demo_match_context_label_v122()
-        else:
-            match_ctx = _fpi_selected_match_context_v94()
-            match_warnings = _fpi_match_week_warning_v94(df, week, match_ctx.get("match_date"))
-            match_context_text = _fpi_match_context_label_v94()
-        ctx_rows = [[P("Meccskontextus", head), P("Hétellenőrzés", head)]]
-        ctx_rows.append([
-            P(match_context_text, small),
-            P("<br/>".join([pdf_safe_text(x) for x in match_warnings[:3]]) if match_warnings else "Hét és meccsnap összhangban.", small),
-        ])
-        story.append(table(ctx_rows, [10.0*cm, 17.7*cm], header_bg="#0F766E", row_bgs=[colors.HexColor("#F0FDFA")]))
-        story.append(Spacer(1, 0.18*cm))
-
         has_tactical_signal = _fpi_has_tactical_signal_v95(tactical_context)
         tactical_plan = tactical_context.get("plan_a", "KIE – kiegyensúlyozott") if has_tactical_signal else "GPS-only – erőnléti fókuszú mikrociklus"
         fitness_msgs = _fpi_top_fitness_messages_v82(ctx, priorities, readiness, 5 if not has_tactical_signal else 3)
@@ -7459,14 +7444,34 @@ def build_fpi_product_pdf_bytes(
         md_rows_simple = _fpi_md_plan_rows_v82(tactical_context, gps_context=ctx, readiness=readiness, priorities=priorities, week=week)
         risk_rows_simple = _fpi_compact_player_risk_rows_v82(risk_df, 12)
 
-        # 1) felső, nagyon gyors döntési sáv
-        fast_rows = [[P("Állapot", head), P("Meccsterv", head), P("Fő döntés", head)]]
+        # 1) felső döntési sáv: kizárólag taktikai lényeg
+        opp_eval_exec = (tactical_context or {}).get("opponent_player_evaluation", []) if isinstance(tactical_context, dict) else []
+        team_tactical_msgs = _fpi_team_level_tactical_messages_v143(tactical_context, tactical_msgs, 4)
+
+        tactical_findings_text = "<br/>".join(
+            [f"• {pdf_safe_text(_fpi_clean_sentence_v82(x, 145))}" for x in team_tactical_msgs[:3]]
+        ) or "• Nincs elegendő taktikai input; a riport GPS-only módban készült."
+
+        opponent_focus_lines = []
+        for row in opp_eval_exec[:3]:
+            name = pdf_safe_text(str(row.get("Játékos", "Ismeretlen játékos")))
+            role = pdf_safe_text(str(row.get("Szerep", "")))
+            eval_text = pdf_safe_text(_fpi_clean_sentence_v82(str(row.get("Értelmezés", "")), 105))
+            opponent_focus_lines.append(f"• <b>{name}</b> – {role}: {eval_text}")
+        opponent_focus_text = "<br/>".join(opponent_focus_lines) or "• Nincs ellenfél-játékos Excel vagy azonosítható játékosprofil."
+
+        match_plan_text = (
+            f"<b>{pdf_safe_text(tactical_plan)}</b><br/>"
+            f"• {pdf_safe_text(_fpi_clean_sentence_v82(_fpi_plan_why_v82(tactical_context, readiness, gps_context=ctx, priorities=priorities, week=week), 235))}"
+        )
+
+        fast_rows = [[P("Taktikai megállapítások", head), P("Ellenfél játékosok", head), P("Meccsterv", head)]]
         fast_rows.append([
-            P(f"Readiness: {readiness}/100 – {_fpi_readiness_short_v82(readiness)}. Risk: {high_risk} magas / {med_risk} közepes.", body),
-            P(f"{tactical_plan}\nMiért: {_fpi_plan_why_v82(tactical_context, readiness, gps_context=ctx, priorities=priorities, week=week)}", body),
-            P("A hét célja: a rendelkezésre álló input alapján használható mikrociklus. GPS-only esetben az erőnléti fókusz, readiness, HSR/sprint/High Effort és játékoskockázat vezeti a tervet.", body),
+            P(tactical_findings_text, body),
+            P(opponent_focus_text, body),
+            P(match_plan_text, body),
         ])
-        story.append(table(fast_rows, [8.8*cm, 10.0*cm, 8.9*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF")]))
+        story.append(table(fast_rows, [9.2*cm, 9.2*cm, 9.3*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF")]))
         story.append(Spacer(1, 0.18*cm))
 
         # 2) mikrociklus legyen a szív
@@ -7477,19 +7482,19 @@ def build_fpi_product_pdf_bytes(
         story.append(table(md_table, [3.2*cm, 11.5*cm, 13.0*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
         story.append(Spacer(1, 0.18*cm))
 
-        # 3) fő edzői üzenetek, tömören, két oszlopban
+        # 3) fő edzői üzenetek: külön erőnléti és valódi csapatszintű taktikai blokk
         story.append(section("Fő edzői üzenetek", "#DCFCE7"))
-        msg_rows = [[P("Erőnléti üzenet", head), P("Taktikai üzenet", head)]]
-        max_len = max(len(fitness_msgs), len(tactical_msgs), 3)
+        team_tactical_msgs = _fpi_team_level_tactical_messages_v143(tactical_context, tactical_msgs, 5)
+        msg_rows = [[P("Erőnléti üzenet", head), P("Csapatszintű taktikai üzenet", head)]]
+        max_len = max(len(fitness_msgs), len(team_tactical_msgs), 3)
         for i in range(max_len):
             fm = fitness_msgs[i] if i < len(fitness_msgs) else ""
-            tm = tactical_msgs[i] if i < len(tactical_msgs) else ""
+            tm = team_tactical_msgs[i] if i < len(team_tactical_msgs) else ""
             msg_rows.append([P(_fpi_clean_sentence_v82(fm, 150), small), P(_fpi_clean_sentence_v82(tm, 150), small)])
         story.append(table(msg_rows, [13.8*cm, 13.9*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
         story.append(Spacer(1, 0.18*cm))
 
         # 3/b) ellenfél játékosszintű értékelés – ha van taktikai/játékos input vagy minta context
-        opp_eval_exec = (tactical_context or {}).get("opponent_player_evaluation", []) if isinstance(tactical_context, dict) else []
         if opp_eval_exec:
             story.append(section("Ellenfél játékosszintű fókusz – kulcsemberek és támadható pontok", "#FEE2E2"))
             op_rows = [[P("Játékos", head), P("Szerep", head), P("Mutató + referencia", head), P("Értékelés", head), P("Meccstervi teendő", head)]]
@@ -9586,22 +9591,25 @@ def render_fpi_landing_page_v100() -> None:
         """, unsafe_allow_html=True)
 
     st.markdown('<div class="fpi-v137-section-title">Minta riportok</div>', unsafe_allow_html=True)
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3, m4, m5 = st.columns(5)
     try:
         sample_exec = build_fpi_sample_pdf_bytes("executive")
         sample_full = build_fpi_sample_pdf_bytes("full")
         sample_gps = build_fpi_gps_only_sample_pdf_bytes()
         sample_own = build_fpi_own_team_profile_sample_pdf_bytes() if "build_fpi_own_team_profile_sample_pdf_bytes" in globals() else None
+        sample_method = build_fpi_methodology_pdf_bytes_v143() if "build_fpi_methodology_pdf_bytes_v143" in globals() else None
     except Exception:
-        sample_exec = sample_full = sample_gps = sample_own = None
+        sample_exec = sample_full = sample_gps = sample_own = sample_method = None
     with m1:
-        if sample_exec: st.download_button("⬇️ Executive minta", sample_exec, "fpi_minta_executive_summary.pdf", "application/pdf", use_container_width=True, key="sample_exec_v137")
+        if sample_exec: st.download_button("⬇️ Executive", sample_exec, "fpi_minta_executive_summary.pdf", "application/pdf", use_container_width=True, key="sample_exec_v143")
     with m2:
-        if sample_gps: st.download_button("⬇️ GPS-only minta", sample_gps, "fpi_minta_gps_only_report.pdf", "application/pdf", use_container_width=True, key="sample_gps_v137")
+        if sample_gps: st.download_button("⬇️ GPS-only", sample_gps, "fpi_minta_gps_only_report.pdf", "application/pdf", use_container_width=True, key="sample_gps_v143")
     with m3:
-        if sample_own: st.download_button("⬇️ Saját csapat minta", sample_own, "fpi_minta_sajat_csapat_profil.pdf", "application/pdf", use_container_width=True, key="sample_own_v137")
+        if sample_own: st.download_button("⬇️ Saját csapat", sample_own, "fpi_minta_sajat_csapat_profil.pdf", "application/pdf", use_container_width=True, key="sample_own_v143")
     with m4:
-        if sample_full: st.download_button("⬇️ Full report minta", sample_full, "fpi_minta_full_report.pdf", "application/pdf", use_container_width=True, key="sample_full_v137")
+        if sample_full: st.download_button("⬇️ Full report", sample_full, "fpi_minta_full_report.pdf", "application/pdf", use_container_width=True, key="sample_full_v143")
+    with m5:
+        if sample_method: st.download_button("⬇️ Metodika", sample_method, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="sample_method_v143")
 
 
 
@@ -10062,55 +10070,123 @@ def render_fpi_clean_workspace_v101() -> None:
     )
 
     # 1. GPS import
-    _fpi_section_header_v113("1. GPS import", "Egy nagy GPS export, CSV vagy ZIP-ben több edzésfájl. A ZIP-ben lévő fájlokra ugyanaz a Smart Mapper logika fut.", "gps")
-    up1, up2 = st.columns([2.4, 1])
-    with up1:
-        uploaded_clean = st.file_uploader("GPS / terhelési Excel, CSV vagy ZIP", type=["xlsx", "xls", "csv", "zip"], key="clean_gps_upload_v137")
-        st.caption("ZIP mód: több tíz/száz edzés külön fájlként is feltölthető. A hibás fájl nem állítja meg az egész importot.")
-    with up2:
-        use_demo_clean = st.toggle("Mintaadat használata", value=uploaded_clean is None, key="clean_use_demo_v137")
-        template_bytes_clean = create_sample_input_template_bytes()
-        if template_bytes_clean is not None:
-            st.download_button("⬇️ Excel sablon", data=template_bytes_clean, file_name="performance_input_sablon.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="clean_template_download_v137")
+    _fpi_section_header_v113(
+        "1. GPS import",
+        "Brainsports, PlayerTek, Polar Team Pro, Catapult és egyéb Excel/CSV exportok. Egy fájl, több fájl vagy ZIP is használható.",
+        "gps",
+    )
+
+    provider_choice_v143 = st.selectbox(
+        "GPS rendszer",
+        FPI_SUPPORTED_GPS_PROVIDERS_V143,
+        index=0,
+        key="clean_provider_v143",
+        help="Automatikus módban az FPI a fejléc és a fájlszerkezet alapján azonosítja a rendszert.",
+    )
+
+    with st.expander("📥 GPS fájlok feltöltése", expanded=True):
+        st.caption(
+            "A fájlok tartalmazhatnak egyetlen edzést/meccset vagy teljes időszakot. "
+            "Több Excel/CSV egyszerre is kijelölhető, illetve ZIP-ben több tíz vagy száz fájl is feltölthető."
+        )
+        gps_a, gps_b, gps_c = st.columns(3)
+        with gps_a:
+            training_uploads_v143 = st.file_uploader(
+                "Edzésfájlok",
+                type=["xlsx", "xls", "xlsm", "csv", "zip"],
+                accept_multiple_files=True,
+                key="clean_training_uploads_v143",
+                help="Az itt feltöltött fájlok sorai automatikusan Edzés típusúak lesznek.",
+            )
+        with gps_b:
+            match_uploads_v143 = st.file_uploader(
+                "Meccsfájlok",
+                type=["xlsx", "xls", "xlsm", "csv", "zip"],
+                accept_multiple_files=True,
+                key="clean_match_uploads_v143",
+                help="Az itt feltöltött fájlok sorai automatikusan Meccs típusúak lesznek.",
+            )
+        with gps_c:
+            mixed_uploads_v143 = st.file_uploader(
+                "Vegyes / teljes időszak",
+                type=["xlsx", "xls", "xlsm", "csv", "zip"],
+                accept_multiple_files=True,
+                key="clean_mixed_uploads_v143",
+                help="Olyan export, amelyben edzések és meccsek együtt szerepelnek, vagy a fájl maga tartalmazza a típust.",
+            )
+
+        demo_col, template_col = st.columns([1, 1.4])
+        with demo_col:
+            no_real_upload_v143 = not (training_uploads_v143 or match_uploads_v143 or mixed_uploads_v143)
+            use_demo_clean = st.toggle(
+                "Mintaadat használata",
+                value=no_real_upload_v143,
+                key="clean_use_demo_v143",
+            )
+        with template_col:
+            template_bytes_clean = create_sample_input_template_bytes()
+            if template_bytes_clean is not None:
+                st.download_button(
+                    "⬇️ Általános Excel sablon",
+                    data=template_bytes_clean,
+                    file_name="performance_input_sablon.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="clean_template_download_v143",
+                )
 
     raw_df_clean = None
     selected_sheet_clean = "Mintaadat"
-    if uploaded_clean is None and not use_demo_clean:
-        st.info("Tölts fel GPS fájlt, vagy kapcsold be a mintaadatot.")
+    has_any_upload_v143 = bool(training_uploads_v143 or match_uploads_v143 or mixed_uploads_v143)
+
+    if not has_any_upload_v143 and not use_demo_clean:
+        st.info("Tölts fel legalább egy GPS fájlt, vagy kapcsold be a mintaadatot.")
         st.stop()
 
-    if use_demo_clean and uploaded_clean is None:
+    if use_demo_clean and not has_any_upload_v143:
         raw_df_clean = build_demo_performance_data()
     else:
         try:
-            try:
-                _clean_sig = hashlib.md5(uploaded_clean.getvalue()).hexdigest()
-                if st.session_state.get("clean_active_upload_signature_v105") != _clean_sig:
-                    st.session_state.pop("clean_mapped_df_override_v105", None)
-                    st.session_state.pop("clean_manual_mapping_v105", None)
-                    st.session_state["clean_active_upload_signature_v105"] = _clean_sig
-            except Exception:
-                pass
-            gps_raw_sheets_v136, gps_report_v136, _clean_sig_v136, is_zip_v136 = _fpi_read_gps_upload_to_sheets_v136(uploaded_clean)
-            try:
-                if st.session_state.get("clean_active_upload_signature_v105") != _clean_sig_v136:
-                    st.session_state.pop("clean_mapped_df_override_v105", None)
-                    st.session_state.pop("clean_manual_mapping_v105", None)
-                    st.session_state["clean_active_upload_signature_v105"] = _clean_sig_v136
-            except Exception:
-                pass
-            with st.expander("📦 Feltöltött fájlok ellenőrzése", expanded=False):
-                _fpi_render_gps_import_report_v136(gps_report_v136, is_zip_v136)
-            if not gps_raw_sheets_v136:
-                st.error("Nem sikerült értelmezhető GPS adatlapot beolvasni. Ellenőrizd a fájlt vagy a ZIP tartalmát.")
+            gps_raw_sheets_v143, gps_report_v143, clean_sig_v143 = _fpi_read_many_gps_files_v143(
+                training_uploads_v143,
+                match_uploads_v143,
+                mixed_uploads_v143,
+                provider_choice_v143,
+            )
+            if st.session_state.get("clean_active_upload_signature_v105") != clean_sig_v143:
+                st.session_state.pop("clean_mapped_df_override_v105", None)
+                st.session_state.pop("clean_manual_mapping_v105", None)
+                st.session_state["clean_active_upload_signature_v105"] = clean_sig_v143
+
+            with st.expander("📦 Importellenőrzés", expanded=False):
+                if gps_report_v143 is not None and not gps_report_v143.empty:
+                    st.dataframe(gps_report_v143, use_container_width=True, hide_index=True)
+                    ok_count = int((gps_report_v143["Státusz"] == "OK").sum()) if "Státusz" in gps_report_v143.columns else 0
+                    mapper_count = int((gps_report_v143["Státusz"] == "MAPPER").sum()) if "Státusz" in gps_report_v143.columns else 0
+                    error_count = int((gps_report_v143["Státusz"] == "HIBA").sum()) if "Státusz" in gps_report_v143.columns else 0
+                    st.caption(f"Automatikus: {ok_count} | Smart Mapper: {mapper_count} | Hiba: {error_count}")
+
+            if not gps_raw_sheets_v143:
+                st.error("Nem sikerült értelmezhető GPS adatot beolvasni.")
                 st.stop()
-            sheets_clean = prepare_uploaded_sheets(gps_raw_sheets_v136)
+
+            sheets_clean = prepare_uploaded_sheets(gps_raw_sheets_v143)
             sheet_names_clean = list(sheets_clean.keys())
-            default_sheet_idx_v136 = sheet_names_clean.index("Összes releváns adatlap") if "Összes releváns adatlap" in sheet_names_clean else 0
-            selected_sheet_clean = st.selectbox("Munkalap / összesített ZIP adat", sheet_names_clean, index=default_sheet_idx_v136, key="clean_sheet_select_v137")
+            preferred_names = ["Összes releváns adatlap", "Data", "Összegzés"]
+            default_sheet_idx_v143 = 0
+            for preferred in preferred_names:
+                if preferred in sheet_names_clean:
+                    default_sheet_idx_v143 = sheet_names_clean.index(preferred)
+                    break
+            selected_sheet_clean = st.selectbox(
+                "Feldolgozott adatforrás",
+                sheet_names_clean,
+                index=default_sheet_idx_v143,
+                key="clean_sheet_select_v143",
+            )
             raw_df_clean = sheets_clean[selected_sheet_clean]
-        except Exception as e:
-            st.error(f"Nem sikerült beolvasni az adatot: {e}")
+        except Exception as exc:
+            st.error(f"Nem sikerült beolvasni a GPS adatokat: {exc}")
             st.stop()
 
     # Standardizálás + mapper alapból csukva
@@ -10327,6 +10403,17 @@ def render_fpi_clean_workspace_v101() -> None:
         full_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="full", tactical_context=clean_tactical_context)
         if full_pdf_clean is not None:
             st.download_button("⬇️ Full Report PDF", data=full_pdf_clean, file_name=f"fpi_full_report_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_full_v137")
+
+    method_pdf_clean_v143 = build_fpi_methodology_pdf_bytes_v143()
+    if method_pdf_clean_v143 is not None:
+        st.download_button(
+            "⬇️ Metodika PDF",
+            data=method_pdf_clean_v143,
+            file_name="fpi_metodika.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="clean_export_method_v143",
+        )
 
 
 # =========================================================
@@ -10775,6 +10862,814 @@ def render_fpi_methodology_center_v138() -> None:
         Az FPI nem diagnózis, nem orvosi döntés és nem garantált sérülés-előrejelzés.
         A számok döntéstámogató jelzések, amelyeket edzői megfigyeléssel, orvosi információval, wellness/RPE adattal és szakmai kontextussal együtt érdemes értelmezni.
         """)
+
+
+# =========================================================
+# V143 - Universal GPS import engine
+# Brainsports / PlayerTek / Polar / Catapult + generic mapper
+# =========================================================
+FPI_SUPPORTED_GPS_PROVIDERS_V143 = [
+    "Automatikus felismerés",
+    "Brainsports",
+    "PlayerTek",
+    "Polar Team Pro",
+    "Catapult",
+    "Egyéb / Smart Mapper",
+]
+
+
+def _fpi_bytes_from_upload_v143(uploaded_file) -> bytes:
+    if uploaded_file is None:
+        return b""
+    try:
+        return uploaded_file.getvalue()
+    except Exception:
+        try:
+            return uploaded_file.read()
+        except Exception:
+            return b""
+
+
+def _fpi_read_csv_bytes_v143(data: bytes, name: str = "") -> pd.DataFrame:
+    last_err = None
+    for enc in ["utf-8-sig", "utf-8", "cp1250", "latin2", "iso-8859-2", "cp1252"]:
+        try:
+            return pd.read_csv(io.BytesIO(data), sep=None, engine="python", encoding=enc, header=None)
+        except Exception as exc:
+            last_err = exc
+    raise ValueError(f"CSV beolvasási hiba ({name}): {last_err}")
+
+
+def _fpi_excel_serial_to_datetime_v143(value):
+    try:
+        if pd.isna(value):
+            return pd.NaT
+    except Exception:
+        pass
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return pd.to_datetime(value, errors="coerce")
+    try:
+        num = float(value)
+        if 20000 <= num <= 80000:
+            return pd.Timestamp("1899-12-30") + pd.to_timedelta(num, unit="D")
+    except Exception:
+        pass
+    return pd.to_datetime(value, errors="coerce", dayfirst=True)
+
+
+def _fpi_clean_headers_v143(values) -> List[str]:
+    result = []
+    used = {}
+    for idx, value in enumerate(list(values)):
+        text = clean_col_name(value)
+        if not text or str(text).lower() in {"nan", "none"}:
+            text = f"Unnamed_{idx+1}"
+        base = text
+        used[base] = used.get(base, 0) + 1
+        if used[base] > 1:
+            text = f"{base}_{used[base]}"
+        result.append(text)
+    return result
+
+
+def _fpi_find_header_row_v143(raw: pd.DataFrame, required_terms: List[str], max_scan: int = 40) -> Optional[int]:
+    if raw is None or raw.empty:
+        return None
+    required = [str(x).lower() for x in required_terms]
+    best_idx, best_score = None, -1
+    for idx in range(min(max_scan, len(raw))):
+        vals = [str(x).strip().lower() for x in raw.iloc[idx].tolist() if str(x).strip().lower() not in {"", "nan", "none"}]
+        joined = " | ".join(vals)
+        score = sum(1 for term in required if term in joined)
+        if score > best_score:
+            best_idx, best_score = idx, score
+    return best_idx if best_score >= max(1, min(2, len(required))) else None
+
+
+def _fpi_table_from_raw_v143(raw: pd.DataFrame, header_idx: int, stop_markers: Optional[List[str]] = None) -> pd.DataFrame:
+    if raw is None or raw.empty or header_idx is None or header_idx >= len(raw):
+        return pd.DataFrame()
+    headers = _fpi_clean_headers_v143(raw.iloc[header_idx].tolist())
+    data = raw.iloc[header_idx + 1 :].copy()
+    data.columns = headers
+    data = data.dropna(how="all")
+    if stop_markers:
+        stop_terms = [str(x).lower() for x in stop_markers]
+        keep_rows = []
+        for _, row in data.iterrows():
+            row_text = " | ".join(str(x).strip().lower() for x in row.tolist() if str(x).strip().lower() not in {"", "nan", "none"})
+            if any(marker in row_text for marker in stop_terms):
+                break
+            keep_rows.append(row)
+        data = pd.DataFrame(keep_rows, columns=headers) if keep_rows else pd.DataFrame(columns=headers)
+    return data.reset_index(drop=True)
+
+
+def _fpi_detect_provider_v143(sheets: Dict[str, pd.DataFrame], file_name: str = "") -> str:
+    name = str(file_name).lower()
+    sheet_names = " ".join(str(x).lower() for x in sheets.keys())
+    sample_text = ""
+    for frame in list(sheets.values())[:4]:
+        try:
+            sample_text += " " + " ".join(str(x).lower() for x in frame.head(8).fillna("").astype(str).values.ravel().tolist())
+        except Exception:
+            pass
+
+    if "playertek" in name or "playerteck" in name or all(x in sample_text for x in ["player name", "player load", "distance (km)"]):
+        return "PlayerTek"
+    if "brainsport" in name or "targets summary" in sample_text or "heart exertion" in sample_text or "main table" in sheet_names:
+        return "Brainsports"
+    if "polar" in name or "edzési terhelési pontérték" in sample_text or "kardióterhelés" in sample_text:
+        return "Polar Team Pro"
+    if "catapult" in name or all(x in sample_text for x in ["athlete_name", "activity_name", "total_player_load"]):
+        return "Catapult"
+    return "Egyéb / Smart Mapper"
+
+
+def _fpi_session_type_from_hint_v143(series: pd.Series, forced_type: Optional[str], file_name: str = "") -> pd.Series:
+    if forced_type in {"Edzés", "Meccs"}:
+        return pd.Series([forced_type] * len(series), index=series.index)
+    hint = str(file_name).lower()
+    if any(x in hint for x in ["match", "game", "meccs"]):
+        default = "Meccs"
+    elif any(x in hint for x in ["training", "train", "edzes", "edzés"]):
+        default = "Edzés"
+    else:
+        default = "Edzés"
+    if series is None:
+        return pd.Series(dtype="object")
+    out = series.astype(str).apply(normalize_session_type)
+    out = out.where(out.isin(["Edzés", "Meccs"]), default)
+    return out
+
+
+def _fpi_prepare_brainsports_v143(
+    sheets: Dict[str, pd.DataFrame],
+    forced_type: Optional[str],
+    file_name: str,
+) -> pd.DataFrame:
+    candidates = []
+    for sheet_name, raw in sheets.items():
+        low_name = str(sheet_name).lower()
+        if low_name.startswith("ts ") or low_name.startswith("ti "):
+            continue
+        header_idx = _fpi_find_header_row_v143(raw, ["name", "total distance", "duration"])
+        if header_idx is None:
+            continue
+        table = _fpi_table_from_raw_v143(
+            raw,
+            header_idx,
+            stop_markers=["targets summary", "targeted values", "targets intensity"],
+        )
+        if table.empty:
+            continue
+        cols_norm = {clean_col_name(c).lower(): c for c in table.columns}
+        if not any("total distance" in k for k in cols_norm):
+            continue
+        candidates.append((sheet_name, table))
+
+    if not candidates:
+        return pd.DataFrame()
+
+    # Prefer the aggregate "Main table..." sheet. Player-specific tabs duplicate rows.
+    aggregate = [item for item in candidates if str(item[0]).lower().startswith("main table")]
+    selected = aggregate[:1] if aggregate else candidates[:1]
+    table = selected[0][1].copy()
+
+    def col_like(*needles):
+        for c in table.columns:
+            lc = clean_col_name(c).lower()
+            if all(n.lower() in lc for n in needles):
+                return c
+        return None
+
+    out = pd.DataFrame()
+    c_name = col_like("name")
+    c_split = col_like("split")
+    c_start = col_like("start")
+    c_duration = col_like("duration")
+    c_dist = col_like("total distance")
+    c_sprint_dist = col_like("total sprints distance")
+    c_sprints = col_like("sprints count")
+    c_hsr = col_like("distance(4+5)")
+    c_top = col_like("top speed")
+    c_he = col_like("high efforts")
+    c_hmld = col_like("hmld")
+    c_acc = col_like("total accelerations")
+    c_dec = col_like("total decelerations")
+    c_hr = col_like("heart exertion")
+
+    if c_name is None or c_start is None:
+        return pd.DataFrame()
+
+    out["Player Name"] = table[c_name]
+    out["Session Type"] = _fpi_session_type_from_hint_v143(
+        table[c_split] if c_split else pd.Series([""] * len(table)),
+        forced_type,
+        file_name,
+    )
+    out["Session Name"] = table[c_split] if c_split else Path(file_name).stem
+    out["Start Time"] = table[c_start].apply(_fpi_excel_serial_to_datetime_v143)
+    if c_duration:
+        out["Duration"] = table[c_duration]
+    if c_dist:
+        out["Total Distance"] = table[c_dist]
+    if c_sprint_dist:
+        out["Sprint Distance"] = table[c_sprint_dist]
+    if c_sprints:
+        out["Sprints"] = table[c_sprints]
+    if c_hsr:
+        # Brainsports Distance(4+5) already combines HSR + sprint.
+        out["HSR Distance"] = table[c_hsr]
+    if c_top:
+        top_speed = pd.to_numeric(table[c_top], errors="coerce")
+        out["Top Speed"] = top_speed.where(top_speed > 15, top_speed * 3.6)
+    if c_he:
+        out["High Efforts"] = table[c_he]
+    if c_hmld:
+        out["HMLD"] = table[c_hmld]
+        out["Player Load"] = table[c_hmld]
+    if c_acc:
+        out["Total Accelerations"] = table[c_acc]
+    if c_dec:
+        out["Total Decelerations"] = table[c_dec]
+    if c_hr:
+        out["Heart Exertion"] = table[c_hr]
+    return out.dropna(how="all").reset_index(drop=True)
+
+
+def _fpi_prepare_playertek_v143(
+    raw: pd.DataFrame,
+    forced_type: Optional[str],
+    file_name: str,
+) -> pd.DataFrame:
+    header_idx = _fpi_find_header_row_v143(raw, ["player name", "distance", "player load"])
+    if header_idx is None:
+        return pd.DataFrame()
+    table = _fpi_table_from_raw_v143(raw, header_idx)
+    if table.empty:
+        return table
+
+    def pick(*names):
+        norm = {clean_col_name(c).lower(): c for c in table.columns}
+        for name in names:
+            n = clean_col_name(name).lower()
+            if n in norm:
+                return norm[n]
+        for c in table.columns:
+            lc = clean_col_name(c).lower()
+            if any(clean_col_name(n).lower() in lc for n in names):
+                return c
+        return None
+
+    out = pd.DataFrame()
+    c_name = pick("Player Name")
+    c_date = pick("Date")
+    c_title = pick("Session Title")
+    c_tags = pick("Tags")
+    c_duration = pick("Duration")
+    c_dist = pick("Distance (km)")
+    c_sprints = pick("Sprints")
+    c_sprint_dist = pick("Sprint Distance (m)")
+    c_acc = pick("Accelerations")
+    c_dec = pick("Decelerations")
+    c_load = pick("Player Load")
+    c_speed = pick("Top Speed (km/h)")
+    c_dpm = pick("Distance Per Min (m/min)")
+    if c_name is None or c_date is None:
+        return pd.DataFrame()
+
+    out["Player Name"] = table[c_name]
+    hint_series = table[c_tags] if c_tags else pd.Series([""] * len(table))
+    out["Session Type"] = _fpi_session_type_from_hint_v143(hint_series, forced_type, file_name)
+    out["Session Name"] = table[c_title] if c_title else Path(file_name).stem
+    out["Start Time"] = table[c_date].apply(_fpi_excel_serial_to_datetime_v143)
+    if c_duration:
+        # PlayerTek duration is seconds in the supplied export.
+        out["Duration"] = pd.to_numeric(table[c_duration], errors="coerce") / 60.0
+    if c_dist:
+        out["Total Distance"] = pd.to_numeric(table[c_dist], errors="coerce") * 1000.0
+    if c_sprints:
+        out["Sprints"] = table[c_sprints]
+    if c_sprint_dist:
+        out["Sprint Distance"] = table[c_sprint_dist]
+    if c_acc:
+        out["Total Accelerations"] = table[c_acc]
+    if c_dec:
+        out["Total Decelerations"] = table[c_dec]
+    if c_load:
+        out["Player Load"] = table[c_load]
+    if c_speed:
+        out["Top Speed"] = table[c_speed]
+    if c_dpm:
+        out["Distance Per Min"] = table[c_dpm]
+    return out.dropna(how="all").reset_index(drop=True)
+
+
+def _fpi_prepare_polar_v143(
+    sheets: Dict[str, pd.DataFrame],
+    forced_type: Optional[str],
+    file_name: str,
+) -> pd.DataFrame:
+    chosen = None
+    for sheet_name, raw in sheets.items():
+        header_idx = _fpi_find_header_row_v143(raw, ["játékos neve", "teljes táv", "kezdési idő"])
+        if header_idx is not None:
+            chosen = _fpi_table_from_raw_v143(raw, header_idx)
+            if not chosen.empty:
+                break
+    if chosen is None or chosen.empty:
+        return pd.DataFrame()
+    # Existing aliases already understand Polar Hungarian headings.
+    # Only force Training/Match when the user used the separated uploader.
+    type_col = None
+    for c in chosen.columns:
+        if clean_col_name(c).lower() in {"típus", "tipus", "type"}:
+            type_col = c
+            break
+    if forced_type in {"Edzés", "Meccs"}:
+        if type_col:
+            chosen[type_col] = forced_type
+        else:
+            chosen["Típus"] = forced_type
+    return chosen.reset_index(drop=True)
+
+
+def _fpi_prepare_catapult_v143(
+    sheets: Dict[str, pd.DataFrame],
+    forced_type: Optional[str],
+    file_name: str,
+) -> pd.DataFrame:
+    raw_table = None
+    for _, raw in sheets.items():
+        header_idx = _fpi_find_header_row_v143(raw, ["athlete_name", "activity_name", "total_distance"])
+        if header_idx is not None:
+            raw_table = _fpi_table_from_raw_v143(raw, header_idx)
+            if not raw_table.empty:
+                break
+    if raw_table is None or raw_table.empty:
+        return pd.DataFrame()
+
+    table = raw_table.copy()
+    table.columns = [clean_col_name(c) for c in table.columns]
+    lookup = {c.lower(): c for c in table.columns}
+
+    def c(name):
+        return lookup.get(clean_col_name(name).lower())
+
+    athlete = c("athlete_name")
+    activity = c("activity_name")
+    date_col = c("date")
+    if athlete is None or activity is None or date_col is None:
+        return pd.DataFrame()
+
+    numeric_names = [
+        "total_duration", "total_distance", "velocity2_band3_total_distance",
+        "velocity2_band4_total_distance", "velocity2_band3_total_effort_count",
+        "velocity2_band4_total_effort_count", "max_vel", "hsr_efforts",
+        "gen2_acceleration_band6plus_total_effort_count",
+        "gen2_acceleration_band3plus_total_effort_count",
+        "total_player_load", "mean_heart_rate", "max_heart_rate",
+    ]
+    for name in numeric_names:
+        col = c(name)
+        if col:
+            table[col] = pd.to_numeric(table[col], errors="coerce")
+
+    group_cols = [athlete, activity, date_col]
+    pos_col = c("position_name")
+    day_col = c("day_name")
+    if pos_col:
+        group_cols.append(pos_col)
+    if day_col:
+        group_cols.append(day_col)
+
+    agg = {}
+    for name in [
+        "total_duration", "total_distance", "velocity2_band3_total_distance",
+        "velocity2_band4_total_distance", "velocity2_band3_total_effort_count",
+        "velocity2_band4_total_effort_count", "hsr_efforts",
+        "gen2_acceleration_band6plus_total_effort_count",
+        "gen2_acceleration_band3plus_total_effort_count",
+        "total_player_load",
+    ]:
+        col = c(name)
+        if col:
+            agg[col] = "sum"
+    for name in ["max_vel", "max_heart_rate"]:
+        col = c(name)
+        if col:
+            agg[col] = "max"
+    mean_hr = c("mean_heart_rate")
+    if mean_hr:
+        agg[mean_hr] = "mean"
+
+    grouped = table.groupby(group_cols, dropna=False).agg(agg).reset_index()
+    out = pd.DataFrame()
+    out["Player Name"] = grouped[athlete]
+    out["Session Name"] = grouped[activity]
+    if forced_type in {"Edzés", "Meccs"}:
+        out["Session Type"] = forced_type
+    else:
+        hint = grouped[day_col] if day_col and day_col in grouped.columns else grouped[activity]
+        out["Session Type"] = hint.astype(str).apply(normalize_session_type)
+        inferred = grouped[activity].astype(str).str.lower().str.contains("match|game|meccs", regex=True)
+        out.loc[inferred, "Session Type"] = "Meccs"
+        out.loc[~inferred & ~out["Session Type"].isin(["Edzés", "Meccs"]), "Session Type"] = "Edzés"
+    out["Start Time"] = grouped[date_col].apply(_fpi_excel_serial_to_datetime_v143)
+    if pos_col and pos_col in grouped:
+        out["Position"] = grouped[pos_col]
+    col = c("total_duration")
+    if col and col in grouped:
+        out["Duration"] = grouped[col] / 60.0
+    col = c("total_distance")
+    if col and col in grouped:
+        out["Total Distance"] = grouped[col]
+    v3 = c("velocity2_band3_total_distance")
+    v4 = c("velocity2_band4_total_distance")
+    if v3 and v3 in grouped:
+        out["HSR Distance"] = grouped[v3]
+    if v4 and v4 in grouped:
+        out["Sprint Distance"] = grouped[v4]
+    e3 = c("velocity2_band3_total_effort_count")
+    e4 = c("velocity2_band4_total_effort_count")
+    if e4 and e4 in grouped:
+        out["Sprints"] = grouped[e4]
+    elif e3 and e3 in grouped:
+        out["Sprints"] = grouped[e3]
+    max_vel = c("max_vel")
+    if max_vel and max_vel in grouped:
+        out["Top Speed"] = grouped[max_vel] * 3.6
+    he = c("hsr_efforts")
+    if he and he in grouped:
+        out["High Efforts"] = grouped[he]
+    acc = c("gen2_acceleration_band3plus_total_effort_count")
+    if acc and acc in grouped:
+        out["Total Accelerations"] = grouped[acc]
+    load = c("total_player_load")
+    if load and load in grouped:
+        out["Player Load"] = grouped[load]
+    hr_avg = c("mean_heart_rate")
+    hr_max = c("max_heart_rate")
+    if hr_avg and hr_avg in grouped:
+        out["Average HR"] = grouped[hr_avg]
+    if hr_max and hr_max in grouped:
+        out["Max HR"] = grouped[hr_max]
+    return out.reset_index(drop=True)
+
+
+def _fpi_read_single_gps_file_v143(
+    uploaded_file,
+    forced_type: Optional[str] = None,
+    provider_override: str = "Automatikus felismerés",
+) -> Tuple[Dict[str, pd.DataFrame], List[Dict[str, object]]]:
+    name = str(getattr(uploaded_file, "name", "gps_file"))
+    data = _fpi_bytes_from_upload_v143(uploaded_file)
+    ext = Path(name).suffix.lower()
+    report = []
+    if not data:
+        return {}, [{"Fájl": name, "Státusz": "HIBA", "Rendszer": "", "Sorok": 0, "Megjegyzés": "Üres fájl"}]
+
+    if ext == ".zip":
+        sheets = {}
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                for member in zf.namelist():
+                    if member.endswith("/") or member.startswith("__MACOSX/"):
+                        continue
+                    m_ext = Path(member).suffix.lower()
+                    if m_ext not in {".xlsx", ".xls", ".xlsm", ".csv"}:
+                        continue
+                    member_bytes = zf.read(member)
+                    pseudo = type("FPIUpload", (), {
+                        "name": Path(member).name,
+                        "getvalue": lambda self, b=member_bytes: b,
+                    })()
+                    inner_sheets, inner_report = _fpi_read_single_gps_file_v143(
+                        pseudo,
+                        forced_type=forced_type,
+                        provider_override=provider_override,
+                    )
+                    for key, frame in inner_sheets.items():
+                        sheets[f"{Path(member).stem}__{key}"] = frame
+                    for row in inner_report:
+                        row["Fájl"] = member
+                        report.append(row)
+            return sheets, report
+        except Exception as exc:
+            return {}, [{"Fájl": name, "Státusz": "HIBA", "Rendszer": "", "Sorok": 0, "Megjegyzés": str(exc)}]
+
+    try:
+        if ext == ".csv":
+            raw_sheets = {"CSV": _fpi_read_csv_bytes_v143(data, name)}
+        elif ext in {".xlsx", ".xlsm", ".xls"}:
+            raw_sheets = pd.read_excel(io.BytesIO(data), sheet_name=None, header=None)
+        else:
+            return {}, [{"Fájl": name, "Státusz": "KIHAGYVA", "Rendszer": "", "Sorok": 0, "Megjegyzés": "Nem támogatott kiterjesztés"}]
+
+        provider = provider_override if provider_override != "Automatikus felismerés" else _fpi_detect_provider_v143(raw_sheets, name)
+        prepared = pd.DataFrame()
+        if provider == "Brainsports":
+            prepared = _fpi_prepare_brainsports_v143(raw_sheets, forced_type, name)
+        elif provider == "PlayerTek":
+            raw = next(iter(raw_sheets.values()), pd.DataFrame())
+            prepared = _fpi_prepare_playertek_v143(raw, forced_type, name)
+        elif provider == "Polar Team Pro":
+            prepared = _fpi_prepare_polar_v143(raw_sheets, forced_type, name)
+        elif provider == "Catapult":
+            prepared = _fpi_prepare_catapult_v143(raw_sheets, forced_type, name)
+
+        if not prepared.empty:
+            key = f"{Path(name).stem}__{provider}"
+            return {key: prepared}, [{
+                "Fájl": name,
+                "Státusz": "OK",
+                "Rendszer": provider,
+                "Sorok": len(prepared),
+                "Megjegyzés": "Automatikusan standardizált",
+            }]
+
+        # Generic fallback: keep all sheets and let the existing header detector + Smart Mapper work.
+        generic = {}
+        for sheet_name, raw in raw_sheets.items():
+            if raw is None or raw.empty:
+                continue
+            generic[f"{Path(name).stem}__{sheet_name}"] = raw
+        return generic, [{
+            "Fájl": name,
+            "Státusz": "MAPPER",
+            "Rendszer": provider,
+            "Sorok": sum(len(x) for x in generic.values()),
+            "Megjegyzés": "Általános Smart Mapper szükséges",
+        }]
+    except Exception as exc:
+        return {}, [{"Fájl": name, "Státusz": "HIBA", "Rendszer": "", "Sorok": 0, "Megjegyzés": str(exc)}]
+
+
+def _fpi_read_many_gps_files_v143(
+    training_files: Optional[List[object]],
+    match_files: Optional[List[object]],
+    mixed_files: Optional[List[object]],
+    provider_override: str = "Automatikus felismerés",
+) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame, str]:
+    all_sheets: Dict[str, pd.DataFrame] = {}
+    rows: List[Dict[str, object]] = []
+    signature_parts = []
+
+    groups = [
+        ("Edzés", training_files or []),
+        ("Meccs", match_files or []),
+        (None, mixed_files or []),
+    ]
+    for forced_type, files in groups:
+        for upload in files:
+            name = str(getattr(upload, "name", "gps_file"))
+            data = _fpi_bytes_from_upload_v143(upload)
+            signature_parts.append(f"{forced_type}:{name}:{len(data)}:{hashlib.md5(data[:200000]).hexdigest() if data else ''}")
+            sheets, report = _fpi_read_single_gps_file_v143(
+                upload,
+                forced_type=forced_type,
+                provider_override=provider_override,
+            )
+            for key, frame in sheets.items():
+                unique = key
+                counter = 2
+                while unique in all_sheets:
+                    unique = f"{key}_{counter}"
+                    counter += 1
+                all_sheets[unique] = frame
+            for row in report:
+                row["Import típus"] = forced_type or "Vegyes / fájlból"
+                rows.append(row)
+
+    return all_sheets, pd.DataFrame(rows), hashlib.md5("|".join(signature_parts).encode("utf-8")).hexdigest()
+
+
+def _fpi_team_level_tactical_messages_v143(
+    tactical_context: Dict[str, object],
+    tactical_msgs: List[str],
+    limit: int = 4,
+) -> List[str]:
+    opponent_players = []
+    for row in (tactical_context or {}).get("opponent_player_evaluation", []) or []:
+        name = str(row.get("Játékos", "")).strip().lower()
+        if name:
+            opponent_players.append(name)
+
+    cleaned = []
+    for msg in tactical_msgs or []:
+        text = _fpi_clean_sentence_v82(str(msg), 180)
+        low = text.lower()
+        if any(name in low for name in opponent_players):
+            continue
+        if text and text not in cleaned:
+            cleaned.append(text)
+
+    if not cleaned:
+        plan = str((tactical_context or {}).get("plan_a", "KIE – kiegyensúlyozott meccsterv"))
+        cleaned = [
+            f"Csapatszintű alapirány: {plan}.",
+            "A blokk-, presszing- és átmeneti viselkedést egységes csapatelvekkel kell végrehajtani.",
+            "A labdavesztés utáni biztosítás és a második labdák kontrollja legyen közös csapatszintű prioritás.",
+        ]
+    return cleaned[:limit]
+
+
+# =========================================================
+# V143 - Methodology content + PDF export
+# =========================================================
+FPI_METHODOLOGY_SECTIONS_V143 = [
+    (
+        "1. Mire épül az FPI metodikája?",
+        [
+            "A Football Performance Intelligence nemzetközi sporttudományi szakirodalomra, saját és partneri GPS-adatokra, valamint gyakorlati teljesítményelemzési logikára épül.",
+            "A rendszer döntéstámogató eszköz: nem diagnózis, nem orvosi döntés és nem garantált sérülés-előrejelzés.",
+            "Az eredmények edzői megfigyeléssel, wellness/RPE, orvosi információval és a heti szakmai kontextussal együtt értelmezendők.",
+        ],
+    ),
+    (
+        "2. Mit jelent a Readiness?",
+        [
+            "A Readiness a csapat vagy játékos aktuális terhelési állapotának 0–100 közötti becslése.",
+            "Figyelembe vett fő területek: rövid távú terhelés, 3–7 napos állapot, 4 hetes trend, össztáv, Load, HSR, sprinttáv, sprintek, High Efforts és – ha elérhető – pulzus/HRV.",
+            "80–100: magas készenlét; 60–79: elfogadható, figyelendő; 40–59: csökkent; 0–39: alacsony.",
+            "Az alacsonyabb érték túlterhelést, alulterhelést vagy kedvezőtlen terhelési mintázatot is jelezhet.",
+        ],
+    ),
+    (
+        "3. Mit jelent a játékoskockázat?",
+        [
+            "A Player Risk Score nem sérülésjóslat, hanem korai figyelmeztető besorolás.",
+            "A rendszer terhelésugrást, 4 hetes trendet, túl- és alulterhelést, sprint/HSR-expozíciót, neuromuszkuláris terhelést, High Efforts értéket és meccsterhelést vizsgál.",
+            "Alacsony: stabil profil. Közepes: egy vagy több figyelmeztető jel. Magas: több kedvezőtlen tényező egyidejű jelenléte.",
+        ],
+    ),
+    (
+        "4. Hogyan működnek a benchmarkok?",
+        [
+            "A referencia nem egyetlen fix érték: korosztály, bajnoki szint, játékosposzt és játékmodell alapján változik.",
+            "A fő benchmark-területek: Distance, Load, HSR, Sprint Distance, Sprint Count és High Efforts.",
+            "Csapatszinten a rendszer a játékosállomány posztösszetételéből súlyozott referencia-profilt képez. A kapusok a sebességi benchmarkban kisebb, de nem nulla súlyt kapnak.",
+            "A referenciák nemzetközi szakirodalmi tartományokból és saját/partneri adatokból finomított döntéstámogató zónák.",
+        ],
+    ),
+    (
+        "5. Mit jelent a 4 hetes trend?",
+        [
+            "A legutóbbi hét értékeit nem önmagukban, hanem a játékos vagy csapat előző heteinek mintázatához viszonyítjuk.",
+            "A trend segít felismerni a hirtelen terhelésnövekedést, a tartós alulexpozíciót, az ingadozó terhelést és a sebességi inger hiányát.",
+            "A rendszer a trendet jelzésként használja, nem mechanikus döntési szabályként.",
+        ],
+    ),
+    (
+        "6. Hogyan készül a mikrociklus-javaslat?",
+        [
+            "A motor a heti edzésszámot, meccsnapot, readiness/risk állapotot, HSR–sprint–High Efforts trendet, játékmodellt és a rendelkezésre álló taktikai inputot kombinálja.",
+            "A terv 3–6 edzéses ciklushoz is igazítható, nem fix négynapos sablon.",
+            "GPS-only módban a fizikai expozíció és regeneráció vezeti a tervet. Taktikai input esetén az ellenfél-specifikus fókuszok is beépülnek.",
+        ],
+    ),
+    (
+        "7. Tactical Framework: 7 dimenzió és 9 stratégia",
+        [
+            "A 7 taktikai dimenzió: letámadás, labdakihozatal, átmenetek, támadó játék, pontrúgások, labdabirtoklás és lövésprofil.",
+            "A két fő értelmezési tengely: játékstílus (direkt–vegyes–kontroll–agresszív) és blokkmagasság (mély–közép–magas).",
+            "A 9 stratégiai profil: KON – kontra mély blokkból; GAT – gyors átmenet; BAT – középső blokk + átmenet; KIE – kiegyensúlyozott; PRS – presszing + átmenet; MLT – magas letámadás; DOM – dominancia; POZ – pozíciós támadás; LAB – labdatartás mélyebb szerkezetből.",
+            "A stratégia nem önmagában kész meccsterv: a rendszer csapatszintű taktikai megállapításokkal, ellenfél-játékos fókuszokkal és konkrét meccstervi teendőkkel differenciál.",
+        ],
+    ),
+    (
+        "8. Hogyan kell szakmailag használni?",
+        [
+            "Vezetőedző: gyors heti fő üzenetek, taktikai és terhelési fókusz.",
+            "Erőnléti edző: readiness, risk, Load, HSR, sprint és High Efforts trendek.",
+            "Sportigazgató: 30 másodperces állapotkép, kockázatok és prioritások.",
+            "Utánpótlás: korosztályos és poszt-specifikus összevetés, alul- és túlterhelés korai jelzése.",
+        ],
+    ),
+]
+
+
+def build_fpi_methodology_pdf_bytes_v143() -> Optional[bytes]:
+    if SimpleDocTemplate is None:
+        return None
+    output = io.BytesIO()
+    try:
+        regular_font, bold_font = _register_pdf_fonts() if "_register_pdf_fonts" in globals() else ("Helvetica", "Helvetica-Bold")
+    except Exception:
+        regular_font, bold_font = "Helvetica", "Helvetica-Bold"
+
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle(
+        "FPI_METHOD_TITLE_V143",
+        parent=styles["Title"],
+        fontName=bold_font,
+        fontSize=20,
+        leading=24,
+        textColor=colors.HexColor("#0F172A"),
+        spaceAfter=10,
+    )
+    subtitle = ParagraphStyle(
+        "FPI_METHOD_SUB_V143",
+        parent=styles["BodyText"],
+        fontName=regular_font,
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#475569"),
+        spaceAfter=10,
+    )
+    heading = ParagraphStyle(
+        "FPI_METHOD_HEAD_V143",
+        parent=styles["Heading2"],
+        fontName=bold_font,
+        fontSize=12,
+        leading=15,
+        textColor=colors.HexColor("#0F766E"),
+        spaceBefore=8,
+        spaceAfter=5,
+    )
+    body = ParagraphStyle(
+        "FPI_METHOD_BODY_V143",
+        parent=styles["BodyText"],
+        fontName=regular_font,
+        fontSize=9.2,
+        leading=12.5,
+        textColor=colors.HexColor("#0F172A"),
+        spaceAfter=4,
+    )
+
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=A4,
+        rightMargin=1.5 * cm,
+        leftMargin=1.5 * cm,
+        topMargin=1.4 * cm,
+        bottomMargin=1.4 * cm,
+    )
+    story = [
+        Paragraph("Football Performance Intelligence – Metodika", title),
+        Paragraph(
+            "A Metodika Center kibontott, exportálható változata. Rövid, szakmai és transzparens áttekintés arról, hogy az FPI milyen adatokat és döntési logikát használ.",
+            subtitle,
+        ),
+        Spacer(1, 0.15 * cm),
+    ]
+    for section_title, paragraphs in FPI_METHODOLOGY_SECTIONS_V143:
+        story.append(Paragraph(pdf_safe_text(section_title), heading))
+        for paragraph in paragraphs:
+            story.append(Paragraph("• " + pdf_safe_text(paragraph), body))
+        story.append(Spacer(1, 0.10 * cm))
+    story.append(Spacer(1, 0.18 * cm))
+    story.append(Paragraph(
+        "Szakmai megjegyzés: az FPI döntéstámogató rendszer. A kimeneteket edzői, orvosi és teljesítménydiagnosztikai információkkal együtt kell értelmezni.",
+        subtitle,
+    ))
+    doc.build(story)
+    output.seek(0)
+    return output.read()
+
+
+def render_fpi_methodology_center_v143() -> None:
+    _fpi_landing_css_v100()
+    c1, c2, c3 = st.columns([1, 1, 4])
+    with c1:
+        if st.button("← Főoldal", use_container_width=True, key="method_v143_back"):
+            _fpi_set_page_v100("landing")
+    with c2:
+        if st.button("⚡ Riport", use_container_width=True, key="method_v143_clean"):
+            _fpi_set_page_v100("clean")
+    with c3:
+        st.caption("Rövid, átlátható szakmai magyarázat – a képletek részletezése nélkül.")
+
+    st.markdown(
+        """
+        <div style="border-radius:26px;padding:24px 28px;background:linear-gradient(135deg,#ffffff,#e0f2fe,#ecfdf5);border:1px solid #bfdbfe;box-shadow:0 16px 44px rgba(15,23,42,.12);margin:8px 0 18px 0;">
+            <div style="font-size:.8rem;font-weight:950;color:#0f766e;letter-spacing:.07em;">FPI METHODOLOGY CENTER</div>
+            <div style="font-size:2.2rem;font-weight:980;color:#0f172a;letter-spacing:-.04em;margin-top:5px;">Mit számol a rendszer, és hogyan értelmezzük?</div>
+            <div style="color:#475569;margin-top:7px;">A legfontosabb szakmai kérdések rövid, kibontott magyarázata.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    method_pdf = build_fpi_methodology_pdf_bytes_v143()
+    if method_pdf:
+        st.download_button(
+            "⬇️ Teljes metodika PDF",
+            data=method_pdf,
+            file_name="fpi_metodika.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="method_pdf_download_v143",
+        )
+    for title_text, paragraphs in FPI_METHODOLOGY_SECTIONS_V143:
+        with st.expander(title_text, expanded=False):
+            for paragraph in paragraphs:
+                st.markdown(f"- {paragraph}")
+
+
+# Override the older methodology renderer with the shared V143 content.
+render_fpi_methodology_center_v138 = render_fpi_methodology_center_v143
+
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
 if "fpi_active_page_v100" not in st.session_state:
@@ -14556,16 +15451,20 @@ with tab_export:
             sample_gps_only_pdf_bytes_export = build_fpi_gps_only_sample_pdf_bytes()
         except Exception:
             sample_exec_pdf_bytes_export = sample_full_pdf_bytes_export = sample_gps_only_pdf_bytes_export = None
-        sm1, sm2, sm3 = st.columns(3)
+        sample_method_pdf_bytes_export = build_fpi_methodology_pdf_bytes_v143() if "build_fpi_methodology_pdf_bytes_v143" in globals() else None
+        sm1, sm2, sm3, sm4 = st.columns(4)
         with sm1:
             if sample_exec_pdf_bytes_export is not None:
-                st.download_button("⬇️ Minta Executive Summary", data=sample_exec_pdf_bytes_export, file_name="fpi_minta_executive_summary.pdf", mime="application/pdf", use_container_width=True, key="download_sample_exec_v83_export")
+                st.download_button("⬇️ Minta Executive Summary", data=sample_exec_pdf_bytes_export, file_name="fpi_minta_executive_summary.pdf", mime="application/pdf", use_container_width=True, key="download_sample_exec_v143_export")
         with sm2:
             if sample_full_pdf_bytes_export is not None:
-                st.download_button("⬇️ Minta Full Report", data=sample_full_pdf_bytes_export, file_name="fpi_minta_full_report.pdf", mime="application/pdf", use_container_width=True, key="download_sample_full_v83_export")
+                st.download_button("⬇️ Minta Full Report", data=sample_full_pdf_bytes_export, file_name="fpi_minta_full_report.pdf", mime="application/pdf", use_container_width=True, key="download_sample_full_v143_export")
         with sm3:
             if sample_gps_only_pdf_bytes_export is not None:
-                st.download_button("⬇️ Minta GPS-only Report", data=sample_gps_only_pdf_bytes_export, file_name="fpi_minta_gps_only_report.pdf", mime="application/pdf", use_container_width=True, key="download_sample_gps_only_v96_export")
+                st.download_button("⬇️ Minta GPS-only Report", data=sample_gps_only_pdf_bytes_export, file_name="fpi_minta_gps_only_report.pdf", mime="application/pdf", use_container_width=True, key="download_sample_gps_only_v143_export")
+        with sm4:
+            if sample_method_pdf_bytes_export is not None:
+                st.download_button("⬇️ Metodika PDF", data=sample_method_pdf_bytes_export, file_name="fpi_metodika.pdf", mime="application/pdf", use_container_width=True, key="download_sample_method_v143_export")
         if sample_exec_pdf_bytes_export is None and sample_full_pdf_bytes_export is None and sample_gps_only_pdf_bytes_export is None:
             st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
 
