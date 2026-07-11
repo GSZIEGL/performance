@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V146_COACH_INTELLIGENCE_ENGINE_2026_07_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V147_SUMMARY_LAYOUT_FITNESS_DEPTH_2026_07_11"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7513,34 +7513,68 @@ def build_fpi_product_pdf_bytes(
         story.append(table(fast_rows, [9.2*cm, 9.2*cm, 9.3*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF")]))
         story.append(Spacer(1, 0.18*cm))
 
-        # 2) mikrociklus legyen a szív
+        # 1. pont lezárása: a heti ciklusterv ugyanazon az oldalon, tömören
         story.append(section("Heti ciklusterv – erőnléti + taktikai cél", "#EDE9FE"))
-        md_table = [[P("Nap", head), P("Erőnléti cél", head), P("Taktikai cél", head)]]
-        for d, fgoal, tgoal in md_rows_simple:
-            md_table.append([P(d, small), P(fgoal, small), P(tgoal, small)])
-        story.append(table(md_table, [3.2*cm, 11.5*cm, 13.0*cm], header_bg="#312E81", row_bgs=[colors.HexColor("#F5F3FF"), colors.white]))
-        story.append(Spacer(1, 0.18*cm))
+        detailed_md_rows_v147 = _fpi_weekly_fitness_rows_v147(
+            md_rows_simple, fitness_insights_v146, readiness
+        )
+        md_table = [[
+            P("Nap", head),
+            P("Erőnléti fókusz", head),
+            P("Taktikai fókusz", head),
+            P("Edzői megjegyzés", head),
+        ]]
+        for d, fgoal, tgoal, coach_note in detailed_md_rows_v147:
+            md_table.append([
+                P(d, small),
+                P(fgoal, small),
+                P(tgoal, small),
+                P(coach_note, small),
+            ])
+        story.append(table(
+            md_table,
+            [2.4*cm, 8.2*cm, 8.6*cm, 8.5*cm],
+            header_bg="#312E81",
+            row_bgs=[colors.HexColor("#F5F3FF"), colors.white],
+        ))
 
-        # 3) fő edzői üzenetek: külön erőnléti és valódi csapatszintű taktikai blokk
+        # 2. pont – külön oldal
         story.append(PageBreak())
-        story.append(section("Fő edzői üzenetek", "#DCFCE7"))
+        story.append(section("2. Fő edzői üzenetek", "#DCFCE7"))
+        story.append(P(
+            "A taktikai és erőnléti üzenetek az adott ellenfélhez, heti terhelési állapothoz és mikrociklushoz igazodnak.",
+            small,
+        ))
+        story.append(Spacer(1, 0.12*cm))
         msg_rows = [[P("Erőnléti üzenet", head), P("Csapatszintű taktikai üzenet", head)]]
-        max_len = max(len(fitness_msgs), len(team_tactical_msgs), 3)
+        max_len = max(len(fitness_msgs), len(team_tactical_msgs), 4)
         for i in range(max_len):
             fm = fitness_msgs[i] if i < len(fitness_msgs) else ""
             tm = team_tactical_msgs[i] if i < len(team_tactical_msgs) else ""
             msg_rows.append([
-                P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(fm, 330)), small),
-                P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(tm, 330)), small),
+                P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(fm, 420)), small),
+                P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(tm, 420)), small),
             ])
-        story.append(table(msg_rows, [13.8*cm, 13.9*cm], header_bg="#166534", row_bgs=[colors.HexColor("#ECFDF5"), colors.white]))
-        story.append(Spacer(1, 0.18*cm))
+        story.append(table(
+            msg_rows,
+            [13.8*cm, 13.9*cm],
+            header_bg="#166534",
+            row_bgs=[colors.HexColor("#ECFDF5"), colors.white],
+        ))
 
-        # 3/b) ellenfél játékosszintű értékelés – ha van taktikai/játékos input vagy minta context
+        # 3. pont – külön oldal, minden játékosszintű információ egy helyen
+        story.append(PageBreak())
+        story.append(section("3. Játékosszintű fókusz", "#FEE2E2"))
+
         if opp_eval_exec:
-            story.append(PageBreak())
-            story.append(section("Ellenfél játékosszintű fókusz – kulcsemberek és támadható pontok", "#FEE2E2"))
-            op_rows = [[P("Játékos", head), P("Szerep", head), P("Mutató + referencia", head), P("Értékelés", head), P("Meccstervi teendő", head)]]
+            story.append(P("Ellenfél kulcsemberei és támadható pontjai", head))
+            op_rows = [[
+                P("Játékos", head),
+                P("Szerep", head),
+                P("Mutató + referencia", head),
+                P("Értékelés", head),
+                P("Meccstervi teendő", head),
+            ]]
             for r in opp_eval_exec[:5]:
                 op_rows.append([
                     P(_fpi_extract_coach_text_v145(r.get("Játékos", ""), 60), small),
@@ -7549,15 +7583,46 @@ def build_fpi_product_pdf_bytes(
                     P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(r.get("Értelmezés", ""), 210)), small),
                     P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(r.get("Javaslat", ""), 230)), small),
                 ])
-            story.append(table(op_rows, [3.4*cm, 4.4*cm, 7.0*cm, 6.2*cm, 6.7*cm], header_bg="#991B1B", row_bgs=[colors.HexColor("#FEF2F2"), colors.white]))
-            story.append(Spacer(1, 0.18*cm))
+            story.append(table(
+                op_rows,
+                [3.4*cm, 4.4*cm, 7.0*cm, 6.2*cm, 6.7*cm],
+                header_bg="#991B1B",
+                row_bgs=[colors.HexColor("#FEF2F2"), colors.white],
+            ))
+            story.append(Spacer(1, 0.20*cm))
 
-        # 4) játékos risk röviden
-        story.append(section("Játékoskockázat – csak a döntéshez szükséges", "#FEE2E2"))
+        story.append(P("Saját játékosok terhelési kockázata", head))
         rr = [[P(c, head) for c in risk_rows_simple[0]]]
         for row in risk_rows_simple[1:]:
             rr.append([P(x, small) for x in row])
-        story.append(table(rr, [6.4*cm, 4.2*cm, 17.1*cm], header_bg="#7F1D1D", row_bgs=[colors.white, colors.HexColor("#FEF2F2")]))
+        story.append(table(
+            rr,
+            [6.4*cm, 4.2*cm, 17.1*cm],
+            header_bg="#7F1D1D",
+            row_bgs=[colors.white, colors.HexColor("#FEF2F2")],
+        ))
+
+        # Legalul: a GPS-only tudásmotor teljesebb erőnléti helyzetképe
+        story.append(PageBreak())
+        story.append(section("Kiegészítő erőnléti helyzetkép – GPS Intelligence", "#E0F2FE"))
+        story.append(P(
+            "Ez a szekció ugyanazt a kombinációs és ismétléscsökkentő logikát használja, mint a GPS-only riport.",
+            small,
+        ))
+        story.append(Spacer(1, 0.12*cm))
+        fitness_snapshot_v147 = _fpi_fitness_snapshot_rows_v147(
+            _fpi_contextual_gps_only_insights_v146(ctx, priorities, readiness, week, 8),
+            8,
+        )
+        fs_rows = [[P(c, head) for c in fitness_snapshot_v147[0]]]
+        for row in fitness_snapshot_v147[1:]:
+            fs_rows.append([P(x, small) for x in row])
+        story.append(table(
+            fs_rows,
+            [5.2*cm, 10.8*cm, 11.7*cm],
+            header_bg="#075985",
+            row_bgs=[colors.HexColor("#F0F9FF"), colors.white],
+        ))
 
 
     def add_fitness_page():
@@ -12673,6 +12738,102 @@ def _fpi_coach_blocks_v146(
     }
 
 
+
+# =========================================================
+# V147 - Executive oldalszerkezet + mélyebb erőnléti mikrociklus
+# =========================================================
+def _fpi_weekly_fitness_rows_v147(
+    md_rows: List[Tuple[str, str, str]],
+    fitness_insights: List[FPIInsightV146],
+    readiness: int,
+) -> List[Tuple[str, str, str, str]]:
+    """Részletesebb, naphoz kötött erőnléti fókusz és edzői megjegyzés."""
+    insight_texts = {
+        item.topic: _fpi_render_insight_text_v146(item)
+        for item in (fitness_insights or [])
+    }
+    result = []
+    for day, fitness_goal, tactical_goal in md_rows:
+        day_text = str(day)
+        base_goal = _fpi_strip_raw_repr_v146(fitness_goal)
+        tactical_text = _fpi_strip_raw_repr_v146(tactical_goal)
+
+        if "MD-5" in day_text or "MD-6" in day_text:
+            extra = (
+                "Volumenépítés: közepes intenzitás, nagyobb össztáv, kontrollált gyorsítás- és lassításszám."
+            )
+            note = (
+                "Ez legyen a hét fő volumenadó napja. A sprintterhelést még ne maximalizáljuk; "
+                "a cél a terhelési alap felépítése túlzott neuromuszkuláris fáradás nélkül."
+            )
+        elif "MD-4" in day_text:
+            extra = (
+                "Fő terhelési nap: HSR, sprint és nagy intenzitású akciók meccsszerű környezetben."
+            )
+            note = (
+                "A sebességi ingert teljes pihenőkkel, kevés jó minőségű ismétléssel adjuk. "
+                "A magasabb kockázatú játékosoknál az ismétlésszám csökkenthető, de a szükséges sebesség maradjon meg."
+            )
+        elif "MD-3" in day_text:
+            extra = (
+                "Intenzitásfenntartás: rövidebb blokkok, ismételt nagy intenzitású akciók, mérsékelt összvolumen."
+            )
+            note = (
+                "A terhelés legyen meccsszerű, de ne érje el a hét fő terhelési napjának volumenét. "
+                "A gyorsítások és fékezések számát külön figyeljük."
+            )
+        elif "MD-2" in day_text:
+            extra = (
+                "Terheléscsökkentés: alacsonyabb volumen, rövid gyorsasági érintés, teljes frissülés támogatása."
+            )
+            note = (
+                "Ne halmozzunk új fáradtságot. A sebességi inger csak idegrendszeri aktiváció legyen, "
+                "nem kondicionáló blokk."
+            )
+        elif "MD-1" in day_text:
+            extra = (
+                "Aktiváció: nagyon alacsony volumen, rövid reakció- és gyorsasági feladatok, hosszú pihenőkkel."
+            )
+            note = (
+                "A játékosok frissessége fontosabb, mint bármely terhelési cél. "
+                "A blokkot a minőség első romlásakor zárjuk le."
+            )
+        elif "Pihen" in base_goal or "regener" in base_goal.lower():
+            extra = "Regeneráció: mobilitás, egyéni visszatöltés, szükség esetén kompenzáció."
+            note = (
+                "A nem játszó vagy alulterhelt játékosok külön kompenzációs tervet kaphatnak; "
+                "a magas terhelést kapók valódi regenerációt kapjanak."
+            )
+        else:
+            extra = "Terhelés a heti ciklus aktuális helyéhez és a játékosok egyéni állapotához igazítva."
+            note = (
+                "Az egyéni eltéréseket a csapatátlag ne fedje el; a kockázati jelzések alapján módosítsuk a volument."
+            )
+
+        if readiness < 60:
+            note += " A csökkent készenlét miatt a tervezett ismétlésszámból szükség esetén 10–20% elhagyható."
+        elif readiness >= 80 and ("MD-4" in day_text or "MD-3" in day_text):
+            note += " A jó frissesség lehetővé teszi a magas végrehajtási minőséget, de a felesleges volumen továbbra sem cél."
+
+        combined_goal = f"{base_goal} {extra}".strip()
+        result.append((day_text, combined_goal, tactical_text, note))
+    return result
+
+
+def _fpi_fitness_snapshot_rows_v147(
+    fitness_insights: List[FPIInsightV146],
+    limit: int = 7,
+) -> List[List[str]]:
+    rows = [["Terület", "Aktuális értelmezés", "Edzői teendő"]]
+    for insight in (fitness_insights or [])[:limit]:
+        rows.append([
+            insight.title or insight.topic,
+            _fpi_strip_raw_repr_v146(insight.finding),
+            _fpi_strip_raw_repr_v146(insight.recommendation),
+        ])
+    return rows
+
+
 # =========================================================
 # V143 - Methodology content + PDF export
 # =========================================================
@@ -12744,6 +12905,8 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
             "A taktikai üzenetek a saját játékmodellből, az ellenfél erősségeiből és gyengeségeiből, a javasolt stratégiai profilból, az ellenfél játékosértékeléséből és a csapat aktuális fizikai állapotából állnak össze.",
             "A rendszer az adott hét, ellenfél, saját játékmodell, stratégiai profil, játékosértékelés és terhelési állapot alapján állítja össze az üzeneteket. A taktikai célok naponta is változnak: más feladat készül a fő terhelési napra, az átmeneti napra, a meccstervi napra és az aktivációra.",
             "Az üzenetek tudásbázisból és szakmai szabályokból épülnek fel. A rendszer témánként választ, majd hasonlóságvizsgálattal kiszűri, hogy ugyanaz a motívum több blokkban vagy három egymást követő sorban megismétlődjön.",
+            "Az Executive Summary logikusan tagolt: az első oldal a vezetői döntést és a heti ciklustervet, a második oldal a fő edzői üzeneteket, a harmadik oldal a játékosszintű fókuszokat tartalmazza. A végén külön erőnléti helyzetkép emeli be a GPS-only motor részletesebb következtetéseit.",
+            "A heti ciklusterv minden naphoz erőnléti fókuszt, taktikai fókuszt és rövid edzői megjegyzést rendel. Így a terv nemcsak azt mondja meg, mi legyen a cél, hanem azt is, hogyan és milyen terhelési logikával valósítsuk meg.",
             "A felső vezetői blokk, a meccsterv, a csapatszintű taktikai üzenet, a napi taktikai cél és az ellenfél játékosfókusz eltérő információs mélységet kap. Ugyanaz a téma megjelenhet több helyen, ha más döntési szintet szolgál, de az egy az egyben ismétlődő mondatokat a rendszer kiszűri.",
             "A meccsterv konkrét kérdésekre válaszol: hol védekezzünk, hol támadjunk, kit keressünk, kire vigyázzunk, mi legyen az első támadó gondolat, és mely játékhelyzeteket kell edzésen gyakorolni.",
             "GPS-only módban ugyanaz a tudás- és kombinációs motor dolgozik, csak taktikai input nélkül. A rendszer a készenlét, kockázat, össztáv, terhelési pont, nagy sebességű futások, sprintek, nagy intenzitású akciók, gyorsítások, lassítások, négyhetes trend, edzés–meccs arány és heti periodizáció alapján állít össze többféle erőnléti üzenetet.",
