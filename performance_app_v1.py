@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V149_READABLE_HIGHLIGHTS_FLEXIBLE_HISTORY_2026_07_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V150_EXECUTIVE_VISUAL_HIERARCHY_2026_07_11"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7523,7 +7523,7 @@ def build_fpi_product_pdf_bytes(
         opp_eval_exec = (tactical_context or {}).get("opponent_player_evaluation", []) if isinstance(tactical_context, dict) else []
 
         tactical_findings_text = "\n\n".join(
-            [f"• {_fpi_emphasize_message_v148(_fpi_render_insight_text_v146(x))}" for x in tactical_insights_v146[:5]]
+            [f"• {_fpi_emphasize_message_v150(_fpi_render_insight_text_v146(x))}" for x in tactical_insights_v146[:5]]
         ) or "• Nincs elegendő taktikai input; a riport GPS-only módban készült."
 
         opponent_focus_lines = []
@@ -7534,32 +7534,28 @@ def build_fpi_product_pdf_bytes(
             eval_text = _fpi_extract_coach_text_v145(row.get("Értelmezés", ""), 150) if isinstance(row, dict) else ""
             clean_line = _fpi_strip_raw_repr_v146(f"{name} – {role}: {eval_text}")
             if clean_line:
-                opponent_focus_lines.append(f"• {clean_line}")
+                opponent_focus_lines.append(f"• {_fpi_emphasize_message_v150(clean_line, 260)}")
         opponent_focus_text = "\n\n".join(opponent_focus_lines) or "• Nincs ellenfél-játékos Excel vagy azonosítható játékosprofil."
 
         match_plan_text = "\n\n".join(
-            [f"• {_fpi_emphasize_message_v148(_fpi_render_insight_text_v146(x))}" for x in match_plan_insights_v146[:6]]
+            [f"• {_fpi_emphasize_message_v150(_fpi_render_insight_text_v146(x))}" for x in match_plan_insights_v146[:6]]
         ) or f"• {_fpi_hu_plain_text_v144(tactical_plan)}"
 
-        key_headline_v149 = _fpi_key_headline_v149(
+        key_messages_v150 = _fpi_key_messages_v150(
             tactical_insights_v146,
             match_plan_insights_v146,
             fitness_insights_v146,
+            opp_eval_exec,
+            minimum=3,
+            maximum=5,
         )
-        headline_box_v149 = Table(
-            [[P(f"<b>KULCSÜZENET:</b> {pdf_safe_text(key_headline_v149)}", callout)]],
-            colWidths=[27.7*cm],
-        )
-        headline_box_v149.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#FEF3C7")),
-            ("BOX", (0,0), (-1,-1), 1.0, colors.HexColor("#F59E0B")),
-            ("LEFTPADDING", (0,0), (-1,-1), 10),
-            ("RIGHTPADDING", (0,0), (-1,-1), 10),
-            ("TOPPADDING", (0,0), (-1,-1), 8),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 8),
-        ]))
-        story.append(headline_box_v149)
-        story.append(Spacer(1, 0.20*cm))
+        story.append(_fpi_key_messages_table_v150(
+            key_messages_v150,
+            P,
+            head,
+            callout,
+        ))
+        story.append(Spacer(1, 0.22*cm))
 
         fast_rows = [[P("TAKTIKAI MEGÁLLAPÍTÁSOK", head), P("ELLENFÉL-KULCSEMBEREK", head), P("KONKRÉT MECCSTERV", head)]]
         fast_rows.append([
@@ -7585,9 +7581,9 @@ def build_fpi_product_pdf_bytes(
         for d, fgoal, tgoal, coach_note in detailed_md_rows_v147:
             md_table.append([
                 P(d, body),
-                P(_fpi_emphasize_message_v148(fgoal, 520), body),
-                P(_fpi_emphasize_message_v148(tgoal, 520), body),
-                P(_fpi_emphasize_message_v148(coach_note, 520), body),
+                P(_fpi_emphasize_message_v150(fgoal, 560), body),
+                P(_fpi_emphasize_message_v150(tgoal, 560), body),
+                P(_fpi_emphasize_message_v150(coach_note, 560), body),
             ])
         story.append(table(
             md_table,
@@ -7610,8 +7606,8 @@ def build_fpi_product_pdf_bytes(
             fm = fitness_msgs[i] if i < len(fitness_msgs) else ""
             tm = team_tactical_msgs[i] if i < len(team_tactical_msgs) else ""
             msg_rows.append([
-                P(_fpi_emphasize_message_v148(fm, 420), small),
-                P(_fpi_emphasize_message_v148(tm, 420), small),
+                P(_fpi_emphasize_message_v150(fm, 480), small),
+                P(_fpi_emphasize_message_v150(tm, 480), small),
             ])
         story.append(table(
             msg_rows,
@@ -7687,7 +7683,7 @@ def build_fpi_product_pdf_bytes(
         )
         fs_rows = [[P(c, head) for c in fitness_snapshot_v147[0]]]
         for row in fitness_snapshot_v147[1:]:
-            fs_rows.append([P(x, small) for x in row])
+            fs_rows.append([P(_fpi_emphasize_message_v150(x, 420), small) for x in row])
         story.append(table(
             fs_rows,
             [5.2*cm, 10.8*cm, 11.7*cm],
@@ -13025,6 +13021,233 @@ def _fpi_player_group_banner_v149(text: str, color: str, P, player_label):
     return table_obj
 
 
+
+# =========================================================
+# V150 - Executive vizuális hierarchia és automatikus kiemelőmotor
+# =========================================================
+FPI_HIGHLIGHT_TERMS_V150 = [
+    # taktikai zónák és akciók
+    "bal oldal", "jobb oldal", "félterület", "középső blokk", "mély blokk",
+    "magas letámadás", "letámadás", "visszatámadás", "átmenet", "támadó átmenet",
+    "védekező átmenet", "második labda", "labdakihozatal", "labdavesztés",
+    "labdaszerzés", "mélységi futás", "oldalváltás", "visszagurítás", "beadás",
+    "pontrúgás", "hosszú oldal", "belső passzsáv", "vonalak között",
+    "szélső játék", "direkt játék", "pozíciós játék", "kontra", "kontrák",
+    # erőnléti fogalmak
+    "Readiness", "készenlét", "frissesség", "sprint", "sprintterhelés",
+    "sprintexpozíció", "HSR", "nagy sebességű futás", "High Efforts",
+    "nagy intenzitású akció", "Load", "terhelési pont", "össztáv", "volumen",
+    "négyhetes trend", "4 hetes trend", "regeneráció", "gyorsítás", "lassítás",
+    "kockázat", "benchmark", "referencia", "alulterhelés", "túlterhelés",
+    # döntési szavak
+    "fő veszély", "kulcsjátékos", "kulcsember", "támadási cél", "védekezési cél",
+    "elsődleges cél", "fő prioritás", "kiemelt figyelem", "alacsony", "közepes", "magas",
+]
+
+
+def _fpi_highlight_numbers_v150(text: str) -> str:
+    """A százalékok, pontszámok és pozitív/negatív eltérések automatikus kiemelése."""
+    patterns = [
+        r"(?<![\w>])[-+]?\d+(?:[.,]\d+)?\s*%",
+        r"(?<![\w>])\d{1,3}\s*/\s*100",
+        r"(?<![\w>])[-+]?\d+(?:[.,]\d+)?\s*(?:m|km|m/min|km/h|perc|nap|hét)\b",
+    ]
+    out = text
+    for pattern in patterns:
+        out = re.sub(
+            pattern,
+            lambda m: f"<b>{m.group(0)}</b>" if "<b>" not in m.group(0) else m.group(0),
+            out,
+            flags=re.IGNORECASE,
+        )
+    return out
+
+
+def _fpi_highlight_terms_v150(text: object, max_highlights: int = 5) -> str:
+    """
+    A kifejtésen belül is kiemeli a legfontosabb fogalmakat.
+    Nem vastagít mindent: egy bekezdésben legfeljebb néhány kulcsrészletet.
+    """
+    clean = _fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(text, 900))
+    if not clean:
+        return ""
+
+    escaped = pdf_safe_text(clean)
+    protected = []
+    count = 0
+
+    # Hosszabb kifejezések előbb, hogy ne törjük szét őket.
+    terms = sorted(FPI_HIGHLIGHT_TERMS_V150, key=len, reverse=True)
+    for term in terms:
+        if count >= max_highlights:
+            break
+        pattern = re.compile(rf"(?i)(?<![\wáéíóöőúüű])({re.escape(term)})(?![\wáéíóöőúüű])")
+        if pattern.search(escaped):
+            placeholder = f"@@FPIHL{len(protected)}@@"
+            escaped = pattern.sub(placeholder, escaped, count=1)
+            protected.append(f"<b>{term}</b>")
+            count += 1
+
+    escaped = _fpi_highlight_numbers_v150(escaped)
+
+    for idx, replacement in enumerate(protected):
+        escaped = escaped.replace(f"@@FPIHL{idx}@@", replacement)
+
+    return escaped
+
+
+def _fpi_emphasize_message_v150(text: object, max_len: int = 460) -> str:
+    """
+    Rövid cím + a magyarázó mondatban is 2–5 kiemelt szó/kifejezés.
+    """
+    clean = _fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(text, max_len))
+    if not clean:
+        return ""
+
+    if ":" in clean:
+        head, rest = clean.split(":", 1)
+        head = head.strip()
+        rest = rest.strip()
+        if 1 <= len(head.split()) <= 6:
+            return f"<b>{pdf_safe_text(head)}:</b> {_fpi_highlight_terms_v150(rest, 5)}"
+
+    sentences = re.split(r"(?<=[.!?])\s+", clean, maxsplit=1)
+    if len(sentences) == 2 and len(sentences[0]) <= 105:
+        return f"<b>{pdf_safe_text(sentences[0])}</b><br/>{_fpi_highlight_terms_v150(sentences[1], 5)}"
+
+    return _fpi_highlight_terms_v150(clean, 5)
+
+
+def _fpi_key_messages_v150(
+    tactical_insights: List[FPIInsightV146],
+    match_plan_insights: List[FPIInsightV146],
+    fitness_insights: List[FPIInsightV146],
+    opponent_players: Optional[List[dict]] = None,
+    minimum: int = 3,
+    maximum: int = 5,
+) -> List[Tuple[str, str, str]]:
+    """
+    3–5 különböző témájú vezetői kulcsüzenet.
+    Visszatér: ikon, rövid cím, rövid üzenet.
+    """
+    candidates: List[Tuple[str, str, str, int]] = []
+    used_topics = set()
+
+    icon_map = {
+        "vedekezesi_zona": "🛡",
+        "tamadasi_zona": "⚽",
+        "veszelyes_jatekos": "⚠",
+        "masodik_veszely": "⚠",
+        "sajat_kulcsember": "👤",
+        "sebesseg": "📈",
+        "readiness": "📈",
+        "terheles": "📊",
+        "atmenet": "🔄",
+        "szelso": "↔",
+        "kozepso": "🎯",
+        "pontrugas": "🎯",
+    }
+
+    def add_from(items, source_priority):
+        for item in items or []:
+            topic = str(getattr(item, "topic", "") or "egyeb")
+            if topic in used_topics:
+                continue
+            title = str(getattr(item, "title", "") or "Kulcsüzenet")
+            finding = str(getattr(item, "finding", "") or "")
+            recommendation = str(getattr(item, "recommendation", "") or "")
+            message = finding.strip()
+            if recommendation:
+                message = f"{message} {recommendation}".strip()
+            message = _fpi_clean_sentence_v82(message, 190)
+            if not message:
+                continue
+            icon = icon_map.get(topic, "◆")
+            priority = int(getattr(item, "priority", 50) or 50) + source_priority
+            candidates.append((icon, title, message, priority, topic))
+
+    add_from(match_plan_insights, 25)
+    add_from(tactical_insights, 15)
+    add_from(fitness_insights, 5)
+
+    # Ha van ellenfél-játékosadat, legalább egy játékosüzenet lehetőleg kerüljön be.
+    if opponent_players:
+        for row in opponent_players[:2]:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("Játékos", "")).strip()
+            role = _fpi_extract_coach_text_v145(row.get("Szerep", ""), 60)
+            eval_text = _fpi_extract_coach_text_v145(row.get("Értelmezés", ""), 120)
+            if name:
+                candidates.append((
+                    "👤",
+                    "Ellenfél-kulcsember",
+                    _fpi_clean_sentence_v82(f"{name} ({role}): {eval_text}", 175),
+                    92,
+                    f"player_{name.lower()}",
+                ))
+
+    selected = []
+    seen_topics = set()
+    seen_texts = []
+    for icon, title, message, priority, topic in sorted(candidates, key=lambda x: x[3], reverse=True):
+        if topic in seen_topics:
+            continue
+        if _fpi_is_near_duplicate_v145(message, seen_texts, 0.72):
+            continue
+        selected.append((icon, title, message))
+        seen_topics.add(topic)
+        seen_texts.append(message)
+        if len(selected) >= maximum:
+            break
+
+    # Biztonsági feltöltés 3 üzenetig.
+    fallback = [
+        ("🛡", "Védekezési irány", "A védekezési magasságot és a labda terelésének oldalát előre rögzítsük."),
+        ("⚽", "Támadási irány", "Az elsődleges támadási zónát és a keresendő játékost tudatosan jelöljük ki."),
+        ("📈", "Erőnléti fókusz", "A heti terhelési döntést a készenlét, a sebességi inger és a regeneráció együtt határozza meg."),
+    ]
+    for item in fallback:
+        if len(selected) >= minimum:
+            break
+        if not _fpi_is_near_duplicate_v145(item[2], [x[2] for x in selected], 0.70):
+            selected.append(item)
+
+    return selected[:maximum]
+
+
+def _fpi_key_messages_table_v150(
+    messages: List[Tuple[str, str, str]],
+    P,
+    head_style,
+    body_style,
+):
+    rows = [[P("KULCSÜZENETEK – 5 MÁSODPERCES ÁTTEKINTÉS", head_style)]]
+    for icon, title, message in messages:
+        rows.append([
+            P(
+                f"<b>{pdf_safe_text(icon)} {pdf_safe_text(title)}:</b> "
+                f"{_fpi_highlight_terms_v150(message, 4)}",
+                body_style,
+            )
+        ])
+    obj = Table(rows, colWidths=[27.7*cm])
+    style = [
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#92400E")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#FFFBEB")),
+        ("BOX", (0,0), (-1,-1), 1.0, colors.HexColor("#F59E0B")),
+        ("INNERGRID", (0,1), (-1,-1), 0.4, colors.HexColor("#FDE68A")),
+        ("LEFTPADDING", (0,0), (-1,-1), 10),
+        ("RIGHTPADDING", (0,0), (-1,-1), 10),
+        ("TOPPADDING", (0,0), (-1,-1), 7),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 7),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+    ]
+    obj.setStyle(TableStyle(style))
+    return obj
+
+
 # =========================================================
 # V143 - Methodology content + PDF export
 # =========================================================
@@ -13096,6 +13319,8 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
             "A taktikai üzenetek a saját játékmodellből, az ellenfél erősségeiből és gyengeségeiből, a javasolt stratégiai profilból, az ellenfél játékosértékeléséből és a csapat aktuális fizikai állapotából állnak össze.",
             "A rendszer az adott hét, ellenfél, saját játékmodell, stratégiai profil, játékosértékelés és terhelési állapot alapján állítja össze az üzeneteket. A taktikai célok naponta is változnak: más feladat készül a fő terhelési napra, az átmeneti napra, a meccstervi napra és az aktivációra.",
             "Az üzenetek tudásbázisból és szakmai szabályokból épülnek fel. A rendszer témánként választ, majd hasonlóságvizsgálattal kiszűri, hogy ugyanaz a motívum több blokkban vagy három egymást követő sorban megismétlődjön.",
+            "Az Executive Summary 3–5 különböző témájú kulcsüzenetet jelenít meg egy öt másodperc alatt áttekinthető vezetői blokkban. A blokk lehet védekezési, támadási, ellenfél-játékos vagy erőnléti fókuszú.",
+            "A kiemelőmotor nemcsak a címsorokat vastagítja. A magyarázó szövegben is automatikusan hangsúlyozza a legfontosabb zónákat, játékhelyzeteket, terhelési mutatókat, százalékokat és pontszámokat. Egy bekezdésben szándékosan csak néhány kifejezést emel ki, hogy a dokumentum ne váljon vizuálisan túlzsúfolttá.",
             "Az Executive Summary nagyobb betűméretű, sorkizárt törzsszöveget, hangsúlyos kulcsüzenet-dobozt, félkövér alcímeket és tágabb cellaközöket használ. A vezetői lényeg így a teljes mondatok végigolvasása nélkül is gyorsan felismerhető.",
             "A játékosszintű oldal egyértelműen két részre válik: ellenfél-játékosok meccstervi értékelése, illetve saját játékosok terhelési állapota és kockázata.",
             "A rendszer egyetlen edzés- vagy meccsfájlt, több külön Excel/CSV fájlt és ZIP-ben nagyobb fájlcsomagot is kezel. Egyhetes adatokból teljes heti állapotképet készít, de nem állít nem létező többhetes trendet. Két-három hétből rövid összevetést, négy vagy több hétből gördülő trendeket számol.",
