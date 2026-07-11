@@ -54,7 +54,7 @@ try:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, KeepTogether
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 except Exception:
@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V154_EXPORTS_PAGEBREAKS_2026_07_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V155_OWN_SAMPLE_EXPORT_FIX_2026_07_11"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -9324,24 +9324,24 @@ def build_fpi_own_team_profile_pdf_bytes(
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=0.9*cm, leftMargin=0.9*cm, topMargin=0.7*cm, bottomMargin=0.7*cm)
     styles = getSampleStyleSheet()
     title = ParagraphStyle("FPIOwnTitle", parent=styles["Title"], fontName=font_bold, fontSize=20, leading=23, textColor=colors.HexColor("#0F172A"))
-    sub = ParagraphStyle("FPIOwnSub", parent=styles["Normal"], fontName=font_name, fontSize=10.2, leading=10.5, textColor=colors.HexColor("#334155"))
-    body = ParagraphStyle("FPIOwnBody", parent=styles["Normal"], fontName=font_name, fontSize=7.6, leading=9.3, textColor=colors.HexColor("#111827"))
-    small = ParagraphStyle("FPIOwnSmall", parent=styles["Normal"], fontName=font_name, fontSize=6.5, leading=7.8, textColor=colors.HexColor("#111827"))
-    head = ParagraphStyle("FPIOwnHead", parent=styles["Normal"], fontName=font_bold, fontSize=7.0, leading=8.5, alignment=1, textColor=colors.white)
+    sub = ParagraphStyle("FPIOwnSub", parent=styles["Normal"], fontName=font_name, fontSize=10.2, leading=13.2, textColor=colors.HexColor("#334155"), alignment=4)
+    body = ParagraphStyle("FPIOwnBody", parent=styles["Normal"], fontName=font_name, fontSize=10.4, leading=13.8, textColor=colors.HexColor("#111827"), alignment=4)
+    small = ParagraphStyle("FPIOwnSmall", parent=styles["Normal"], fontName=font_name, fontSize=9.2, leading=12.0, textColor=colors.HexColor("#111827"), alignment=4)
+    head = ParagraphStyle("FPIOwnHead", parent=styles["Normal"], fontName=font_bold, fontSize=10.0, leading=12.4, alignment=1, textColor=colors.white)
 
     def clean(v):
         return pdf_safe_text(v).replace("\r", "").strip()
     def P(v, style=body):
         return Paragraph(html.escape(clean(v)).replace("\n", "<br/>") or "—", style)
     def section(txt, color="#DBEAFE"):
-        t = Table([[P(txt, ParagraphStyle("FPIOwnH", parent=body, fontName=font_bold, fontSize=11.0, leading=13.0, textColor=colors.HexColor("#0F172A")))]], colWidths=[27.7*cm])
+        t = Table([[P(txt, ParagraphStyle("FPIOwnH", parent=body, fontName=font_bold, fontSize=14.0, leading=17.0, textColor=colors.HexColor("#0F172A")))]], colWidths=[27.7*cm])
         t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor(color)),("BOX",(0,0),(-1,-1),0.4,colors.HexColor("#93C5FD")),("LEFTPADDING",(0,0),(-1,-1),7),("RIGHTPADDING",(0,0),(-1,-1),7),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
         return t
     def table(rows, widths, header_bg="#0F172A", row_bgs=None):
         if row_bgs is None:
             row_bgs=[colors.white, colors.HexColor("#F8FAFC")]
         t=Table(rows, colWidths=widths, repeatRows=1)
-        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor(header_bg)),("GRID",(0,0),(-1,-1),0.25,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),row_bgs),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
+        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor(header_bg)),("GRID",(0,0),(-1,-1),0.25,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),row_bgs),("LEFTPADDING",(0,0),(-1,-1),7),("RIGHTPADDING",(0,0),(-1,-1),7),("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6)]))
         return t
 
     story=[]
@@ -9398,35 +9398,100 @@ def build_fpi_own_team_profile_pdf_bytes(
 
 
 def build_fpi_own_team_profile_sample_pdf_bytes() -> Optional[bytes]:
-    demo_raw = build_demo_performance_data()
-    demo_df, _, missing = standardize_dataframe(demo_raw)
-    if missing:
-        return None
-    demo_df = add_position_group(demo_df)
-    latest = _fpi_latest_week(demo_df)
-    tactical_ctx = _build_demo_tactical_context()
-    # Demo player tables, hogy a minta PDF-ben is legyen játékosszintű saját csapat blokk.
-    tactical_ctx["own_player_tables"] = {
-        "creators": pd.DataFrame([{"player":"Kovács M.","position":"AM","key_passes":4.0,"xg":0.22,"shots":2},{"player":"Szabó B.","position":"W","key_passes":3.0,"crosses":7}]),
-        "progressors": pd.DataFrame([{"player":"Nagy D.","position":"CM","progressive_passes":9.0,"passes":58},{"player":"Tóth Á.","position":"DM","progressive_passes":7.0,"recoveries":8}]),
-        "build_up": pd.DataFrame([{"player":"Varga L.","position":"CB","passes":62.0,"progressive_passes":6},{"player":"Tóth Á.","position":"DM","passes":55.0,"lost_balls":3}]),
-        "finishers": pd.DataFrame([{"player":"Farkas Z.","position":"F","shots":5,"xg":0.75,"goals":0}]),
-        "wide_players": pd.DataFrame([{"player":"Szabó B.","position":"W","crosses":7,"key_passes":3}]),
-        "defenders": pd.DataFrame([{"player":"Farkas Z.","position":"CB","interceptions":6.0,"recoveries":9}]),
-        "duel_players": pd.DataFrame([{"player":"Balogh P.","position":"FB","defensive_challenges":11.0,"recoveries":6}]),
+    """
+    Stabil Saját csapat mintaexport.
+    A demo PDF ugyanazt a renderelőt használja, mint az éles riport,
+    de garantáltan kap saját csapat- és játékosszintű mintaadatot.
+    """
+    old_vals = {
+        "clean_own_formation_v132": st.session_state.get("clean_own_formation_v132"),
+        "clean_own_block_v132": st.session_state.get("clean_own_block_v132"),
+        "clean_own_attack_route_v132": st.session_state.get("clean_own_attack_route_v132"),
     }
-    tactical_ctx["own_player_evaluation"] = _fpi_build_player_evaluation_v132(tactical_ctx["own_player_tables"], side="own", max_rows=10)
-    old_vals = {"clean_own_formation_v132": st.session_state.get("clean_own_formation_v132"), "clean_own_block_v132": st.session_state.get("clean_own_block_v132"), "clean_own_attack_route_v132": st.session_state.get("clean_own_attack_route_v132")}
-    st.session_state["clean_own_formation_v132"] = st.session_state.get("clean_own_formation_v132", "4-2-3-1") or "4-2-3-1"
-    st.session_state["clean_own_block_v132"] = st.session_state.get("clean_own_block_v132", "Középső blokk") or "Középső blokk"
-    st.session_state["clean_own_attack_route_v132"] = st.session_state.get("clean_own_attack_route_v132", "Átmenetek") or "Átmenetek"
-    pdf = build_fpi_own_team_profile_pdf_bytes(demo_df, latest, "Magas presszing", tactical_context=tactical_ctx, demo_label="MINTA RIPORT / KTE U19 – saját csapat profil")
-    for k, v in old_vals.items():
-        if v is None:
-            st.session_state.pop(k, None)
-        else:
-            st.session_state[k] = v
-    return pdf
+
+    try:
+        demo_raw = build_demo_performance_data()
+        demo_df, _, missing = standardize_dataframe(demo_raw)
+        if missing or demo_df is None or demo_df.empty:
+            return None
+
+        demo_df = add_position_group(demo_df)
+        latest = _fpi_latest_week(demo_df)
+        if not latest:
+            return None
+
+        tactical_ctx = _build_demo_tactical_context()
+        if not isinstance(tactical_ctx, dict):
+            tactical_ctx = {}
+
+        tactical_ctx["own_team_metrics"] = {
+            "possession_pct": 54.8,
+            "shots": 13,
+            "xg": 1.62,
+            "entries_box": 24,
+            "final_third_entries": 42,
+            "key_passes": 9,
+            "corners": 6,
+            "ppda": 9.7,
+            "pressing_success_pct": 31.5,
+            "passes_accurate_pct": 84.2,
+            "crosses": 18,
+            "recoveries": 61,
+            "lost_balls": 104,
+            "counterattacks": 7,
+        }
+
+        tactical_ctx["own_player_tables"] = {
+            "creators": pd.DataFrame([
+                {"player": "Kovács M.", "position": "AM", "key_passes": 4.0, "xg": 0.22, "shots": 2},
+                {"player": "Szabó B.", "position": "W", "key_passes": 3.0, "crosses": 7},
+            ]),
+            "progressors": pd.DataFrame([
+                {"player": "Nagy D.", "position": "CM", "progressive_passes": 9.0, "passes": 58},
+                {"player": "Tóth Á.", "position": "DM", "progressive_passes": 7.0, "recoveries": 8},
+            ]),
+            "build_up": pd.DataFrame([
+                {"player": "Varga L.", "position": "CB", "passes": 62.0, "progressive_passes": 6},
+                {"player": "Tóth Á.", "position": "DM", "passes": 55.0, "lost_balls": 3},
+            ]),
+            "finishers": pd.DataFrame([
+                {"player": "Farkas Z.", "position": "F", "shots": 5, "xg": 0.75, "goals": 0},
+            ]),
+            "wide_players": pd.DataFrame([
+                {"player": "Szabó B.", "position": "W", "crosses": 7, "key_passes": 3},
+            ]),
+            "defenders": pd.DataFrame([
+                {"player": "Varga L.", "position": "CB", "interceptions": 6.0, "recoveries": 9},
+            ]),
+            "duel_players": pd.DataFrame([
+                {"player": "Balogh P.", "position": "FB", "defensive_challenges": 11.0, "recoveries": 6},
+            ]),
+        }
+        tactical_ctx["own_player_evaluation"] = _fpi_build_player_evaluation_v132(
+            tactical_ctx["own_player_tables"],
+            side="own",
+            max_rows=10,
+        )
+
+        st.session_state["clean_own_formation_v132"] = "4-2-3-1"
+        st.session_state["clean_own_block_v132"] = "Középső blokk"
+        st.session_state["clean_own_attack_route_v132"] = "Gyors átmenetek és félterületi kapcsolatok"
+
+        return build_fpi_own_team_profile_pdf_bytes(
+            demo_df,
+            latest,
+            "Kiegyensúlyozott",
+            tactical_context=tactical_ctx,
+            demo_label="MINTA RIPORT / SAJÁT CSAPAT PROFIL",
+        )
+    except Exception:
+        return None
+    finally:
+        for key, value in old_vals.items():
+            if value is None:
+                st.session_state.pop(key, None)
+            else:
+                st.session_state[key] = value
 
 
 def _fpi_enrich_tactical_context_v132(executive_ctx: Dict[str, object], own_player_tables: object, opp_player_tables: object) -> Dict[str, object]:
@@ -9819,13 +9884,25 @@ def render_fpi_landing_page_v100() -> None:
     sample_own = _fpi_safe_sample_v153(build_fpi_own_team_profile_sample_pdf_bytes) if "build_fpi_own_team_profile_sample_pdf_bytes" in globals() else None
     sample_method = _fpi_safe_sample_v153(build_fpi_methodology_pdf_bytes_v143) if "build_fpi_methodology_pdf_bytes_v143" in globals() else None
     with m1:
-        if sample_exec: st.download_button("⬇️ Executive", sample_exec, "fpi_minta_executive_summary.pdf", "application/pdf", use_container_width=True, key="sample_exec_v154")
+        if sample_exec:
+            st.download_button("⬇️ Executive", sample_exec, "fpi_minta_executive_summary.pdf", "application/pdf", use_container_width=True, key="sample_exec_v155")
+        else:
+            st.error("Executive minta nem készült el.")
     with m2:
-        if sample_gps: st.download_button("⬇️ GPS-only", sample_gps, "fpi_minta_gps_only_report.pdf", "application/pdf", use_container_width=True, key="sample_gps_v154")
+        if sample_gps:
+            st.download_button("⬇️ GPS-only", sample_gps, "fpi_minta_gps_only_report.pdf", "application/pdf", use_container_width=True, key="sample_gps_v155")
+        else:
+            st.error("GPS-only minta nem készült el.")
     with m3:
-        if sample_own: st.download_button("⬇️ Saját csapat", sample_own, "fpi_minta_sajat_csapat_profil.pdf", "application/pdf", use_container_width=True, key="sample_own_v154")
+        if sample_own:
+            st.download_button("⬇️ Saját csapat", sample_own, "fpi_minta_sajat_csapat_profil.pdf", "application/pdf", use_container_width=True, key="sample_own_v155")
+        else:
+            st.error("Saját csapat minta nem készült el.")
     with m4:
-        if sample_method: st.download_button("⬇️ Metodika", sample_method, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="sample_method_v154")
+        if sample_method:
+            st.download_button("⬇️ Metodika", sample_method, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="sample_method_v155")
+        else:
+            st.error("Metodika minta nem készült el.")
 
 
 
@@ -13749,6 +13826,7 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
             "A GPS-only riportban nincs külön fogalomtár és nincs automatikus heti típus címke. A fogalmi magyarázatok kizárólag a Metodika Centerben találhatók.",
             "A minta- és éles riportok ugyanazokat a renderelőfüggvényeket használják. A minták beépített demo adatokból, az éles riportok a feltöltött adatokból készülnek; egyetlen sikertelen mintaexport nem blokkolhatja a többi letöltési gombot.",
             "Az exportkészlet négy dokumentumra szűkül: Executive Summary, GPS-only riport, Saját csapat profil és Metodika. A Full Report nem jelenik meg sem a minta-, sem az éles exportok között.",
+            "A Saját csapat mintaexport garantált csapat- és játékosszintű demo adatokat használ. Az exportkártya hiba esetén sem tűnik el: a felület egyértelmű státuszt mutat, így a PDF-generálási probléma azonnal látható.",
             "A fő logikai blokkok új oldalon indulnak. A rendszer inkább több oldalt használ, mintsem hogy egy cím vagy egy összetartozó szakmai blokk az előző oldal alján kezdődjön.",
             "A korábbi automatikus kulcsszó-vastagítás helyett a szerkezet emeli ki a lényeget: rövid cím, megfigyelés, nyíl és meccstervi válasz. Ez gyorsabban értelmezhető, és kevésbé teszi zsúfolttá a dokumentumot.",
             "Az Executive Summary nagyobb betűméretű, sorkizárt törzsszöveget, hangsúlyos kulcsüzenet-dobozt, félkövér alcímeket és tágabb cellaközöket használ. A vezetői lényeg így a teljes mondatok végigolvasása nélkül is gyorsan felismerhető.",
