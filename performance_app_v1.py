@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V153_SAMPLE_EXPORTS_STABLE_2026_07_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V154_EXPORTS_PAGEBREAKS_2026_07_11"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -8765,6 +8765,7 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(tbl(c_rows, [1.0*cm, 26.7*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
     story.append(Spacer(1, 0.22*cm))
 
+    story.append(PageBreak())
     story.append(section("2. Edzés–meccs arányok választott korosztály/szint referenciával", "#FEF3C7"))
     if ratio_df is None or ratio_df.empty:
         story.append(P("Nincs elég adat az edzés/meccs arányokhoz. Kell legalább egy edzés és egy meccs típusú esemény.", body))
@@ -8795,6 +8796,7 @@ def build_fpi_gps_only_pdf_bytes(
 
     trend_v99 = _fpi_gps_trend_summary_v99(ctx, str(week))
     if isinstance(trend_v99.get("totals"), pd.DataFrame) and not trend_v99.get("totals").empty:
+        story.append(PageBreak())
         story.append(section("4. Előző hetek trendje – mikrociklus alapja", "#ECFDF5"))
         tr = [[P("Hét", head), P("Volumen", head), P("HSR", head), P("Sprint táv", head), P("Sprint db", head), P("High Eff.", head), P("Load", head)]]
         for _, r in trend_v99.get("totals").tail(5).iterrows():
@@ -8812,6 +8814,7 @@ def build_fpi_gps_only_pdf_bytes(
             story.append(P("Trendjelzések: " + "; ".join(trend_v99.get("signals", [])[:4]) + ".", small))
         story.append(Spacer(1, 0.22*cm))
 
+    story.append(PageBreak())
     story.append(section("5. Heti csapat GPS profil", "#E0F2FE"))
     wk = weekly.copy()
     if not wk.empty and "week" in wk.columns:
@@ -8835,6 +8838,7 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(tbl(gps_rows, [3.0*cm, 3.2*cm, 2.5*cm, 2.6*cm, 3.0*cm, 3.0*cm, 2.5*cm, 2.8*cm, 2.8*cm], header_bg="#0369A1"))
 
     story.append(Spacer(1, 0.22*cm))
+    story.append(PageBreak())
     story.append(section("6. Játékosszintű monitoring", "#FEE2E2"))
     risk_rows = [[P("Játékos", head), P("Szint", head), P("Miért fontos?", head)]]
     if risk_df is not None and not risk_df.empty:
@@ -9380,6 +9384,7 @@ def build_fpi_own_team_profile_pdf_bytes(
         story.append(P("Nincs saját játékosstatisztika Excel. Játékosszintű szerepértékeléshez saját játékos Excel szükséges.", body))
     story.append(Spacer(1,0.18*cm))
 
+    story.append(PageBreak())
     story.append(section("Edzői összegzés", "#FEF3C7"))
     bullets=[
         "Ez a riport nem ellenfélre készülő meccsterv, hanem a saját csapat aktuális profilja.",
@@ -9801,7 +9806,7 @@ def render_fpi_landing_page_v100() -> None:
         """, unsafe_allow_html=True)
 
     st.markdown('<div class="fpi-v137-section-title">Minta riportok</div>', unsafe_allow_html=True)
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4 = st.columns(4)
     def _fpi_safe_sample_v153(builder):
         try:
             value = builder()
@@ -9810,20 +9815,17 @@ def render_fpi_landing_page_v100() -> None:
             return None
 
     sample_exec = _fpi_safe_sample_v153(lambda: build_fpi_sample_pdf_bytes("executive"))
-    sample_full = _fpi_safe_sample_v153(lambda: build_fpi_sample_pdf_bytes("full"))
     sample_gps = _fpi_safe_sample_v153(build_fpi_gps_only_sample_pdf_bytes)
     sample_own = _fpi_safe_sample_v153(build_fpi_own_team_profile_sample_pdf_bytes) if "build_fpi_own_team_profile_sample_pdf_bytes" in globals() else None
     sample_method = _fpi_safe_sample_v153(build_fpi_methodology_pdf_bytes_v143) if "build_fpi_methodology_pdf_bytes_v143" in globals() else None
     with m1:
-        if sample_exec: st.download_button("⬇️ Executive", sample_exec, "fpi_minta_executive_summary.pdf", "application/pdf", use_container_width=True, key="sample_exec_v143")
+        if sample_exec: st.download_button("⬇️ Executive", sample_exec, "fpi_minta_executive_summary.pdf", "application/pdf", use_container_width=True, key="sample_exec_v154")
     with m2:
-        if sample_gps: st.download_button("⬇️ GPS-only", sample_gps, "fpi_minta_gps_only_report.pdf", "application/pdf", use_container_width=True, key="sample_gps_v143")
+        if sample_gps: st.download_button("⬇️ GPS-only", sample_gps, "fpi_minta_gps_only_report.pdf", "application/pdf", use_container_width=True, key="sample_gps_v154")
     with m3:
-        if sample_own: st.download_button("⬇️ Saját csapat", sample_own, "fpi_minta_sajat_csapat_profil.pdf", "application/pdf", use_container_width=True, key="sample_own_v143")
+        if sample_own: st.download_button("⬇️ Saját csapat", sample_own, "fpi_minta_sajat_csapat_profil.pdf", "application/pdf", use_container_width=True, key="sample_own_v154")
     with m4:
-        if sample_full: st.download_button("⬇️ Full report", sample_full, "fpi_minta_full_report.pdf", "application/pdf", use_container_width=True, key="sample_full_v143")
-    with m5:
-        if sample_method: st.download_button("⬇️ Metodika", sample_method, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="sample_method_v143")
+        if sample_method: st.download_button("⬇️ Metodika", sample_method, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="sample_method_v154")
 
 
 
@@ -10608,29 +10610,19 @@ def render_fpi_clean_workspace_v101() -> None:
         if own_team_pdf_clean is not None:
             st.download_button("⬇️ Saját csapat profil PDF", data=own_team_pdf_clean, file_name=f"fpi_sajat_csapat_profil_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_own_team_v137")
 
-    more1, more2 = st.columns(2)
-    with more1:
-        gps_pdf_clean = build_fpi_gps_only_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean)
-        if gps_pdf_clean is not None:
-            st.download_button("⬇️ GPS-only PDF", data=gps_pdf_clean, file_name=f"fpi_gps_only_report_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_gps_v137")
-    with more2:
-        full_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="full", tactical_context=clean_tactical_context)
-        if full_pdf_clean is not None:
-            st.download_button("⬇️ Full Report PDF", data=full_pdf_clean, file_name=f"fpi_full_report_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_full_v137")
-
-    gps_only_pdf_clean_v148 = _fpi_gps_only_download_bytes_v148(
+    gps_pdf_clean = build_fpi_gps_only_pdf_bytes(
         analysis_clean,
         selected_week_clean,
         selected_playstyle_clean,
     )
-    if gps_only_pdf_clean_v148 is not None:
+    if gps_pdf_clean is not None:
         st.download_button(
             "⬇️ GPS-only PDF",
-            data=gps_only_pdf_clean_v148,
-            file_name=f"fpi_gps_only_{safe_week_clean}.pdf",
+            data=gps_pdf_clean,
+            file_name=f"fpi_gps_only_report_{safe_week_clean}.pdf",
             mime="application/pdf",
             use_container_width=True,
-            key="clean_export_gps_only_v148",
+            key="clean_export_gps_v154",
         )
 
     method_pdf_clean_v143 = build_fpi_methodology_pdf_bytes_v143()
@@ -13756,6 +13748,8 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
             "Az Executive Summary és a GPS-only riport ugyanazt a GPS-alapú erőnléti insight- és mikrocikluslogikát használja. A taktikai riport ezt csak taktikai fókuszokkal egészíti ki, ezért ugyanazon hét erőnléti megállapításai nem mondhatnak ellent egymásnak.",
             "A GPS-only riportban nincs külön fogalomtár és nincs automatikus heti típus címke. A fogalmi magyarázatok kizárólag a Metodika Centerben találhatók.",
             "A minta- és éles riportok ugyanazokat a renderelőfüggvényeket használják. A minták beépített demo adatokból, az éles riportok a feltöltött adatokból készülnek; egyetlen sikertelen mintaexport nem blokkolhatja a többi letöltési gombot.",
+            "Az exportkészlet négy dokumentumra szűkül: Executive Summary, GPS-only riport, Saját csapat profil és Metodika. A Full Report nem jelenik meg sem a minta-, sem az éles exportok között.",
+            "A fő logikai blokkok új oldalon indulnak. A rendszer inkább több oldalt használ, mintsem hogy egy cím vagy egy összetartozó szakmai blokk az előző oldal alján kezdődjön.",
             "A korábbi automatikus kulcsszó-vastagítás helyett a szerkezet emeli ki a lényeget: rövid cím, megfigyelés, nyíl és meccstervi válasz. Ez gyorsabban értelmezhető, és kevésbé teszi zsúfolttá a dokumentumot.",
             "Az Executive Summary nagyobb betűméretű, sorkizárt törzsszöveget, hangsúlyos kulcsüzenet-dobozt, félkövér alcímeket és tágabb cellaközöket használ. A vezetői lényeg így a teljes mondatok végigolvasása nélkül is gyorsan felismerhető.",
             "A játékosszintű oldal egyértelműen két részre válik: ellenfél-játékosok meccstervi értékelése, illetve saját játékosok terhelési állapota és kockázata.",
@@ -17424,7 +17418,7 @@ with tab_exec:
             fpi_empty_state("Nincs játékos risk adat", "A risk gyorsnézet akkor jelenik meg, ha van elég heti játékos- és terhelésadat.", "🛡️")
 
     st.markdown("### Letölthető Football Performance Intelligence riportok")
-    st.caption("A régi vezetői PDF/Word/Excel/CSV gombok kikerültek. Itt csak a termékriportok maradnak: GPS-only, Executive Summary és Full Report.")
+    st.caption("Elérhető riportok: GPS-only, Executive Summary és Saját csapat profil.")
     safe_week_main = _safe_filename_week(selected_week)
 
     gps_only_live_pdf_main = build_fpi_gps_only_pdf_bytes(analysis_base_df.copy(), selected_week, selected_playstyle)
@@ -17440,8 +17434,11 @@ with tab_exec:
 
 
     st.markdown("### Football Performance Intelligence riportok – éles export")
-    st.caption("Három kimenet: GPS-only Report, Executive Summary és Full Report.")
+    st.caption("Három kimenet: GPS-only Report, Executive Summary és Saját csapat profil.")
     live_report_base = analysis_base_df.copy()
+    live_tactical_context_v154 = _fpi_context_for_export_v87(
+        tactical_gps_context if "tactical_gps_context" in globals() else {}
+    )
     lr1, lr2, lr3 = st.columns(3)
     with lr1:
         gps_only_pack_pdf = build_fpi_gps_only_pdf_bytes(live_report_base, selected_week, selected_playstyle)
@@ -17452,7 +17449,7 @@ with tab_exec:
                 file_name=f"fpi_gps_only_report_{safe_week_main}.pdf",
                 mime="application/pdf",
                 use_container_width=True,
-                key="download_fpi_gps_only_v96",
+                key="download_fpi_gps_only_v154",
             )
     with lr2:
         exec_pack_pdf = build_fpi_product_pdf_bytes(
@@ -17460,7 +17457,7 @@ with tab_exec:
             selected_week,
             selected_playstyle,
             report_type="executive",
-            tactical_context=_fpi_context_for_export_v87(tactical_gps_context if "tactical_gps_context" in globals() else {}),
+            tactical_context=live_tactical_context_v154,
         )
         if exec_pack_pdf is not None:
             st.download_button(
@@ -17469,24 +17466,23 @@ with tab_exec:
                 file_name=f"fpi_executive_summary_{safe_week_main}.pdf",
                 mime="application/pdf",
                 use_container_width=True,
-                key="download_fpi_exec_v83",
+                key="download_fpi_exec_v154",
             )
     with lr3:
-        full_pack_pdf = build_fpi_product_pdf_bytes(
+        own_pack_pdf = build_fpi_own_team_profile_pdf_bytes(
             live_report_base,
             selected_week,
             selected_playstyle,
-            report_type="full",
-            tactical_context=_fpi_context_for_export_v87(tactical_gps_context if "tactical_gps_context" in globals() else {}),
+            tactical_context=live_tactical_context_v154,
         )
-        if full_pack_pdf is not None:
+        if own_pack_pdf is not None:
             st.download_button(
-                "⬇️ Full Report PDF",
-                data=full_pack_pdf,
-                file_name=f"fpi_full_report_{safe_week_main}.pdf",
+                "⬇️ Saját csapat profil PDF",
+                data=own_pack_pdf,
+                file_name=f"fpi_sajat_csapat_profil_{safe_week_main}.pdf",
                 mime="application/pdf",
                 use_container_width=True,
-                key="download_fpi_full_v83",
+                key="download_fpi_own_team_v154",
             )
 
 
@@ -17676,57 +17672,59 @@ with tab_export:
     # V6.1 - Product Report Pack visszaemelve az Export fülre is
     # -------------------------------------------------------------------------
     st.markdown("### Football Performance Intelligence riportok – minta PDF-ek")
-    st.caption("Két riport: Executive Summary és Full Report. A minta ugyanazt a struktúrát használja, mint az éles export.")
+    st.caption("Négy minta: Executive Summary, GPS-only, Saját csapat profil és Metodika.")
     if 'build_fpi_sample_pdf_bytes' in globals():
         sample_exec_pdf_bytes_export = _fpi_safe_sample_v153(lambda: build_fpi_sample_pdf_bytes("executive"))
-        sample_full_pdf_bytes_export = _fpi_safe_sample_v153(lambda: build_fpi_sample_pdf_bytes("full"))
         sample_gps_only_pdf_bytes_export = _fpi_safe_sample_v153(build_fpi_gps_only_sample_pdf_bytes)
-        sample_method_pdf_bytes_export = build_fpi_methodology_pdf_bytes_v143() if "build_fpi_methodology_pdf_bytes_v143" in globals() else None
+        sample_own_pdf_bytes_export = _fpi_safe_sample_v153(build_fpi_own_team_profile_sample_pdf_bytes) if "build_fpi_own_team_profile_sample_pdf_bytes" in globals() else None
+        sample_method_pdf_bytes_export = _fpi_safe_sample_v153(build_fpi_methodology_pdf_bytes_v143) if "build_fpi_methodology_pdf_bytes_v143" in globals() else None
         sm1, sm2, sm3, sm4 = st.columns(4)
         with sm1:
             if sample_exec_pdf_bytes_export is not None:
-                st.download_button("⬇️ Minta Executive Summary", data=sample_exec_pdf_bytes_export, file_name="fpi_minta_executive_summary.pdf", mime="application/pdf", use_container_width=True, key="download_sample_exec_v143_export")
+                st.download_button("⬇️ Minta Executive Summary", data=sample_exec_pdf_bytes_export, file_name="fpi_minta_executive_summary.pdf", mime="application/pdf", use_container_width=True, key="download_sample_exec_v154_export")
         with sm2:
-            if sample_full_pdf_bytes_export is not None:
-                st.download_button("⬇️ Minta Full Report", data=sample_full_pdf_bytes_export, file_name="fpi_minta_full_report.pdf", mime="application/pdf", use_container_width=True, key="download_sample_full_v143_export")
-        with sm3:
             if sample_gps_only_pdf_bytes_export is not None:
-                st.download_button("⬇️ Minta GPS-only Report", data=sample_gps_only_pdf_bytes_export, file_name="fpi_minta_gps_only_report.pdf", mime="application/pdf", use_container_width=True, key="download_sample_gps_only_v143_export")
+                st.download_button("⬇️ Minta GPS-only Report", data=sample_gps_only_pdf_bytes_export, file_name="fpi_minta_gps_only_report.pdf", mime="application/pdf", use_container_width=True, key="download_sample_gps_only_v154_export")
+        with sm3:
+            if sample_own_pdf_bytes_export is not None:
+                st.download_button("⬇️ Minta Saját csapat", data=sample_own_pdf_bytes_export, file_name="fpi_minta_sajat_csapat_profil.pdf", mime="application/pdf", use_container_width=True, key="download_sample_own_v154_export")
         with sm4:
             if sample_method_pdf_bytes_export is not None:
-                st.download_button("⬇️ Metodika PDF", data=sample_method_pdf_bytes_export, file_name="fpi_metodika.pdf", mime="application/pdf", use_container_width=True, key="download_sample_method_v143_export")
-        if sample_exec_pdf_bytes_export is None and sample_full_pdf_bytes_export is None and sample_gps_only_pdf_bytes_export is None:
+                st.download_button("⬇️ Metodika PDF", data=sample_method_pdf_bytes_export, file_name="fpi_metodika.pdf", mime="application/pdf", use_container_width=True, key="download_sample_method_v154_export")
+        if all(x is None for x in [sample_exec_pdf_bytes_export, sample_gps_only_pdf_bytes_export, sample_own_pdf_bytes_export, sample_method_pdf_bytes_export]):
             st.info("A minta PDF exporthoz a reportlab csomag szükséges.")
 
     st.markdown("### Football Performance Intelligence riportok – éles PDF-ek")
-    st.caption("Az aktuális feltöltött adatokból: Executive Summary + Full Report.")
+    st.caption("Az aktuális feltöltött adatokból: GPS-only, Executive Summary és Saját csapat profil.")
     if 'build_fpi_product_pdf_bytes' in globals():
         live_report_base_export = analysis_base_df.copy() if 'analysis_base_df' in globals() else df.copy()
+        live_tactical_export_v154 = _fpi_context_for_export_v87(
+            tactical_gps_context if "tactical_gps_context" in globals() else {}
+        )
         er1, er2, er3 = st.columns(3)
         with er1:
             gps_only_pack_pdf_export = build_fpi_gps_only_pdf_bytes(live_report_base_export, selected_week, selected_playstyle)
             if gps_only_pack_pdf_export is not None:
-                st.download_button("⬇️ GPS-only PDF Report", data=gps_only_pack_pdf_export, file_name=f"fpi_gps_only_report_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_gps_only_v96_export")
+                st.download_button("⬇️ GPS-only PDF Report", data=gps_only_pack_pdf_export, file_name=f"fpi_gps_only_report_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_gps_only_v154_export")
         with er2:
             exec_pack_pdf_export = build_fpi_product_pdf_bytes(
                 live_report_base_export,
                 selected_week,
                 selected_playstyle,
                 report_type="executive",
-                tactical_context=_fpi_context_for_export_v87(tactical_gps_context if "tactical_gps_context" in globals() else {}),
+                tactical_context=live_tactical_export_v154,
             )
             if exec_pack_pdf_export is not None:
-                st.download_button("⬇️ Executive Summary PDF", data=exec_pack_pdf_export, file_name=f"fpi_executive_summary_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_exec_v83_export")
+                st.download_button("⬇️ Executive Summary PDF", data=exec_pack_pdf_export, file_name=f"fpi_executive_summary_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_exec_v154_export")
         with er3:
-            full_pack_pdf_export = build_fpi_product_pdf_bytes(
+            own_pack_pdf_export = build_fpi_own_team_profile_pdf_bytes(
                 live_report_base_export,
                 selected_week,
                 selected_playstyle,
-                report_type="full",
-                tactical_context=_fpi_context_for_export_v87(tactical_gps_context if "tactical_gps_context" in globals() else {}),
+                tactical_context=live_tactical_export_v154,
             )
-            if full_pack_pdf_export is not None:
-                st.download_button("⬇️ Full Report PDF", data=full_pack_pdf_export, file_name=f"fpi_full_report_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_full_v83_export")
+            if own_pack_pdf_export is not None:
+                st.download_button("⬇️ Saját csapat profil PDF", data=own_pack_pdf_export, file_name=f"fpi_sajat_csapat_profil_{safe_week}.pdf", mime="application/pdf", use_container_width=True, key="download_fpi_own_v154_export")
     else:
         st.warning("A Product Report Pack függvényei nem érhetők el ebben a fájlban.")
 
