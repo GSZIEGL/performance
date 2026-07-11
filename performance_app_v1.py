@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V151_PRO_SCOUTING_LANGUAGE_2026_07_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V152_PDF_DESIGN_SYNC_2026_07_11"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7503,10 +7503,13 @@ def build_fpi_product_pdf_bytes(
 
         has_tactical_signal = _fpi_has_tactical_signal_v95(tactical_context)
         tactical_plan = tactical_context.get("plan_a", "KIE – kiegyensúlyozott") if has_tactical_signal else "GPS-only – erőnléti fókuszú mikrociklus"
+        shared_fitness_v152 = _fpi_shared_fitness_payload_v152(
+            analysis, week, playstyle, tactical_context=tactical_context if has_tactical_signal else {}
+        )
+        fitness_insights_v146 = shared_fitness_v152['fitness_insights']
+        md_rows_simple = shared_fitness_v152['md_rows']
+
         if has_tactical_signal:
-            fitness_insights_v146 = _fpi_contextual_gps_only_insights_v146(
-                ctx, priorities, readiness, week, 5
-            )
             coach_blocks_v146 = _fpi_coach_blocks_v146(
                 tactical_context, ctx, readiness, priorities, week
             )
@@ -7514,9 +7517,6 @@ def build_fpi_product_pdf_bytes(
             match_plan_insights_v146 = coach_blocks_v146["plan"]
             team_tactical_insights_v146 = coach_blocks_v146["team"]
         else:
-            fitness_insights_v146 = _fpi_contextual_gps_only_insights_v146(
-                ctx, priorities, readiness, week, 7
-            )
             tactical_insights_v146 = []
             match_plan_insights_v146 = []
             team_tactical_insights_v146 = []
@@ -7530,13 +7530,6 @@ def build_fpi_product_pdf_bytes(
         team_tactical_msgs = [
             _fpi_render_insight_text_v146(x) for x in team_tactical_insights_v146
         ]
-        md_rows_simple = _fpi_contextual_md_plan_rows_v151(
-            tactical_context,
-            gps_context=ctx,
-            readiness=readiness,
-            priorities=priorities,
-            week=week,
-        )
         risk_rows_simple = _fpi_compact_player_risk_rows_v82(risk_df, 12)
 
         # 1) felső döntési sáv: több taktikai megállapítás és konkrét meccsterv
@@ -7769,7 +7762,7 @@ def build_fpi_product_pdf_bytes(
             story.append(Paragraph(pdf_safe_text("Értelmezés: a heti összes megmutatja, hogy a teljes edzésheted hány meccsnyi ingert adott. Az edzésátlag azt mutatja, hogy egy átlagos edzés hány %-a egy meccsnek. A kettőt együtt kell nézni."), small))
         story.append(Spacer(1, 0.25*cm))
 
-        story.append(section("Fogalmak röviden – HSR, sprint és sprint expozíció", "#DBEAFE"))
+        story.append(section(" röviden – HSR, sprint és sprint expozíció", "#DBEAFE"))
         expl = [[P("Fogalom", head), P("Egyszerű jelentés", head)]]
         expl.append([P("HSR", small), P("High Speed Running: nagy sebességű futás, általában kb. 19,8–20 km/h felett. Ez még nem feltétlen maximális sprint.", small)])
         expl.append([P("Sprint", small), P("Sprintzóna vagy sprintakció. A sprint táv a sprintzónában megtett méter, a sprint count pedig a sprintakciók darabszáma.", small)])
@@ -8673,7 +8666,7 @@ def build_fpi_gps_only_pdf_bytes(
     styles = getSampleStyleSheet()
     title = ParagraphStyle("GPSOnlyTitle", parent=styles["Title"], fontName=font_bold, fontSize=20, leading=23, textColor=colors.HexColor("#0F172A"))
     sub = ParagraphStyle("GPSOnlySub", parent=styles["Normal"], fontName=font_name, fontSize=8.8, leading=11, textColor=colors.HexColor("#334155"))
-    body = ParagraphStyle("GPSOnlyBody", parent=styles["Normal"], fontName=font_name, fontSize=8.0, leading=10.2, textColor=colors.HexColor("#111827"))
+    body = ParagraphStyle("GPSOnlyBody", parent=styles["Normal"], fontName=font_name, fontSize=10.2, leading=13.4, textColor=colors.HexColor("#111827"))
     small = ParagraphStyle("GPSOnlySmall", parent=styles["Normal"], fontName=font_name, fontSize=7.0, leading=8.6, textColor=colors.HexColor("#111827"))
     head = ParagraphStyle("GPSOnlyHead", parent=styles["Normal"], fontName=font_bold, fontSize=7.4, leading=8.8, textColor=colors.white)
     story = []
@@ -8841,7 +8834,7 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(tbl(risk_rows, [6.5*cm, 4.0*cm, 17.2*cm], header_bg="#7F1D1D", row_bgs=[colors.white, colors.HexColor("#FEF2F2")]))
 
     story.append(PageBreak())
-    story.append(section("7. Fogalmak röviden", "#DCFCE7"))
+    story.append(section("7.  röviden", "#DCFCE7"))
     expl = [[P("Fogalom", head), P("Jelentés", head)]]
     expl.append([P("Volumen", small), P("Összmunka: például teljes táv, edzésidő, load vagy heti összterhelés.", small)])
     expl.append([P("HSR", small), P("High Speed Running: nagy sebességű futás, általában kb. 19,8–20 km/h felett. Nem feltétlen maximális sprint.", small)])
@@ -8855,7 +8848,7 @@ def build_fpi_gps_only_pdf_bytes(
     buffer.seek(0)
     return buffer.getvalue()
 
-def build_fpi_gps_only_sample_pdf_bytes() -> Optional[bytes]:
+def build_fpi_gps_only_sample_pdf_bytes_v152() -> Optional[bytes]:
     demo_raw = build_demo_performance_data()
     demo_df, _, missing = standardize_dataframe(demo_raw)
     if missing:
@@ -9357,6 +9350,7 @@ def build_fpi_own_team_profile_pdf_bytes(
     story.append(Spacer(1,0.18*cm))
 
     metric_rows=_fpi_team_metric_rows_v132(own_metrics)
+    story.append(PageBreak())
     story.append(section("Csapatszintű taktikai / játékprofil", "#E0F2FE"))
     if metric_rows:
         tr=[[P("Mutató",head),P("Érték",head),P("Referencia / értékelés",head),P("Edzői olvasat",head)]]
@@ -9367,6 +9361,7 @@ def build_fpi_own_team_profile_pdf_bytes(
         story.append(P("Nincs saját csapatstatisztika Excel feltöltve. A riport ilyenkor GPS + megadott játékmodell alapján ad saját csapat profilt.", body))
     story.append(Spacer(1,0.18*cm))
 
+    story.append(PageBreak())
     story.append(section("Játékosszintű saját értékelés", "#DCFCE7"))
     if own_eval:
         pr=[[P("Játékos",head),P("Szerep",head),P("Konkrét mutatók",head),P("Értékelés",head),P("Használati javaslat",head)]]
@@ -9802,7 +9797,7 @@ def render_fpi_landing_page_v100() -> None:
     try:
         sample_exec = build_fpi_sample_pdf_bytes("executive")
         sample_full = build_fpi_sample_pdf_bytes("full")
-        sample_gps = build_fpi_gps_only_sample_pdf_bytes()
+        sample_gps = build_fpi_gps_only_sample_pdf_bytes_v152()
         sample_own = build_fpi_own_team_profile_sample_pdf_bytes() if "build_fpi_own_team_profile_sample_pdf_bytes" in globals() else None
         sample_method = build_fpi_methodology_pdf_bytes_v143() if "build_fpi_methodology_pdf_bytes_v143" in globals() else None
     except Exception:
@@ -10611,7 +10606,7 @@ def render_fpi_clean_workspace_v101() -> None:
         if full_pdf_clean is not None:
             st.download_button("⬇️ Full Report PDF", data=full_pdf_clean, file_name=f"fpi_full_report_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_full_v137")
 
-    gps_only_pdf_clean_v148 = _fpi_gps_only_download_bytes_v148(
+    gps_only_pdf_clean_v148 = build_fpi_gps_only_pdf_bytes_v152(
         analysis_clean,
         selected_week_clean,
         selected_playstyle_clean,
@@ -12962,7 +12957,7 @@ def _fpi_emphasize_message_v148(text: object, max_len: int = 360) -> str:
     return pdf_safe_text(clean)
 
 
-def _fpi_gps_only_download_bytes_v148(
+def build_fpi_gps_only_pdf_bytes_v152(
     analysis,
     selected_week,
     selected_playstyle,
@@ -13672,6 +13667,99 @@ def _fpi_contextual_md_plan_rows_v151(
     return result
 
 
+
+# =========================================================
+# V152 - Közös PDF design és egységes erőnléti riportmotor
+# =========================================================
+def _fpi_shared_fitness_payload_v152(analysis, selected_week, selected_playstyle, tactical_context=None):
+    """Executive és GPS-only közös erőnléti forrása."""
+    week = str(selected_week)
+    ctx = _fpi_week_context_v82(analysis, week)
+    priorities = _fpi_week_priorities_v82(analysis, week)
+    readiness = int(_fpi_readiness_score_v82(analysis, week))
+    risk_df = _fpi_player_risk_table_v82(analysis, week)
+    fitness_insights = _fpi_contextual_gps_only_insights_v146(ctx, priorities, readiness, week, 8)
+    md_rows = _fpi_contextual_md_plan_rows_v151(
+        tactical_context or {}, gps_context=ctx, readiness=readiness,
+        priorities=priorities, week=week,
+    )
+    detailed_md_rows = _fpi_weekly_fitness_rows_v147(md_rows, fitness_insights, readiness)
+    return {
+        'week': week, 'ctx': ctx, 'priorities': priorities, 'readiness': readiness,
+        'risk_df': risk_df, 'fitness_insights': fitness_insights,
+        'fitness_messages': [_fpi_render_insight_text_v146(x) for x in fitness_insights],
+        'md_rows': md_rows, 'detailed_md_rows': detailed_md_rows,
+    }
+
+
+def _fpi_pdf_common_styles_v152(styles, font_name, font_bold):
+    """Nagyobb, sorkizárt, egységes PDF-stílusok."""
+    return {
+        'title': ParagraphStyle('FPI152Title', parent=styles['Title'], fontName=font_bold, fontSize=22, leading=26, textColor=colors.HexColor('#0F172A')),
+        'section': ParagraphStyle('FPI152Section', parent=styles['Heading2'], fontName=font_bold, fontSize=14, leading=17, textColor=colors.HexColor('#0F172A'), spaceAfter=7),
+        'body': ParagraphStyle('FPI152Body', parent=styles['BodyText'], fontName=font_name, fontSize=10.6, leading=14.1, textColor=colors.HexColor('#111827'), alignment=4),
+        'small': ParagraphStyle('FPI152Small', parent=styles['BodyText'], fontName=font_name, fontSize=9.4, leading=12.4, textColor=colors.HexColor('#111827'), alignment=4),
+        'table': ParagraphStyle('FPI152Table', parent=styles['BodyText'], fontName=font_name, fontSize=9.2, leading=12.0, textColor=colors.HexColor('#111827'), alignment=4),
+        'head': ParagraphStyle('FPI152Head', parent=styles['BodyText'], fontName=font_bold, fontSize=10.5, leading=13.0, textColor=colors.white, alignment=1),
+    }
+
+
+
+def build_fpi_gps_only_pdf_bytes_v152(analysis, selected_week, selected_playstyle, demo_label=None):
+    if SimpleDocTemplate is None:
+        return None
+    payload = _fpi_shared_fitness_payload_v152(analysis, selected_week, selected_playstyle, tactical_context={})
+    output = io.BytesIO()
+    try:
+        font_name, font_bold = _register_pdf_fonts()
+    except Exception:
+        font_name, font_bold = 'Helvetica', 'Helvetica-Bold'
+    styles = getSampleStyleSheet()
+    s = _fpi_pdf_common_styles_v152(styles, font_name, font_bold)
+    doc = SimpleDocTemplate(output, pagesize=landscape(A4), rightMargin=1.25*cm, leftMargin=1.25*cm, topMargin=1.15*cm, bottomMargin=1.15*cm)
+
+    def P(v, style=None):
+        return Paragraph(pdf_safe_text(_fpi_complete_text_v151(v)).replace('\\n','<br/>'), style or s['body'])
+    def sec(title, bg='#DBEAFE'):
+        t=Table([[P(title,s['section'])]], colWidths=[27.7*cm])
+        t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor(bg)),('BOX',(0,0),(-1,-1),.6,colors.HexColor('#CBD5E1')),('LEFTPADDING',(0,0),(-1,-1),9),('RIGHTPADDING',(0,0),(-1,-1),9),('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]))
+        return t
+    def tbl(rows,widths,bg='#075985'):
+        t=Table(rows,colWidths=widths,repeatRows=1,splitByRow=1)
+        t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor(bg)),('TEXTCOLOR',(0,0),(-1,0),colors.white),('GRID',(0,0),(-1,-1),.35,colors.HexColor('#CBD5E1')),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),7),('RIGHTPADDING',(0,0),(-1,-1),7),('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6)]))
+        return t
+
+    story=[P('Football Performance Intelligence – GPS Intelligence Report',s['title']),Spacer(1,.18*cm)]
+    story.append(sec('1. Heti erőnléti helyzetkép'))
+    rows=[[P('Terület',s['head']),P('Aktuális értelmezés',s['head']),P('Edzői teendő',s['head'])]]
+    for ins in payload['fitness_insights'][:8]:
+        rows.append([P(ins.title or ins.topic,s['table']),P(ins.finding,s['table']),P(ins.recommendation,s['table'])])
+    story.append(tbl(rows,[5.0*cm,10.9*cm,11.8*cm]))
+    story.append(PageBreak())
+
+    story.append(sec('2. Mikrociklus – erőnléti terv','#EDE9FE'))
+    rows=[[P('Nap',s['head']),P('Erőnléti fókusz',s['head']),P('Taktikai fókusz',s['head']),P('Edzői megjegyzés',s['head'])]]
+    for day,fit,tact,note in payload['detailed_md_rows']:
+        rows.append([P(day,s['table']),P(fit,s['table']),P(tact,s['table']),P(note,s['table'])])
+    story.append(tbl(rows,[2.4*cm,8.3*cm,8.4*cm,8.6*cm],'#312E81'))
+    story.append(PageBreak())
+
+    story.append(sec('3. Játékosszintű terhelési kockázat','#FEE2E2'))
+    risk_rows=_fpi_compact_player_risk_rows_v82(payload['risk_df'],20)
+    rr=[[P(x,s['head']) for x in risk_rows[0]]]
+    for row in risk_rows[1:]: rr.append([P(x,s['table']) for x in row])
+    story.append(tbl(rr,[6.3*cm,4.2*cm,17.2*cm],'#991B1B'))
+    doc.build(story)
+    output.seek(0)
+    return output.read()
+
+
+def build_fpi_gps_only_sample_pdf_bytes_v152():
+    analysis=build_fpi_demo_analysis()
+    week=_fpi_demo_selected_week_v82(analysis)
+    return build_fpi_gps_only_pdf_bytes_v152(analysis,week,'Kiegyensúlyozott',demo_label='MINTA')
+
+
 # =========================================================
 # V143 - Methodology content + PDF export
 # =========================================================
@@ -13745,6 +13833,9 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
             "Az üzenetek tudásbázisból és szakmai szabályokból épülnek fel. A rendszer témánként választ, majd hasonlóságvizsgálattal kiszűri, hogy ugyanaz a motívum több blokkban vagy három egymást követő sorban megismétlődjön.",
             "Az Executive Summary 3–5 különböző témájú kulcsüzenetet jelenít meg rövid scouting-lánc formájában: megfigyelés → következmény → konkrét meccstervi válasz.",
             "A taktikai nyelvezet NB I/NB II-es szakmai közeghez igazodik. Nem általános futballalapelveket tanít, hanem az ellenfél adataiból és a saját csapat aktuális állapotából levezetett, helyhez, játékoshoz és szituációhoz kötött döntési pontokat ad.",
+            "Az Executive Summary és a GPS-only riport ugyanabból a közös erőnléti insight- és mikrociklusmotorból dolgozik. Ugyanazon hét és beállítások mellett az erőnléti megállapítások, a játékoskockázat és a mikrociklus erőnléti része nem térhet el.",
+            "A GPS-only riport nem tartalmaz külön fogalomtárat vagy heti típus címkét. A fogalmak a Metodika Centerben érhetők el; a riport az állapotképre, a mikrociklusra és a játékoskockázatra koncentrál.",
+            "Az Executive, a GPS-only, a saját csapat és a metodika PDF egységes vizuális rendszert használ: nagyobb betűméret, sorkizárt törzsszöveg, tágabb cellaköz, ismétlődő táblázatfejléc és logikus oldaltörés.",
             "A riport nem használ félbehagyott, három ponttal levágott mondatokat. Ha a tartalom hosszabb, a PDF új sorba vagy új oldalra tör, de a szakmai gondolat teljes marad.",
             "A korábbi automatikus kulcsszó-vastagítás helyett a szerkezet emeli ki a lényeget: rövid cím, megfigyelés, nyíl és meccstervi válasz. Ez gyorsabban értelmezhető, és kevésbé teszi zsúfolttá a dokumentumot.",
             "Az Executive Summary nagyobb betűméretű, sorkizárt törzsszöveget, hangsúlyos kulcsüzenet-dobozt, félkövér alcímeket és tágabb cellaközöket használ. A vezetői lényeg így a teljes mondatok végigolvasása nélkül is gyorsan felismerhető.",
@@ -17671,7 +17762,7 @@ with tab_export:
         try:
             sample_exec_pdf_bytes_export = build_fpi_sample_pdf_bytes("executive")
             sample_full_pdf_bytes_export = build_fpi_sample_pdf_bytes("full")
-            sample_gps_only_pdf_bytes_export = build_fpi_gps_only_sample_pdf_bytes()
+            sample_gps_only_pdf_bytes_export = build_fpi_gps_only_sample_pdf_bytes_v152()
         except Exception:
             sample_exec_pdf_bytes_export = sample_full_pdf_bytes_export = sample_gps_only_pdf_bytes_export = None
         sample_method_pdf_bytes_export = build_fpi_methodology_pdf_bytes_v143() if "build_fpi_methodology_pdf_bytes_v143" in globals() else None
