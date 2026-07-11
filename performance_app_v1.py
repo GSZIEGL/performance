@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V147_SUMMARY_LAYOUT_FITNESS_DEPTH_2026_07_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V148_READABLE_JUSTIFIED_PDFS_GPS_EXPORT_2026_07_11"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -4873,7 +4873,7 @@ def build_premium_pdf_bytes(
         "LiveReportSubtitle",
         parent=styles["Normal"],
         fontName=font_name,
-        fontSize=8.5,
+        fontSize=10.2,
         leading=11,
         textColor=colors.HexColor("#475569"),
         spaceAfter=8,
@@ -4916,7 +4916,7 @@ def build_premium_pdf_bytes(
         "LiveReportHeader",
         parent=styles["Normal"],
         fontName=font_bold,
-        fontSize=7.2,
+        fontSize=9.0,
         leading=9,
         alignment=1,
         textColor=colors.white,
@@ -4925,7 +4925,7 @@ def build_premium_pdf_bytes(
         "KpiLabel",
         parent=styles["Normal"],
         fontName=font_bold,
-        fontSize=7.2,
+        fontSize=9.0,
         leading=9,
         alignment=1,
         textColor=colors.white,
@@ -5616,7 +5616,7 @@ def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
     body = ParagraphStyle("FPIBody", parent=styles["BodyText"], fontName=font_name, fontSize=8.3, leading=10.2, textColor=colors.HexColor("#111827"))
     body_white = ParagraphStyle("FPIBodyWhite", parent=styles["BodyText"], fontName=font_name, fontSize=8.2, leading=10.2, textColor=colors.white)
     small = ParagraphStyle("FPISmall", parent=styles["BodyText"], fontName=font_name, fontSize=7.3, leading=9, textColor=colors.HexColor("#64748b"))
-    header = ParagraphStyle("FPIHeader", parent=styles["BodyText"], fontName=font_bold, fontSize=7.7, leading=9.2, textColor=colors.white, alignment=TA_CENTER)
+    header = ParagraphStyle("FPIHeader", parent=styles["BodyText"], fontName=font_bold, fontSize=9.3, leading=9.2, textColor=colors.white, alignment=TA_CENTER)
     kpi_label = ParagraphStyle("KPILabel", parent=styles["BodyText"], fontName=font_bold, fontSize=7, leading=8, textColor=colors.HexColor("#bfdbfe"), alignment=TA_CENTER)
     kpi_value = ParagraphStyle("KPIValue", parent=styles["BodyText"], fontName=font_bold, fontSize=18, leading=21, textColor=colors.white, alignment=TA_CENTER)
 
@@ -7366,7 +7366,7 @@ def build_fpi_product_pdf_bytes(
     h2 = ParagraphStyle("FPI58H2", parent=styles["Heading2"], fontName=font_bold, fontSize=11.2, leading=14, textColor=colors.HexColor("#0F172A"))
     body = ParagraphStyle("FPI58Body", parent=styles["Normal"], fontName=font_name, fontSize=8.0, leading=10.2, textColor=colors.HexColor("#111827"))
     small = ParagraphStyle("FPI58Small", parent=styles["Normal"], fontName=font_name, fontSize=6.6, leading=7.9, textColor=colors.HexColor("#111827"))
-    head = ParagraphStyle("FPI58Head", parent=styles["Normal"], fontName=font_bold, fontSize=7.2, leading=8.8, alignment=1, textColor=colors.white)
+    head = ParagraphStyle("FPI58Head", parent=styles["Normal"], fontName=font_bold, fontSize=9.0, leading=8.8, alignment=1, textColor=colors.white)
     white_big = ParagraphStyle("FPI58WhiteBig", parent=styles["Normal"], fontName=font_bold, fontSize=16, leading=18, alignment=1, textColor=colors.white)
     white_small = ParagraphStyle("FPI58WhiteSmall", parent=styles["Normal"], fontName=font_name, fontSize=7.0, leading=8.5, alignment=1, textColor=colors.white)
 
@@ -7486,7 +7486,7 @@ def build_fpi_product_pdf_bytes(
         opp_eval_exec = (tactical_context or {}).get("opponent_player_evaluation", []) if isinstance(tactical_context, dict) else []
 
         tactical_findings_text = "\n\n".join(
-            [f"• {_fpi_render_insight_text_v146(x)}" for x in tactical_insights_v146[:5]]
+            [f"• {_fpi_emphasize_message_v148(_fpi_render_insight_text_v146(x))}" for x in tactical_insights_v146[:5]]
         ) or "• Nincs elegendő taktikai input; a riport GPS-only módban készült."
 
         opponent_focus_lines = []
@@ -7501,7 +7501,7 @@ def build_fpi_product_pdf_bytes(
         opponent_focus_text = "\n\n".join(opponent_focus_lines) or "• Nincs ellenfél-játékos Excel vagy azonosítható játékosprofil."
 
         match_plan_text = "\n\n".join(
-            [f"• {_fpi_render_insight_text_v146(x)}" for x in match_plan_insights_v146[:6]]
+            [f"• {_fpi_emphasize_message_v148(_fpi_render_insight_text_v146(x))}" for x in match_plan_insights_v146[:6]]
         ) or f"• {_fpi_hu_plain_text_v144(tactical_plan)}"
 
         fast_rows = [[P("Taktikai megállapítások", head), P("Ellenfél játékosok", head), P("Meccsterv", head)]]
@@ -7513,7 +7513,8 @@ def build_fpi_product_pdf_bytes(
         story.append(table(fast_rows, [9.2*cm, 9.2*cm, 9.3*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF")]))
         story.append(Spacer(1, 0.18*cm))
 
-        # 1. pont lezárása: a heti ciklusterv ugyanazon az oldalon, tömören
+        # 1. pont külön oldalon marad; utána új oldal kezdődik
+        story.append(PageBreak())
         story.append(section("Heti ciklusterv – erőnléti + taktikai cél", "#EDE9FE"))
         detailed_md_rows_v147 = _fpi_weekly_fitness_rows_v147(
             md_rows_simple, fitness_insights_v146, readiness
@@ -7526,10 +7527,10 @@ def build_fpi_product_pdf_bytes(
         ]]
         for d, fgoal, tgoal, coach_note in detailed_md_rows_v147:
             md_table.append([
-                P(d, small),
-                P(fgoal, small),
-                P(tgoal, small),
-                P(coach_note, small),
+                P(d, body),
+                P(_fpi_emphasize_message_v148(fgoal, 520), body),
+                P(_fpi_emphasize_message_v148(tgoal, 520), body),
+                P(_fpi_emphasize_message_v148(coach_note, 520), body),
             ])
         story.append(table(
             md_table,
@@ -7538,8 +7539,8 @@ def build_fpi_product_pdf_bytes(
             row_bgs=[colors.HexColor("#F5F3FF"), colors.white],
         ))
 
-        # 2. pont – külön oldal
-        story.append(PageBreak())
+        # 2. pont – a heti ciklusterv után ugyanazon az oldalon kezdődik; ha nem fér el, a PDF automatikusan tördel
+        story.append(Spacer(1, 0.22*cm))
         story.append(section("2. Fő edzői üzenetek", "#DCFCE7"))
         story.append(P(
             "A taktikai és erőnléti üzenetek az adott ellenfélhez, heti terhelési állapothoz és mikrociklushoz igazodnak.",
@@ -7552,8 +7553,8 @@ def build_fpi_product_pdf_bytes(
             fm = fitness_msgs[i] if i < len(fitness_msgs) else ""
             tm = team_tactical_msgs[i] if i < len(team_tactical_msgs) else ""
             msg_rows.append([
-                P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(fm, 420)), small),
-                P(_fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(tm, 420)), small),
+                P(_fpi_emphasize_message_v148(fm, 420), small),
+                P(_fpi_emphasize_message_v148(tm, 420), small),
             ])
         story.append(table(
             msg_rows,
@@ -9226,7 +9227,7 @@ def build_fpi_own_team_profile_pdf_bytes(
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=0.9*cm, leftMargin=0.9*cm, topMargin=0.7*cm, bottomMargin=0.7*cm)
     styles = getSampleStyleSheet()
     title = ParagraphStyle("FPIOwnTitle", parent=styles["Title"], fontName=font_bold, fontSize=20, leading=23, textColor=colors.HexColor("#0F172A"))
-    sub = ParagraphStyle("FPIOwnSub", parent=styles["Normal"], fontName=font_name, fontSize=8.5, leading=10.5, textColor=colors.HexColor("#334155"))
+    sub = ParagraphStyle("FPIOwnSub", parent=styles["Normal"], fontName=font_name, fontSize=10.2, leading=10.5, textColor=colors.HexColor("#334155"))
     body = ParagraphStyle("FPIOwnBody", parent=styles["Normal"], fontName=font_name, fontSize=7.6, leading=9.3, textColor=colors.HexColor("#111827"))
     small = ParagraphStyle("FPIOwnSmall", parent=styles["Normal"], fontName=font_name, fontSize=6.5, leading=7.8, textColor=colors.HexColor("#111827"))
     head = ParagraphStyle("FPIOwnHead", parent=styles["Normal"], fontName=font_bold, fontSize=7.0, leading=8.5, alignment=1, textColor=colors.white)
@@ -10517,6 +10518,21 @@ def render_fpi_clean_workspace_v101() -> None:
         full_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="full", tactical_context=clean_tactical_context)
         if full_pdf_clean is not None:
             st.download_button("⬇️ Full Report PDF", data=full_pdf_clean, file_name=f"fpi_full_report_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_full_v137")
+
+    gps_only_pdf_clean_v148 = _fpi_gps_only_download_bytes_v148(
+        analysis_clean,
+        selected_week_clean,
+        selected_playstyle_clean,
+    )
+    if gps_only_pdf_clean_v148 is not None:
+        st.download_button(
+            "⬇️ GPS-only PDF",
+            data=gps_only_pdf_clean_v148,
+            file_name=f"fpi_gps_only_{safe_week_clean}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="clean_export_gps_only_v148",
+        )
 
     method_pdf_clean_v143 = build_fpi_methodology_pdf_bytes_v143()
     if method_pdf_clean_v143 is not None:
@@ -12834,6 +12850,40 @@ def _fpi_fitness_snapshot_rows_v147(
     return rows
 
 
+
+# =========================================================
+# V148 - Olvasható PDF, kiemelések, sorkizárás
+# =========================================================
+def _fpi_emphasize_message_v148(text: object, max_len: int = 360) -> str:
+    clean = _fpi_strip_raw_repr_v146(_fpi_extract_coach_text_v145(text, max_len))
+    if not clean:
+        return ""
+    if ":" in clean:
+        head, rest = clean.split(":", 1)
+        head = head.strip()
+        rest = rest.strip()
+        if 1 <= len(head.split()) <= 5:
+            return f"<b>{pdf_safe_text(head)}:</b> {pdf_safe_text(rest)}"
+    first_sentence = re.split(r"(?<=[.!?])\s+", clean, maxsplit=1)
+    if len(first_sentence) == 2 and len(first_sentence[0]) <= 95:
+        return f"<b>{pdf_safe_text(first_sentence[0])}</b><br/>{pdf_safe_text(first_sentence[1])}"
+    return pdf_safe_text(clean)
+
+
+def _fpi_gps_only_download_bytes_v148(
+    analysis,
+    selected_week,
+    selected_playstyle,
+):
+    return build_fpi_product_pdf_bytes(
+        analysis,
+        selected_week,
+        selected_playstyle,
+        report_type="gps_only",
+        tactical_context={},
+    )
+
+
 # =========================================================
 # V143 - Methodology content + PDF export
 # =========================================================
@@ -12905,7 +12955,9 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
             "A taktikai üzenetek a saját játékmodellből, az ellenfél erősségeiből és gyengeségeiből, a javasolt stratégiai profilból, az ellenfél játékosértékeléséből és a csapat aktuális fizikai állapotából állnak össze.",
             "A rendszer az adott hét, ellenfél, saját játékmodell, stratégiai profil, játékosértékelés és terhelési állapot alapján állítja össze az üzeneteket. A taktikai célok naponta is változnak: más feladat készül a fő terhelési napra, az átmeneti napra, a meccstervi napra és az aktivációra.",
             "Az üzenetek tudásbázisból és szakmai szabályokból épülnek fel. A rendszer témánként választ, majd hasonlóságvizsgálattal kiszűri, hogy ugyanaz a motívum több blokkban vagy három egymást követő sorban megismétlődjön.",
-            "Az Executive Summary logikusan tagolt: az első oldal a vezetői döntést és a heti ciklustervet, a második oldal a fő edzői üzeneteket, a harmadik oldal a játékosszintű fókuszokat tartalmazza. A végén külön erőnléti helyzetkép emeli be a GPS-only motor részletesebb következtetéseit.",
+            "Az Executive Summary olvashatóbb, nagyobb betűméretű és sorkizárt törzsszöveget használ. A fontos üzenetek rövid címsorral vagy félkövér kiemeléssel jelennek meg, így a lényeg gyors átfutással is felismerhető.",
+            "Az első döntési pont saját oldalon vagy – szükség esetén – két oldalon jelenik meg. A heti ciklusterv és a fő edzői üzenetek közös oldalon kezdődnek; ha a tartalom nem fér el kulturáltan, a dokumentum automatikusan új oldalra tör.",
+            "A GPS-only riport minden esetben külön letölthető, akkor is, ha taktikai anyagok is rendelkezésre állnak. Így ugyanabból a feltöltésből integrált Executive Summary és önálló GPS teljesítményriport is készül.",
             "A heti ciklusterv minden naphoz erőnléti fókuszt, taktikai fókuszt és rövid edzői megjegyzést rendel. Így a terv nemcsak azt mondja meg, mi legyen a cél, hanem azt is, hogyan és milyen terhelési logikával valósítsuk meg.",
             "A felső vezetői blokk, a meccsterv, a csapatszintű taktikai üzenet, a napi taktikai cél és az ellenfél játékosfókusz eltérő információs mélységet kap. Ugyanaz a téma megjelenhet több helyen, ha más döntési szintet szolgál, de az egy az egyben ismétlődő mondatokat a rendszer kiszűri.",
             "A meccsterv konkrét kérdésekre válaszol: hol védekezzünk, hol támadjunk, kit keressünk, kire vigyázzunk, mi legyen az első támadó gondolat, és mely játékhelyzeteket kell edzésen gyakorolni.",
@@ -12968,8 +13020,9 @@ def build_fpi_methodology_pdf_bytes_v143() -> Optional[bytes]:
         "FPI_METHOD_BODY_V143",
         parent=styles["BodyText"],
         fontName=regular_font,
-        fontSize=9.2,
-        leading=12.5,
+        fontSize=10.4,
+        leading=14.0,
+        alignment=4,
         textColor=colors.HexColor("#0F172A"),
         spaceAfter=4,
     )
