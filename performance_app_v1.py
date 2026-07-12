@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V156_FIVE_MODES_DURATION_CONSISTENCY_2026_07_12"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V157_TACTICAL_ONLY_TEXT_FIX_2026_07_12"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -12977,11 +12977,17 @@ def _fpi_coach_blocks_v146(
     priorities: Optional[List[dict]],
     week: Optional[str],
 ) -> Dict[str, List[FPIInsightV146]]:
-    tactical = _fpi_pro_tactical_findings_v151(
-        tactical_context, gps_context, readiness, priorities, week, 7
+    tactical = _fpi_clean_tactical_insights_v157(
+        _fpi_pro_tactical_findings_v151(
+            tactical_context, gps_context, readiness, priorities, week, 10
+        ),
+        limit=7,
     )
-    plan = _fpi_pro_match_plan_v151(
-        tactical_context, gps_context, readiness, priorities, week, 7
+    plan = _fpi_clean_tactical_insights_v157(
+        _fpi_pro_match_plan_v151(
+            tactical_context, gps_context, readiness, priorities, week, 9
+        ),
+        limit=7,
     )
 
     # Lágy deduplikáció: azonos gondolat más mélységben megmaradhat,
@@ -13557,22 +13563,37 @@ def _fpi_pro_tactical_findings_v151(
     opponent = _fpi_opponent_name_v145(ctx)
     pool: List[FPIInsightV146] = []
 
-    # A nyers forrásból csak a tényleges edzői következtetés kerülhet be.
+    # A nyers forrásból csak teljes, értelmezhető scoutingkövetkeztetés kerülhet be.
+    # Az "Edzői megállapítás", önálló gondolatjel és félkész exporttöredék nem jelenhet meg.
     for key in ["risks", "tactical_findings", "pdf_provider_findings", "opp_topics"]:
         for raw in ctx.get(key, []) or []:
             insight = _fpi_normalize_any_insight_v146(raw)
             if not insight:
                 continue
-            finding = _fpi_complete_text_v151(insight.finding)
-            recommendation = _fpi_complete_text_v151(insight.recommendation)
-            if finding:
-                pool.append(FPIInsightV146(
-                    topic=f"source_{insight.topic}",
-                    title=_fpi_complete_text_v151(insight.title or "Scoutingjel"),
-                    finding=finding,
-                    recommendation=recommendation,
-                    priority=max(82, insight.priority),
-                ))
+
+            title = _fpi_tactical_pdf_text_v157(insight.title or "")
+            finding = _fpi_tactical_pdf_text_v157(insight.finding)
+            recommendation = _fpi_tactical_pdf_text_v157(insight.recommendation)
+
+            if title.lower() in {
+                "", "edzöi megállapítás", "edzői megállapítás",
+                "taktikai megállapítás", "megállapítás"
+            }:
+                continue
+            if not finding or finding in {"—", "-", "–"}:
+                continue
+            if not recommendation and len(finding.split()) < 7:
+                continue
+
+            candidate = FPIInsightV146(
+                topic=f"source_{insight.topic}",
+                title=title,
+                finding=finding,
+                recommendation=recommendation,
+                priority=max(82, insight.priority),
+            )
+            if _fpi_valid_tactical_insight_v157(candidate):
+                pool.append(candidate)
 
     if features["transition"]:
         pool.append(FPIInsightV146(
@@ -13847,6 +13868,95 @@ def _fpi_contextual_md_plan_rows_v151(
 
 
 
+
+# =========================================================
+# V157 - Tactical-only szövegtisztítás és PDF-biztos magyar karakterek
+# =========================================================
+def _fpi_tactical_pdf_text_v157(value: object) -> str:
+    """
+    A Tactical-only riportban a PDF-környezet miatt a hosszú ő/ű helyett
+    rövid ö/ü jelenik meg. Ez megakadályozza az ő -> n hibás karaktercserét.
+    """
+    text = _fpi_complete_text_v151(value)
+    text = (
+        text.replace("Ő", "Ö")
+            .replace("ő", "ö")
+            .replace("Ű", "Ü")
+            .replace("ű", "ü")
+    )
+
+    # Nyers exporttöredékek és félkész címkék eltávolítása.
+    text = re.sub(r"(?i)\bedzöi megállapítás\b[:\s—-]*", "", text)
+    text = re.sub(r"(?i)\bedzői megállapítás\b[:\s—-]*", "", text)
+    text = re.sub(r"\s*[—–-]\s*$", "", text)
+    text = re.sub(r"(?i)\bbiztosítás\s+biztosítás\b", "biztosítás", text)
+    text = re.sub(r"\s{2,}", " ", text).strip(" —–-;")
+    return text
+
+
+def _fpi_valid_tactical_insight_v157(insight: Optional[FPIInsightV146]) -> bool:
+    if insight is None:
+        return False
+    title = _fpi_tactical_pdf_text_v157(insight.title)
+    finding = _fpi_tactical_pdf_text_v157(insight.finding)
+    recommendation = _fpi_tactical_pdf_text_v157(insight.recommendation)
+
+    if not finding:
+        return False
+    if title.lower() in {
+        "", "edzöi megállapítás", "edzői megállapítás",
+        "taktikai megállapítás", "megállapítás"
+    }:
+        return False
+    if finding in {"—", "-", "–"}:
+        return False
+    if not recommendation and len(finding.split()) < 5:
+        return False
+    return True
+
+
+def _fpi_clean_tactical_insights_v157(
+    insights: List[FPIInsightV146],
+    limit: int = 8,
+) -> List[FPIInsightV146]:
+    """
+    Ugyanazt a megtisztított taktikai insight-listát használja
+    a Tactical-only és az integrált riport.
+    """
+    result: List[FPIInsightV146] = []
+    accepted_texts: List[str] = []
+
+    for item in insights or []:
+        if not _fpi_valid_tactical_insight_v157(item):
+            continue
+
+        cleaned = FPIInsightV146(
+            topic=item.topic,
+            title=_fpi_tactical_pdf_text_v157(item.title),
+            finding=_fpi_tactical_pdf_text_v157(item.finding),
+            recommendation=_fpi_tactical_pdf_text_v157(item.recommendation),
+            source=_fpi_tactical_pdf_text_v157(item.source),
+            priority=item.priority,
+            block=item.block,
+            day=item.day,
+        )
+        rendered = " ".join([
+            cleaned.title,
+            cleaned.finding,
+            cleaned.recommendation,
+        ]).strip()
+
+        if _fpi_is_near_duplicate_v145(rendered, accepted_texts, 0.78):
+            continue
+
+        result.append(cleaned)
+        accepted_texts.append(rendered)
+        if len(result) >= limit:
+            break
+
+    return result
+
+
 # =========================================================
 # V156 - Öt riportmód, közös tartalmi motor
 # =========================================================
@@ -13877,11 +13987,17 @@ def _fpi_canonical_report_bundle_v156(
     tactical_insights, match_plan = [], []
     if _fpi_has_tactical_signal_v95(tctx):
         tactical_readiness = readiness if readiness is not None else 70
-        tactical_insights = _fpi_pro_tactical_findings_v151(
-            tctx, gps_ctx, tactical_readiness, priorities, week, 8
+        tactical_insights = _fpi_clean_tactical_insights_v157(
+            _fpi_pro_tactical_findings_v151(
+                tctx, gps_ctx, tactical_readiness, priorities, week, 10
+            ),
+            limit=8,
         )
-        match_plan = _fpi_pro_match_plan_v151(
-            tctx, gps_ctx, tactical_readiness, priorities, week, 7
+        match_plan = _fpi_clean_tactical_insights_v157(
+            _fpi_pro_match_plan_v151(
+                tctx, gps_ctx, tactical_readiness, priorities, week, 9
+            ),
+            limit=7,
         )
 
     return {
@@ -13951,7 +14067,8 @@ def build_fpi_tactical_only_pdf_bytes_v156(
     head = ParagraphStyle("FPITacOnlyHeadV156", parent=styles["BodyText"], fontName=font_bold, fontSize=10.2, leading=12.6, alignment=1, textColor=colors.white)
 
     def P(v, style=body):
-        return Paragraph(html.escape(_fpi_complete_text_v151(v)).replace("\n", "<br/>") or "—", style)
+        clean_v157 = _fpi_tactical_pdf_text_v157(v)
+        return Paragraph(html.escape(clean_v157).replace("\n", "<br/>") or "Nincs értékelhető adat.", style)
 
     def section(text, bg="#DBEAFE"):
         section_style = ParagraphStyle("FPITacOnlySectionV156", parent=body, fontName=font_bold, fontSize=14, leading=17)
@@ -13984,14 +14101,26 @@ def build_fpi_tactical_only_pdf_bytes_v156(
     ]
     rows = [[P("Fókusz", head), P("Megfigyelés", head), P("Meccstervi válasz", head)]]
     for item in findings:
-        rows.append([P(item.title, small), P(item.finding, small), P(item.recommendation, small)])
+        if not _fpi_valid_tactical_insight_v157(item):
+            continue
+        rows.append([
+            P(item.title, small),
+            P(item.finding, small),
+            P(item.recommendation or "A forrás alapján külön végrehajtási feladat nem azonosítható.", small),
+        ])
     story.append(tbl(rows, [5.0*cm, 10.8*cm, 11.7*cm]))
 
     story.append(PageBreak())
     story.append(section("2. Konkrét meccsterv", "#FEF3C7"))
     plan_rows = [[P("Döntési pont", head), P("Adatból következő irány", head), P("Végrehajtási fókusz", head)]]
     for item in plan:
-        plan_rows.append([P(item.title, small), P(item.finding, small), P(item.recommendation, small)])
+        if not _fpi_valid_tactical_insight_v157(item):
+            continue
+        plan_rows.append([
+            P(item.title, small),
+            P(item.finding, small),
+            P(item.recommendation or "A végrehajtási fókusz további inputot igényel.", small),
+        ])
     story.append(tbl(plan_rows, [5.2*cm, 10.8*cm, 11.5*cm], header="#92400E"))
 
     story.append(PageBreak())
@@ -14001,9 +14130,9 @@ def build_fpi_tactical_only_pdf_bytes_v156(
         for row in entries[:6]:
             player_rows.append([
                 P(side, small),
-                P(row.get("Játékos", ""), small),
-                P(row.get("Szerep", ""), small),
-                P(f"{row.get('Értelmezés','')} {row.get('Javaslat','')}", small),
+                P(_fpi_tactical_pdf_text_v157(row.get("Játékos", "")), small),
+                P(_fpi_tactical_pdf_text_v157(row.get("Szerep", "")), small),
+                P(_fpi_tactical_pdf_text_v157(f"{row.get('Értelmezés','')} {row.get('Javaslat','')}"), small),
             ])
     if len(player_rows) == 1:
         player_rows.append([P("—", small), P("Nincs játékos Excel", small), P("—", small), P("A riport csapatszintű taktikai inputból készült.", small)])
@@ -14071,7 +14200,8 @@ def build_fpi_own_team_tactical_only_pdf_bytes_v156(
     head = ParagraphStyle("FPIOwnTacHeadV156", parent=styles["BodyText"], fontName=font_bold, fontSize=10.2, leading=12.5, alignment=1, textColor=colors.white)
 
     def P(v, style=body):
-        return Paragraph(html.escape(_fpi_complete_text_v151(v)).replace("\n", "<br/>") or "—", style)
+        clean_v157 = _fpi_tactical_pdf_text_v157(v)
+        return Paragraph(html.escape(clean_v157).replace("\n", "<br/>") or "Nincs értékelhető adat.", style)
 
     def tbl(rows, widths, header="#0F766E"):
         t = Table(rows, colWidths=widths, repeatRows=1, splitByRow=1)
@@ -14199,6 +14329,8 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
             "A riportok közös tartalmi motorból dolgoznak. A GPS + taktikai riport erőnléti állításai megegyeznek a GPS-only riport megfelelő állításaival, taktikai állításai pedig a Taktikai-only riport megfelelő állításaival.",
             "A rendszer 90 percnél hosszabb mérkőzéseket és edzőmeccseket is kezel. A tényleges 105/120 perces összterhelés megmarad, emellett per90 mutató készül a referencia-összevetéshez.",
             "A Saját csapat elemzés külön forrásként használja a saját taktikai PDF-ekből kinyert visszatérő csapatmintákat, a saját csapat- és játékos Excel mellett.",
+            "A Tactical-only és a GPS + taktikai riport ugyanazt a megtisztított taktikai insight-listát használja. Így a taktikai tartalom, a prioritási sorrend és a meccstervi állítások megegyeznek.",
+            "A Tactical-only PDF a hosszú ő és ű helyett rövid ö és ü karaktert használ a PDF-megjelenítési hibák elkerülésére. A generikus „Edzői megállapítás” címkék, önálló gondolatjelek és félkész exporttöredékek nem kerülnek a riportba.",
             "A fő logikai blokkok új oldalon indulnak. A rendszer inkább több oldalt használ, mintsem hogy egy cím vagy egy összetartozó szakmai blokk az előző oldal alján kezdődjön.",
             "A korábbi automatikus kulcsszó-vastagítás helyett a szerkezet emeli ki a lényeget: rövid cím, megfigyelés, nyíl és meccstervi válasz. Ez gyorsabban értelmezhető, és kevésbé teszi zsúfolttá a dokumentumot.",
             "Az Executive Summary nagyobb betűméretű, sorkizárt törzsszöveget, hangsúlyos kulcsüzenet-dobozt, félkövér alcímeket és tágabb cellaközöket használ. A vezetői lényeg így a teljes mondatok végigolvasása nélkül is gyorsan felismerhető.",
