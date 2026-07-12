@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V157_TACTICAL_ONLY_TEXT_FIX_2026_07_12"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V158_GENERIC_DEMO_NAMES_2026_07_12"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5751,7 +5751,7 @@ def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
             [P("1"), P("Heti terhelési kiugrás"), P("FIGYELMEZTETÉS"), P("A heti edzés terhelési pontértéke 27%-kal nőtt az előző héthez képest."), P("Következő edzésen terheléskontroll és egyéni reakciók figyelése.")],
             [P("2"), P("Alacsony sprintinger"), P("FIGYELMEZTETÉS"), P("A heti sprintprofil a meccsigény kb. 72%-a."), P("Rövid, kontrollált maximális sebességű blokk, ha a heti cél engedi.")],
             [P("3"), P("MD-2 terhelés magas lehet"), P("FIGYELMEZTETÉS"), P("Az MD-2 load közel volt a hét fő terhelési napjához."), P("Meccs előtt 48 órával alacsonyabb neuromuszkuláris terhelés.")],
-            [P("4"), P("Két játékos magas risk zónában"), P("KRITIKUS"), P("Nagy D. és Varga L. egyéni terhelése eltér a csapatprofiltól."), P("Egyéni terheléskorrekció és regenerációs visszajelzés ellenőrzése.")],
+            [P("4"), P("Két játékos magas risk zónában"), P("KRITIKUS"), P("Molnár Dávid és Kiss Levente egyéni terhelése eltér a csapatprofiltól."), P("Egyéni terheléskorrekció és regenerációs visszajelzés ellenőrzése.")],
             [P("5"), P("Pozitív tapering jel"), P("INFORMÁCIÓ"), P("Az MD-1 terhelés alacsonyabb volt a hét fő napjához képest."), P("A struktúra megtartható, ha a meccsteljesítmény visszaigazolja.")],
         ], [1.0*cm, 5.0*cm, 3.0*cm, 9.0*cm, 9.2*cm], header_color="#0f172a")
     ]))
@@ -5768,9 +5768,9 @@ def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
         Spacer(1, 4),
         styled_table([
             [P("Prioritás", header), P("Teendő", header), P("Miért fontos?", header), P("Mikor?", header)],
-            [P("1. Sprintterhelés kontroll"), P("Nagy D. és Varga L. kapjon kontrollált nagysebességű ingert, de ne újabb volumennövelő blokkot."), P("Mindkét játékosnál magasabb sprinttáv és terhelési löket látható."), P("Következő edzés")],
+            [P("1. Sprintterhelés kontroll"), P("Molnár Dávid és Kiss Levente kapjon kontrollált nagysebességű ingert, de ne újabb volumennövelő blokkot."), P("Mindkét játékosnál magasabb sprinttáv és terhelési löket látható."), P("Következő edzés")],
             [P("2. MD-2 frissesség"), P("A mérkőzés előtti 48 órában csökkenteni kell a teljes loadot és a lassítási terhelést."), P("A túl magas MD-2 terhelés ronthatja a meccsnapi frissességet."), P("Meccs előtt 2 nap")],
-            [P("3. Alacsony terhelésű játékosok"), P("Kiss R. és Farkas Z. részére kiegészítő egyéni munka vagy fokozatos visszaterhelés."), P("Két hete csapatátlag alatti load, lemaradó inger alakulhat ki."), P("Következő 2 edzés")],
+            [P("3. Alacsony terhelésű játékosok"), P("Kiss R. és Horváth Zalán részére kiegészítő egyéni munka vagy fokozatos visszaterhelés."), P("Két hete csapatátlag alatti load, lemaradó inger alakulhat ki."), P("Következő 2 edzés")],
             [P("4. High effort monitoring"), P("A nagy intenzitású erőfeszítéseket játékosonként kell figyelni, nem csak csapatszinten."), P("A csapatátlag elfedhet egyéni neuromuszkuláris kockázatot."), P("Minden edzés után")],
             [P("5. Posztcsoport összevetés"), P("Szélsők és középpályások sprint/HSR arányát külön értékelni."), P("A játékmodell más fizikai profilt vár el posztonként."), P("Heti review")],
             [P("6. Frissességi kérdőív"), P("A két magas risk játékosnál rövid szubjektív frissességi check-in."), P("A GPS nem mutatja önmagában a belső terhelésérzetet."), P("Edzés előtt")],
@@ -5783,9 +5783,9 @@ def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
         Spacer(1, 4),
         styled_table([
             [P("Játékos", header), P("Poszt", header), P("Risk", header), P("Fő eltérés", header), P("Ajánlott lépés", header)],
-            [P("Nagy D."), P("CM"), P("Magas - 82"), P("Sprinttáv +55%, összterhelés +18%"), P("Load kontroll, regenerációs monitor, következő edzésen limitált extra munka.")],
-            [P("Varga L."), P("W"), P("Magas - 79"), P("High effort és lassítás kiugrás"), P("Excentrikus terhelés csökkentése, frissesség ellenőrzés.")],
-            [P("Farkas Z."), P("DM"), P("Közepes - 63"), P("Max sebesség trend csökkenő"), P("Rövid, kontrollált max sebességű inger.")],
+            [P("Molnár Dávid"), P("CM"), P("Magas - 82"), P("Sprinttáv +55%, összterhelés +18%"), P("Load kontroll, regenerációs monitor, következő edzésen limitált extra munka.")],
+            [P("Kiss Levente"), P("W"), P("Magas - 79"), P("High effort és lassítás kiugrás"), P("Excentrikus terhelés csökkentése, frissesség ellenőrzés.")],
+            [P("Horváth Zalán"), P("DM"), P("Közepes - 63"), P("Max sebesség trend csökkenő"), P("Rövid, kontrollált max sebességű inger.")],
             [P("Kiss R."), P("GK"), P("Közepes - 61"), P("Alacsony heti load"), P("Pozícióspecifikus kiegészítő blokk.")],
             [P("Tóth B."), P("CB"), P("Alacsony - 38"), P("Stabil terhelés, nincs kiugrás"), P("Normál terhelés folytatható.")],
             [P("Mészáros P."), P("ST"), P("Alacsony - 34"), P("Jó sprint kitettség, kontrollált load"), P("Jelenlegi struktúra megtartható.")],
@@ -6088,7 +6088,7 @@ def build_demo_performance_data() -> pd.DataFrame:
     Direkt olyan mintákkal, amelyekből működő readiness, mikrociklus és risk riport készül.
     """
     rng = np.random.default_rng(42)
-    players = ["Kovács M.", "Nagy D.", "Szabó B.", "Tóth Á.", "Varga L.", "Farkas Z.", "Balogh P.", "Kiss R."]
+    players = ["Kiss Márk", "Molnár Dávid", "Farkas Bence", "Varga Ádám", "Kiss Levente", "Horváth Zalán", "Takács Patrik", "Kiss R."]
     positions = ["CB", "FB", "CM", "AM", "W", "F", "DM", "GK"]
     start = pd.Timestamp("2026-05-18")
     rows = []
@@ -6112,7 +6112,7 @@ def build_demo_performance_data() -> pd.DataFrame:
                 dpm = total_distance / duration
                 sprint_dist = max(20, (180 if typ == "Edzés" else 520) * factor * role_factor * rng.normal(1, .18))
                 # direkt kiugrók: 2 játékos magas risk a 3. héten
-                if w == 2 and player in ["Nagy D.", "Varga L."]:
+                if w == 2 and player in ["Molnár Dávid", "Kiss Levente"]:
                     sprint_dist *= 1.55
                     total_distance *= 1.18
                 acc_high = max(0, rng.normal(14, 4) * factor)
@@ -8114,9 +8114,9 @@ def _build_demo_tactical_context() -> Dict[str, object]:
             {"Mutató": "Beadások", "Saját": 14.0, "Ellenfél": 21.0, "Értelmezés": "Ellenfél szélső veszély"},
         ],
         "opponent_player_evaluation": [
-            {"Játékos":"András Simon","Poszt":"CF","Szerep":"Befejező / kapura veszélyes játékos","Bizonyíték":"lövés: 4.0; xG: 0.6","Értelmezés":"aktív befejező, kapura veszélyes","Javaslat":"Boxon belüli felvétel korlátozása, második labdák kontrollja."},
-            {"Játékos":"Bence Szabó","Poszt":"RM","Szerep":"Szélső / beadó veszély","Bizonyíték":"beadás: 8.0; kulcspassz: 3.0","Értelmezés":"oldali veszély / beadások jelentős száma","Javaslat":"Oldali 1v1 kontroll, beadásblokkolás, hosszú oldali zárás."},
-            {"Játékos":"Zsolt János Magyar","Poszt":"AM","Szerep":"Kreatív kulcsjátékos","Bizonyíték":"kulcspassz: 4.0; progresszív passz: 7.0","Értelmezés":"jó kreatív kapcsolódási pont, több kulcspasszal","Javaslat":"Passzsáv zárása, testhelyzet kontroll, belső irány lezárása."},
+            {"Játékos":"Kovács Péter","Poszt":"CF","Szerep":"Befejező / kapura veszélyes játékos","Bizonyíték":"lövés: 4.0; xG: 0.6","Értelmezés":"aktív befejező, kapura veszélyes","Javaslat":"Boxon belüli felvétel korlátozása, második labdák kontrollja."},
+            {"Játékos":"Nagy Bence","Poszt":"RM","Szerep":"Szélső / beadó veszély","Bizonyíték":"beadás: 8.0; kulcspassz: 3.0","Értelmezés":"oldali veszély / beadások jelentős száma","Javaslat":"Oldali 1v1 kontroll, beadásblokkolás, hosszú oldali zárás."},
+            {"Játékos":"Tóth Zoltán","Poszt":"AM","Szerep":"Kreatív kulcsjátékos","Bizonyíték":"kulcspassz: 4.0; progresszív passz: 7.0","Értelmezés":"jó kreatív kapcsolódási pont, több kulcspasszal","Javaslat":"Passzsáv zárása, testhelyzet kontroll, belső irány lezárása."},
         ],
     }
 
@@ -8913,9 +8913,9 @@ def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool
         # V134: a minta Executive Summary-ben is legyen konkrét ellenfél-játékos értékelés referenciaértékekkel.
         if not tactical_ctx.get("opponent_player_evaluation"):
             tactical_ctx["opp_player_tables"] = {
-                "creators": pd.DataFrame([{"player":"Zsolt János Magyar","position":"AM","key_passes":4.0,"progressive_passes":7.0,"shots":2.0,"xg":0.20}]),
-                "wide_players": pd.DataFrame([{"player":"Bence Szabó","position":"RM","crosses":8.0,"key_passes":3.0,"lost_balls":4.0}]),
-                "finishers": pd.DataFrame([{"player":"András Simon","position":"CF","shots":4.0,"xg":0.60,"goals":1.0}]),
+                "creators": pd.DataFrame([{"player":"Tóth Zoltán","position":"AM","key_passes":4.0,"progressive_passes":7.0,"shots":2.0,"xg":0.20}]),
+                "wide_players": pd.DataFrame([{"player":"Nagy Bence","position":"RM","crosses":8.0,"key_passes":3.0,"lost_balls":4.0}]),
+                "finishers": pd.DataFrame([{"player":"Kovács Péter","position":"CF","shots":4.0,"xg":0.60,"goals":1.0}]),
                 "weak_links": pd.DataFrame([{"player":"Márk Helembai","position":"CB","lost_balls":7.0,"passes":42.0}]),
             }
             tactical_ctx["opponent_player_evaluation"] = _fpi_build_player_evaluation_v132(tactical_ctx["opp_player_tables"], side="opp", max_rows=8)
@@ -9484,28 +9484,28 @@ def build_fpi_own_team_profile_sample_pdf_bytes() -> Optional[bytes]:
 
         tactical_ctx["own_player_tables"] = {
             "creators": pd.DataFrame([
-                {"player": "Kovács M.", "position": "AM", "key_passes": 4.0, "xg": 0.22, "shots": 2},
-                {"player": "Szabó B.", "position": "W", "key_passes": 3.0, "crosses": 7},
+                {"player": "Kiss Márk", "position": "AM", "key_passes": 4.0, "xg": 0.22, "shots": 2},
+                {"player": "Farkas Bence", "position": "W", "key_passes": 3.0, "crosses": 7},
             ]),
             "progressors": pd.DataFrame([
-                {"player": "Nagy D.", "position": "CM", "progressive_passes": 9.0, "passes": 58},
-                {"player": "Tóth Á.", "position": "DM", "progressive_passes": 7.0, "recoveries": 8},
+                {"player": "Molnár Dávid", "position": "CM", "progressive_passes": 9.0, "passes": 58},
+                {"player": "Varga Ádám", "position": "DM", "progressive_passes": 7.0, "recoveries": 8},
             ]),
             "build_up": pd.DataFrame([
-                {"player": "Varga L.", "position": "CB", "passes": 62.0, "progressive_passes": 6},
-                {"player": "Tóth Á.", "position": "DM", "passes": 55.0, "lost_balls": 3},
+                {"player": "Kiss Levente", "position": "CB", "passes": 62.0, "progressive_passes": 6},
+                {"player": "Varga Ádám", "position": "DM", "passes": 55.0, "lost_balls": 3},
             ]),
             "finishers": pd.DataFrame([
-                {"player": "Farkas Z.", "position": "F", "shots": 5, "xg": 0.75, "goals": 0},
+                {"player": "Horváth Zalán", "position": "F", "shots": 5, "xg": 0.75, "goals": 0},
             ]),
             "wide_players": pd.DataFrame([
-                {"player": "Szabó B.", "position": "W", "crosses": 7, "key_passes": 3},
+                {"player": "Farkas Bence", "position": "W", "crosses": 7, "key_passes": 3},
             ]),
             "defenders": pd.DataFrame([
-                {"player": "Varga L.", "position": "CB", "interceptions": 6.0, "recoveries": 9},
+                {"player": "Kiss Levente", "position": "CB", "interceptions": 6.0, "recoveries": 9},
             ]),
             "duel_players": pd.DataFrame([
-                {"player": "Balogh P.", "position": "FB", "defensive_challenges": 11.0, "recoveries": 6},
+                {"player": "Takács Patrik", "position": "FB", "defensive_challenges": 11.0, "recoveries": 6},
             ]),
         }
         tactical_ctx["own_player_evaluation"] = _fpi_build_player_evaluation_v132(
