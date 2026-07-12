@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V155_OWN_SAMPLE_EXPORT_FIX_2026_07_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V156_FIVE_MODES_DURATION_CONSISTENCY_2026_07_12"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -2645,6 +2645,37 @@ def finalize_exposure_columns(df: pd.DataFrame) -> pd.DataFrame:
     )
     out["player_minutes"] = pd.to_numeric(out["player_minutes"], errors="coerce")
     out.loc[out["player_minutes"] <= 0, "player_minutes"] = np.nan
+
+    # V156: a mérkőzés tényleges hossza lehet 90 percnél hosszabb is.
+    is_match_v156 = out.get("session_type", "").astype(str).eq("Meccs")
+    out["event_duration_min"] = out["duration_min"]
+    if "match_minutes" in out.columns:
+        out.loc[is_match_v156, "event_duration_min"] = (
+            out.loc[is_match_v156, "match_minutes"]
+            .where(
+                out.loc[is_match_v156, "match_minutes"].notna()
+                & (out.loc[is_match_v156, "match_minutes"] > 0),
+                out.loc[is_match_v156, "duration_min"],
+            )
+        )
+    out["event_duration_min"] = pd.to_numeric(out["event_duration_min"], errors="coerce")
+    out["match_length_label"] = np.where(
+        is_match_v156 & out["event_duration_min"].notna(),
+        out["event_duration_min"].round(0).astype("Int64").astype(str) + " perces mérkőzés",
+        "",
+    )
+
+    # A teljes 105/120 perces terhelés megmarad, mellette per90 érték készül.
+    per90_metrics_v156 = [
+        "total_distance", "hsr_distance", "sprint_distance", "sprints",
+        "high_efforts", "training_load", "acc_high", "dec_high",
+        "speed_zone_4", "speed_zone_5",
+    ]
+    denominator_v156 = out["player_minutes"].where(out["player_minutes"] > 0)
+    for metric_v156 in per90_metrics_v156:
+        if metric_v156 in out.columns:
+            numeric_v156 = pd.to_numeric(out[metric_v156], errors="coerce")
+            out[f"{metric_v156}_per90"] = numeric_v156 / denominator_v156 * 90.0
     group_cols = ["week", "session_date", "session_type"]
     if "session_name" in out.columns:
         group_cols.append("session_name")
@@ -9361,6 +9392,16 @@ def build_fpi_own_team_profile_pdf_bytes(
     story.append(table(rows,[5.5*cm,22.2*cm],header_bg="#0F766E",row_bgs=[colors.HexColor("#F0FDFA"),colors.white]))
     story.append(Spacer(1,0.18*cm))
 
+    own_pdf_findings_v156 = _fpi_own_pdf_findings_v156(tactical_context, 8)
+    if own_pdf_findings_v156:
+        story.append(PageBreak())
+        story.append(section("Saját taktikai PDF – visszatérő csapatminták", "#FEF3C7"))
+        pdf_rows_v156 = [[P("Forrás", head), P("Megállapítás", head)]]
+        for finding_v156 in own_pdf_findings_v156:
+            pdf_rows_v156.append([P("Saját taktikai PDF", small), P(finding_v156, small)])
+        story.append(table(pdf_rows_v156, [5.0*cm,22.7*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"),colors.white]))
+        story.append(Spacer(1,0.18*cm))
+
     metric_rows=_fpi_team_metric_rows_v132(own_metrics)
     story.append(PageBreak())
     story.append(section("Csapatszintű taktikai / játékprofil", "#E0F2FE"))
@@ -9871,7 +9912,8 @@ def render_fpi_landing_page_v100() -> None:
         """, unsafe_allow_html=True)
 
     st.markdown('<div class="fpi-v137-section-title">Minta riportok</div>', unsafe_allow_html=True)
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3, m4, m5 = st.columns(5)
+
     def _fpi_safe_sample_v153(builder):
         try:
             value = builder()
@@ -9879,30 +9921,37 @@ def render_fpi_landing_page_v100() -> None:
         except Exception:
             return None
 
-    sample_exec = _fpi_safe_sample_v153(lambda: build_fpi_sample_pdf_bytes("executive"))
-    sample_gps = _fpi_safe_sample_v153(build_fpi_gps_only_sample_pdf_bytes)
-    sample_own = _fpi_safe_sample_v153(build_fpi_own_team_profile_sample_pdf_bytes) if "build_fpi_own_team_profile_sample_pdf_bytes" in globals() else None
-    sample_method = _fpi_safe_sample_v153(build_fpi_methodology_pdf_bytes_v143) if "build_fpi_methodology_pdf_bytes_v143" in globals() else None
+    sample_gps_v156 = _fpi_safe_sample_v153(build_fpi_gps_only_sample_pdf_bytes)
+    sample_tactical_v156 = _fpi_safe_sample_v153(build_fpi_tactical_only_sample_pdf_bytes_v156)
+    sample_integrated_v156 = _fpi_safe_sample_v153(build_fpi_integrated_sample_pdf_bytes_v156)
+    sample_own_v156 = _fpi_safe_sample_v153(build_fpi_own_team_profile_sample_pdf_bytes)
+    sample_method_v156 = _fpi_safe_sample_v153(build_fpi_methodology_pdf_bytes_v143)
+
     with m1:
-        if sample_exec:
-            st.download_button("⬇️ Executive", sample_exec, "fpi_minta_executive_summary.pdf", "application/pdf", use_container_width=True, key="sample_exec_v155")
+        if sample_gps_v156:
+            st.download_button("⬇️ GPS-only", sample_gps_v156, "fpi_minta_gps_only.pdf", "application/pdf", use_container_width=True, key="sample_gps_v156")
         else:
-            st.error("Executive minta nem készült el.")
+            st.error("GPS-only minta hiba.")
     with m2:
-        if sample_gps:
-            st.download_button("⬇️ GPS-only", sample_gps, "fpi_minta_gps_only_report.pdf", "application/pdf", use_container_width=True, key="sample_gps_v155")
+        if sample_tactical_v156:
+            st.download_button("⬇️ Taktikai-only", sample_tactical_v156, "fpi_minta_taktikai_only.pdf", "application/pdf", use_container_width=True, key="sample_tactical_v156")
         else:
-            st.error("GPS-only minta nem készült el.")
+            st.error("Taktikai-only minta hiba.")
     with m3:
-        if sample_own:
-            st.download_button("⬇️ Saját csapat", sample_own, "fpi_minta_sajat_csapat_profil.pdf", "application/pdf", use_container_width=True, key="sample_own_v155")
+        if sample_integrated_v156:
+            st.download_button("⬇️ GPS + taktikai", sample_integrated_v156, "fpi_minta_gps_taktikai.pdf", "application/pdf", use_container_width=True, key="sample_integrated_v156")
         else:
-            st.error("Saját csapat minta nem készült el.")
+            st.error("Integrált minta hiba.")
     with m4:
-        if sample_method:
-            st.download_button("⬇️ Metodika", sample_method, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="sample_method_v155")
+        if sample_own_v156:
+            st.download_button("⬇️ Saját csapat", sample_own_v156, "fpi_minta_sajat_csapat.pdf", "application/pdf", use_container_width=True, key="sample_own_v156")
         else:
-            st.error("Metodika minta nem készült el.")
+            st.error("Saját csapat minta hiba.")
+    with m5:
+        if sample_method_v156:
+            st.download_button("⬇️ Metodika", sample_method_v156, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="sample_method_v156")
+        else:
+            st.error("Metodika minta hiba.")
 
 
 
@@ -10362,6 +10411,52 @@ def render_fpi_clean_workspace_v101() -> None:
         unsafe_allow_html=True,
     )
 
+    report_mode_v156 = st.radio(
+        "Riportmód",
+        ["Automatikus / GPS-alapú", "Taktikai-only (GPS nélkül)"],
+        horizontal=True,
+        key="clean_report_mode_v156",
+        help="Taktikai-only módban saját és ellenfél PDF/Excel alapján készül riport; GPS mutatókat az app nem talál ki.",
+    )
+
+    if report_mode_v156 == "Taktikai-only (GPS nélkül)":
+        _fpi_section_header_v113(
+            "1. Taktikai-only input",
+            "Saját és ellenfél taktikai PDF/Excel fájlokból önálló meccsterv és saját csapat profil készül.",
+            "tactical",
+        )
+        tactical_only_gps_context_v156 = {
+            "has_gps": False,
+            "selected_week": "",
+            "readiness_score": None,
+            "playstyle": "Kiegyensúlyozott",
+            "priorities": [],
+            "periodization_type": "GPS nélkül nem értékelt",
+            "df": pd.DataFrame(),
+        }
+        tactical_only_context_v156 = _fpi_clean_tactical_import_v102(tactical_only_gps_context_v156)
+        st.session_state["fpi_clean_tactical_context_v115"] = tactical_only_context_v156
+
+        _fpi_section_header_v113("2. Export", "GPS-adat nélkül taktikai, saját csapat és metodikai riport készül.", "export")
+        tc1, tc2, tc3 = st.columns(3)
+        with tc1:
+            tactical_only_pdf_v156 = build_fpi_tactical_only_pdf_bytes_v156(tactical_only_context_v156)
+            if tactical_only_pdf_v156 is not None:
+                st.download_button("⬇️ Taktikai-only PDF", tactical_only_pdf_v156, "fpi_taktikai_only.pdf", "application/pdf", use_container_width=True, key="clean_tactical_only_export_v156")
+            else:
+                st.info("Tölts fel legalább egy értelmezhető taktikai PDF/Excel fájlt.")
+        with tc2:
+            own_tactical_pdf_v156 = build_fpi_own_team_tactical_only_pdf_bytes_v156(tactical_only_context_v156)
+            if own_tactical_pdf_v156 is not None:
+                st.download_button("⬇️ Saját csapat profil PDF", own_tactical_pdf_v156, "fpi_sajat_csapat_taktikai.pdf", "application/pdf", use_container_width=True, key="clean_own_tactical_export_v156")
+            else:
+                st.info("Saját csapat riporthoz tölts fel saját PDF-et vagy saját csapat/játékos Excelt.")
+        with tc3:
+            method_tactical_v156 = build_fpi_methodology_pdf_bytes_v143()
+            if method_tactical_v156 is not None:
+                st.download_button("⬇️ Metodika PDF", method_tactical_v156, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="clean_method_tactical_v156")
+        return
+
     # 1. GPS import
     _fpi_section_header_v113(
         "1. GPS import",
@@ -10674,44 +10769,47 @@ def render_fpi_clean_workspace_v101() -> None:
     clean_tactical_context = _fpi_clean_tactical_import_v102(tactical_gps_context_clean)
     st.session_state["fpi_clean_tactical_context_v115"] = clean_tactical_context
 
-    # 4. Exportok – nagy, elsődleges gombok.
-    _fpi_section_header_v113("4. Export", "A fő termék az Executive Summary. A többi riport kiegészítő / haladó használatra.", "export")
-    safe_week_clean = _safe_filename_week(selected_week_clean)
-    ex1, ex2 = st.columns([1.55, 1])
-    with ex1:
-        exec_pdf_clean = build_fpi_product_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, report_type="executive", tactical_context=clean_tactical_context)
-        if exec_pdf_clean is not None:
-            st.download_button("⬇️ VEZETŐI EXECUTIVE SUMMARY PDF", data=exec_pdf_clean, file_name=f"fpi_executive_summary_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_exec_v137")
-    with ex2:
-        own_team_pdf_clean = build_fpi_own_team_profile_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean, tactical_context=clean_tactical_context)
-        if own_team_pdf_clean is not None:
-            st.download_button("⬇️ Saját csapat profil PDF", data=own_team_pdf_clean, file_name=f"fpi_sajat_csapat_profil_{safe_week_clean}.pdf", mime="application/pdf", use_container_width=True, key="clean_export_own_team_v137")
-
-    gps_pdf_clean = build_fpi_gps_only_pdf_bytes(
-        analysis_clean,
-        selected_week_clean,
-        selected_playstyle_clean,
+    # 4. Exportok – öt konzisztens riportmód.
+    _fpi_section_header_v113(
+        "4. Export",
+        "Az integrált riport ugyanazokat a GPS-megállapításokat használja, mint a GPS-only, és ugyanazokat a taktikai megállapításokat, mint a Taktikai-only.",
+        "export",
     )
-    if gps_pdf_clean is not None:
-        st.download_button(
-            "⬇️ GPS-only PDF",
-            data=gps_pdf_clean,
-            file_name=f"fpi_gps_only_report_{safe_week_clean}.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-            key="clean_export_gps_v154",
-        )
+    safe_week_clean = _safe_filename_week(selected_week_clean)
+    canonical_bundle_v156 = _fpi_canonical_report_bundle_v156(
+        analysis_clean, selected_week_clean, selected_playstyle_clean, clean_tactical_context
+    )
 
-    method_pdf_clean_v143 = build_fpi_methodology_pdf_bytes_v143()
-    if method_pdf_clean_v143 is not None:
-        st.download_button(
-            "⬇️ Metodika PDF",
-            data=method_pdf_clean_v143,
-            file_name="fpi_metodika.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-            key="clean_export_method_v143",
+    ex1, ex2, ex3, ex4, ex5 = st.columns(5)
+    with ex1:
+        gps_pdf_clean = build_fpi_gps_only_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean)
+        if gps_pdf_clean is not None:
+            st.download_button("⬇️ GPS-only", gps_pdf_clean, f"fpi_gps_only_{safe_week_clean}.pdf", "application/pdf", use_container_width=True, key="clean_export_gps_v156")
+    with ex2:
+        tactical_only_pdf_clean_v156 = build_fpi_tactical_only_pdf_bytes_v156(clean_tactical_context)
+        if tactical_only_pdf_clean_v156 is not None:
+            st.download_button("⬇️ Taktikai-only", tactical_only_pdf_clean_v156, f"fpi_taktikai_only_{safe_week_clean}.pdf", "application/pdf", use_container_width=True, key="clean_export_tactical_only_v156")
+        else:
+            st.caption("Nincs taktikai input.")
+    with ex3:
+        integrated_pdf_clean_v156 = build_fpi_product_pdf_bytes(
+            analysis_clean, selected_week_clean, selected_playstyle_clean,
+            report_type="executive", tactical_context=clean_tactical_context,
         )
+        if integrated_pdf_clean_v156 is not None:
+            st.download_button("⬇️ GPS + taktikai", integrated_pdf_clean_v156, f"fpi_gps_taktikai_{safe_week_clean}.pdf", "application/pdf", use_container_width=True, key="clean_export_integrated_v156")
+    with ex4:
+        own_team_pdf_clean_v156 = build_fpi_own_team_profile_pdf_bytes(
+            analysis_clean, selected_week_clean, selected_playstyle_clean,
+            tactical_context=clean_tactical_context,
+        )
+        if own_team_pdf_clean_v156 is not None:
+            st.download_button("⬇️ Saját csapat", own_team_pdf_clean_v156, f"fpi_sajat_csapat_{safe_week_clean}.pdf", "application/pdf", use_container_width=True, key="clean_export_own_v156")
+    with ex5:
+        method_pdf_clean_v156 = build_fpi_methodology_pdf_bytes_v143()
+        if method_pdf_clean_v156 is not None:
+            st.download_button("⬇️ Metodika", method_pdf_clean_v156, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="clean_export_method_v156")
+
 
 
 # =========================================================
@@ -13748,6 +13846,276 @@ def _fpi_contextual_md_plan_rows_v151(
     return result
 
 
+
+# =========================================================
+# V156 - Öt riportmód, közös tartalmi motor
+# =========================================================
+def _fpi_canonical_report_bundle_v156(
+    data: Optional[pd.DataFrame],
+    selected_week: Optional[str],
+    playstyle: str,
+    tactical_context: Optional[Dict[str, object]],
+) -> Dict[str, object]:
+    tctx = tactical_context or {}
+    has_gps = isinstance(data, pd.DataFrame) and not data.empty
+    week = str(selected_week or "")
+
+    gps_ctx, readiness, priorities, fitness_insights, risk_df = {}, None, [], [], pd.DataFrame()
+    if has_gps:
+        try:
+            report_ctx = _fpi_report_context(data, selected_week, playstyle)
+            gps_ctx = report_ctx
+            readiness = int(report_ctx.get("readiness_score", 70) or 70)
+            priorities = report_ctx.get("priorities", []) or []
+            risk_df = report_ctx.get("risk_df") if isinstance(report_ctx.get("risk_df"), pd.DataFrame) else pd.DataFrame()
+            fitness_insights = _fpi_contextual_gps_only_insights_v146(
+                gps_ctx, priorities, readiness, week, 8
+            )
+        except Exception:
+            pass
+
+    tactical_insights, match_plan = [], []
+    if _fpi_has_tactical_signal_v95(tctx):
+        tactical_readiness = readiness if readiness is not None else 70
+        tactical_insights = _fpi_pro_tactical_findings_v151(
+            tctx, gps_ctx, tactical_readiness, priorities, week, 8
+        )
+        match_plan = _fpi_pro_match_plan_v151(
+            tctx, gps_ctx, tactical_readiness, priorities, week, 7
+        )
+
+    return {
+        "has_gps": has_gps,
+        "has_tactical": bool(_fpi_has_tactical_signal_v95(tctx)),
+        "week": week,
+        "gps_context": gps_ctx,
+        "readiness": readiness,
+        "priorities": priorities,
+        "risk_df": risk_df,
+        "fitness_insights": fitness_insights,
+        "tactical_insights": tactical_insights,
+        "match_plan": match_plan,
+        "tactical_context": tctx,
+    }
+
+
+def _fpi_own_pdf_findings_v156(tactical_context: Optional[Dict[str, object]], limit: int = 8) -> List[str]:
+    ctx = tactical_context or {}
+    own = ctx.get("own", {}) if isinstance(ctx.get("own"), dict) else {}
+    pdf = own.get("pdf_insights", {}) if isinstance(own.get("pdf_insights"), dict) else {}
+    values = []
+    for key in ["sportsbase_findings", "topics", "sportsbase_lines"]:
+        raw = pdf.get(key, []) or []
+        if isinstance(raw, dict):
+            raw = list(raw.values())
+        for item in raw:
+            text = _fpi_complete_text_v151(_fpi_extract_coach_text_v145(item, 500))
+            if text and text not in values:
+                values.append(text)
+    blocks = pdf.get("blocks", {}) if isinstance(pdf.get("blocks"), dict) else {}
+    for raw in blocks.values():
+        if isinstance(raw, (list, tuple)):
+            candidates = raw
+        else:
+            candidates = [raw]
+        for item in candidates:
+            text = _fpi_complete_text_v151(_fpi_extract_coach_text_v145(item, 500))
+            if text and text not in values:
+                values.append(text)
+    return values[:limit]
+
+
+def build_fpi_tactical_only_pdf_bytes_v156(
+    tactical_context: Optional[Dict[str, object]],
+    demo_label: str = "",
+) -> Optional[bytes]:
+    if SimpleDocTemplate is None:
+        return None
+    ctx = tactical_context or {}
+    if not _fpi_has_tactical_signal_v95(ctx):
+        return None
+
+    bundle = _fpi_canonical_report_bundle_v156(None, "", "Kiegyensúlyozott", ctx)
+    findings = bundle["tactical_insights"]
+    plan = bundle["match_plan"]
+    opp_eval = ctx.get("opponent_player_evaluation", []) or []
+    own_eval = ctx.get("own_player_evaluation", []) or []
+
+    font_name, font_bold = _register_pdf_font()
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1.1*cm, leftMargin=1.1*cm, topMargin=1.0*cm, bottomMargin=1.0*cm)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("FPITacOnlyTitleV156", parent=styles["Title"], fontName=font_bold, fontSize=22, leading=26, textColor=colors.HexColor("#0F172A"))
+    body = ParagraphStyle("FPITacOnlyBodyV156", parent=styles["BodyText"], fontName=font_name, fontSize=10.5, leading=14.0, alignment=4, textColor=colors.HexColor("#111827"))
+    small = ParagraphStyle("FPITacOnlySmallV156", parent=styles["BodyText"], fontName=font_name, fontSize=9.3, leading=12.2, alignment=4, textColor=colors.HexColor("#111827"))
+    head = ParagraphStyle("FPITacOnlyHeadV156", parent=styles["BodyText"], fontName=font_bold, fontSize=10.2, leading=12.6, alignment=1, textColor=colors.white)
+
+    def P(v, style=body):
+        return Paragraph(html.escape(_fpi_complete_text_v151(v)).replace("\n", "<br/>") or "—", style)
+
+    def section(text, bg="#DBEAFE"):
+        section_style = ParagraphStyle("FPITacOnlySectionV156", parent=body, fontName=font_bold, fontSize=14, leading=17)
+        t = Table([[P(text, section_style)]], colWidths=[27.5*cm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,-1),colors.HexColor(bg)),
+            ("BOX",(0,0),(-1,-1),0.5,colors.HexColor("#93C5FD")),
+            ("LEFTPADDING",(0,0),(-1,-1),8),("RIGHTPADDING",(0,0),(-1,-1),8),
+            ("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6),
+        ]))
+        return t
+
+    def tbl(rows, widths, header="#1E3A8A"):
+        t = Table(rows, colWidths=widths, repeatRows=1, splitByRow=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,0),colors.HexColor(header)),
+            ("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#CBD5E1")),
+            ("VALIGN",(0,0),(-1,-1),"TOP"),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),
+            ("LEFTPADDING",(0,0),(-1,-1),7),("RIGHTPADDING",(0,0),(-1,-1),7),
+            ("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6),
+        ]))
+        return t
+
+    story = [
+        P("Football Performance Intelligence – Tactical-only", title),
+        P(f"{demo_label or 'ÉLES RIPORT'} | GPS-adat nélkül, kizárólag taktikai PDF/Excel inputokból.", small),
+        Spacer(1, 0.18*cm),
+        section("1. Taktikai megállapítások", "#E0F2FE"),
+    ]
+    rows = [[P("Fókusz", head), P("Megfigyelés", head), P("Meccstervi válasz", head)]]
+    for item in findings:
+        rows.append([P(item.title, small), P(item.finding, small), P(item.recommendation, small)])
+    story.append(tbl(rows, [5.0*cm, 10.8*cm, 11.7*cm]))
+
+    story.append(PageBreak())
+    story.append(section("2. Konkrét meccsterv", "#FEF3C7"))
+    plan_rows = [[P("Döntési pont", head), P("Adatból következő irány", head), P("Végrehajtási fókusz", head)]]
+    for item in plan:
+        plan_rows.append([P(item.title, small), P(item.finding, small), P(item.recommendation, small)])
+    story.append(tbl(plan_rows, [5.2*cm, 10.8*cm, 11.5*cm], header="#92400E"))
+
+    story.append(PageBreak())
+    story.append(section("3. Játékosszintű fókusz", "#FEE2E2"))
+    player_rows = [[P("Oldal", head), P("Játékos", head), P("Szerep", head), P("Értékelés / feladat", head)]]
+    for side, entries in [("ELLENFÉL", opp_eval), ("SAJÁT", own_eval)]:
+        for row in entries[:6]:
+            player_rows.append([
+                P(side, small),
+                P(row.get("Játékos", ""), small),
+                P(row.get("Szerep", ""), small),
+                P(f"{row.get('Értelmezés','')} {row.get('Javaslat','')}", small),
+            ])
+    if len(player_rows) == 1:
+        player_rows.append([P("—", small), P("Nincs játékos Excel", small), P("—", small), P("A riport csapatszintű taktikai inputból készült.", small)])
+    story.append(tbl(player_rows, [3.0*cm, 4.5*cm, 6.2*cm, 13.8*cm], header="#991B1B"))
+
+    story.append(PageBreak())
+    story.append(section("4. Taktikai mikrociklus", "#EDE9FE"))
+    micro = [
+        ("MD-4", "Játékfelépítés", "Az ellenfél első védelmi vonalának és labdaszerzési csapdáinak modellezése."),
+        ("MD-3", "Fő meccshelyzet", "A legmagasabb prioritású átmeneti, szélső vagy belső veszély meccsintenzitású gyakorlása."),
+        ("MD-2", "Meccsterv", "Védekezési magasság, támadási célterület és ellenfél-kulcsemberek elleni feladatok rögzítése."),
+        ("MD-1", "Aktiváció", "Kezdőhelyzetek, első támadó gondolat és pontrúgásfókusz rövid ismétlése."),
+    ]
+    mr = [[P("Nap", head), P("Cím", head), P("Taktikai cél", head), P("Erőnléti értékelés", head)]]
+    for d, label, text in micro:
+        mr.append([P(d, small), P(label, small), P(text, small), P("GPS-adat nélkül nem értékelt.", small)])
+    story.append(tbl(mr, [2.8*cm, 5.0*cm, 13.7*cm, 6.0*cm], header="#312E81"))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def build_fpi_tactical_only_sample_pdf_bytes_v156() -> Optional[bytes]:
+    return build_fpi_tactical_only_pdf_bytes_v156(_build_demo_tactical_context(), demo_label="MINTA RIPORT")
+
+
+def build_fpi_integrated_sample_pdf_bytes_v156() -> Optional[bytes]:
+    demo_raw = build_demo_performance_data()
+    demo_df, _, missing = standardize_dataframe(demo_raw)
+    if missing or demo_df is None or demo_df.empty:
+        return None
+    demo_df = add_position_group(demo_df)
+    latest = _fpi_latest_week(demo_df)
+    return build_fpi_product_pdf_bytes(
+        demo_df, latest, "Kiegyensúlyozott",
+        report_type="executive",
+        tactical_context=_build_demo_tactical_context(),
+        demo_label="MINTA RIPORT / GPS + TAKTIKAI",
+    )
+
+
+def build_fpi_own_team_tactical_only_pdf_bytes_v156(
+    tactical_context: Optional[Dict[str, object]],
+    demo_label: str = "",
+) -> Optional[bytes]:
+    if SimpleDocTemplate is None:
+        return None
+    ctx = tactical_context or {}
+    own_findings = _fpi_own_pdf_findings_v156(ctx, 10)
+    own_metrics = ctx.get("own_team_metrics", {}) or {}
+    own_eval = ctx.get("own_player_evaluation", []) or []
+    if not own_eval:
+        own_eval = _fpi_build_player_evaluation_v132(ctx.get("own_player_tables", {}) or {}, side="own", max_rows=10)
+    if not own_findings and not own_metrics and not own_eval:
+        return None
+
+    font_name, font_bold = _register_pdf_font()
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1.1*cm, leftMargin=1.1*cm, topMargin=1.0*cm, bottomMargin=1.0*cm)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("FPIOwnTacTitleV156", parent=styles["Title"], fontName=font_bold, fontSize=22, leading=26)
+    body = ParagraphStyle("FPIOwnTacBodyV156", parent=styles["BodyText"], fontName=font_name, fontSize=10.5, leading=14, alignment=4)
+    small = ParagraphStyle("FPIOwnTacSmallV156", parent=styles["BodyText"], fontName=font_name, fontSize=9.3, leading=12.2, alignment=4)
+    head = ParagraphStyle("FPIOwnTacHeadV156", parent=styles["BodyText"], fontName=font_bold, fontSize=10.2, leading=12.5, alignment=1, textColor=colors.white)
+
+    def P(v, style=body):
+        return Paragraph(html.escape(_fpi_complete_text_v151(v)).replace("\n", "<br/>") or "—", style)
+
+    def tbl(rows, widths, header="#0F766E"):
+        t = Table(rows, colWidths=widths, repeatRows=1, splitByRow=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,0),colors.HexColor(header)),
+            ("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#CBD5E1")),
+            ("VALIGN",(0,0),(-1,-1),"TOP"),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),
+            ("LEFTPADDING",(0,0),(-1,-1),7),("RIGHTPADDING",(0,0),(-1,-1),7),
+            ("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6),
+        ]))
+        return t
+
+    story = [P("Football Performance Intelligence – saját csapat profil", title), P(f"{demo_label or 'ÉLES RIPORT'} | Saját taktikai PDF/Excel alapú elemzés, GPS nélkül.", small)]
+    story.append(Spacer(1,0.2*cm))
+    rows = [[P("Forrás", head), P("Saját csapat taktikai megállapítás", head)]]
+    for text in own_findings:
+        rows.append([P("Saját taktikai PDF", small), P(text, small)])
+    if len(rows) == 1:
+        rows.append([P("Saját taktikai input", small), P("A PDF nem adott külön szöveges megállapítást; az Excel-alapú profil szerepel a következő oldalakon.", small)])
+    story.append(tbl(rows, [5.0*cm, 22.5*cm]))
+
+    story.append(PageBreak())
+    metric_rows = _fpi_team_metric_rows_v132(own_metrics)
+    mr = [[P("Mutató", head), P("Érték", head), P("Referencia / értékelés", head), P("Edzői olvasat", head)]]
+    for lab, val, ref_txt, reading, _key in metric_rows:
+        mr.append([P(lab, small), P(val, small), P(ref_txt, small), P(reading, small)])
+    if len(mr) == 1:
+        mr.append([P("Csapatmutatók", small), P("—", small), P("Nincs saját csapat Excel", small), P("Az elemzés a saját taktikai PDF-re támaszkodik.", small)])
+    story.append(tbl(mr, [4.3*cm,3.0*cm,6.0*cm,14.2*cm], header="#1E3A8A"))
+
+    story.append(PageBreak())
+    pr = [[P("Játékos", head), P("Szerep", head), P("Konkrét mutatók", head), P("Értékelés", head), P("Használati javaslat", head)]]
+    for r in own_eval[:10]:
+        pr.append([P(r.get("Játékos",""),small),P(r.get("Szerep",""),small),P(r.get("Bizonyíték",""),small),P(r.get("Értelmezés",""),small),P(r.get("Javaslat",""),small)])
+    if len(pr) == 1:
+        pr.append([P("—",small),P("—",small),P("Nincs saját játékos Excel",small),P("Játékosszintű számszerű értékelés nem készült.",small),P("Tölts fel saját játékos Excel/CSV-t.",small)])
+    story.append(tbl(pr,[3.8*cm,4.8*cm,6.0*cm,6.2*cm,6.7*cm], header="#166534"))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 # =========================================================
 # V143 - Methodology content + PDF export
 # =========================================================
@@ -13827,6 +14195,10 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
             "A minta- és éles riportok ugyanazokat a renderelőfüggvényeket használják. A minták beépített demo adatokból, az éles riportok a feltöltött adatokból készülnek; egyetlen sikertelen mintaexport nem blokkolhatja a többi letöltési gombot.",
             "Az exportkészlet négy dokumentumra szűkül: Executive Summary, GPS-only riport, Saját csapat profil és Metodika. A Full Report nem jelenik meg sem a minta-, sem az éles exportok között.",
             "A Saját csapat mintaexport garantált csapat- és játékosszintű demo adatokat használ. Az exportkártya hiba esetén sem tűnik el: a felület egyértelmű státuszt mutat, így a PDF-generálási probléma azonnal látható.",
+            "Öt riportmód érhető el éles és minta formában: GPS-only, Taktikai-only, GPS + taktikai, Saját csapat és Metodika.",
+            "A riportok közös tartalmi motorból dolgoznak. A GPS + taktikai riport erőnléti állításai megegyeznek a GPS-only riport megfelelő állításaival, taktikai állításai pedig a Taktikai-only riport megfelelő állításaival.",
+            "A rendszer 90 percnél hosszabb mérkőzéseket és edzőmeccseket is kezel. A tényleges 105/120 perces összterhelés megmarad, emellett per90 mutató készül a referencia-összevetéshez.",
+            "A Saját csapat elemzés külön forrásként használja a saját taktikai PDF-ekből kinyert visszatérő csapatmintákat, a saját csapat- és játékos Excel mellett.",
             "A fő logikai blokkok új oldalon indulnak. A rendszer inkább több oldalt használ, mintsem hogy egy cím vagy egy összetartozó szakmai blokk az előző oldal alján kezdődjön.",
             "A korábbi automatikus kulcsszó-vastagítás helyett a szerkezet emeli ki a lényeget: rövid cím, megfigyelés, nyíl és meccstervi válasz. Ez gyorsabban értelmezhető, és kevésbé teszi zsúfolttá a dokumentumot.",
             "Az Executive Summary nagyobb betűméretű, sorkizárt törzsszöveget, hangsúlyos kulcsüzenet-dobozt, félkövér alcímeket és tágabb cellaközöket használ. A vezetői lényeg így a teljes mondatok végigolvasása nélkül is gyorsan felismerhető.",
