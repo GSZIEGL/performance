@@ -7,6 +7,8 @@ from __future__ import annotations
 import html
 import io
 import hashlib
+import importlib
+import sys
 import os
 import json
 import re
@@ -71,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V165_POLAR_XLS_IMPORT_2026_07_19"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V166_POLAR_XLS_RUNTIME_FIXED_2026_07_19"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -11915,7 +11917,7 @@ def _fpi_detect_provider_v143(sheets: Dict[str, pd.DataFrame], file_name: str = 
     sample_text = ""
     for frame in list(sheets.values())[:4]:
         try:
-            sample_text += " " + " ".join(str(x).lower() for x in frame.head(8).fillna("").astype(str).values.ravel().tolist())
+            sample_text += " " + " ".join(str(x).lower() for x in frame.head(15).fillna("").astype(str).values.ravel().tolist())
         except Exception:
             pass
 
@@ -11923,7 +11925,12 @@ def _fpi_detect_provider_v143(sheets: Dict[str, pd.DataFrame], file_name: str = 
         return "PlayerTek"
     if "brainsport" in name or "targets summary" in sample_text or "heart exertion" in sample_text or "main table" in sheet_names:
         return "Brainsports"
-    if "polar" in name or "edzési terhelési pontérték" in sample_text or "kardióterhelés" in sample_text:
+    if (
+        "polar" in name
+        or "edzési terhelési pontérték" in sample_text
+        or "kardióterhelés" in sample_text
+        or ("játékos neve" in sample_text and "táv/perc" in sample_text and "hrv (rmssd)" in sample_text)
+    ):
         return "Polar Team Pro"
     old_catapult = all(x in sample_text for x in ["athlete_name", "activity_name", "total_player_load"])
     vector_catapult = all(x in sample_text for x in ["player name", "period name", "total player load"]) and ("meterage per minute" in sample_text or "max velocity" in sample_text)
@@ -12157,8 +12164,8 @@ def _fpi_prepare_polar_v143(
     for _, raw in sheets.items():
         header_idx = _fpi_find_header_row_v143(
             raw,
-            ["játékos neve", "táv", "kezdési idő"],
-            max_scan=30,
+            ["játékos neve", "kezdési idő", "időtartam"],
+            max_scan=40,
         )
         if header_idx is None:
             continue
@@ -12552,82 +12559,151 @@ def _fpi_prepare_catapult_v143(
     return out.reset_index(drop=True)
 
 
+def _fpi_ensure_xlrd_v166() -> Tuple[bool, str]:
+    """Biztosítja a régi bináris .xls fájlok olvasásához szükséges xlrd-t."""
+    try:
+        import xlrd  # noqa: F401
+        return True, "xlrd elérhető"
+    except Exception as first_exc:
+        first_error = str(first_exc)
+
+    # Streamlit/virtuális környezetben megkíséreljük ugyanabba a Pythonba telepíteni.
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--quiet",
+                "xlrd>=2.0.1",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        importlib.invalidate_caches()
+        try:
+            import xlrd  # noqa: F401
+            return True, "xlrd automatikusan telepítve"
+        except Exception as second_exc:
+            detail = result.stderr.strip() or result.stdout.strip() or str(second_exc)
+            return False, f"xlrd telepítési kísérlet sikertelen: {detail}"
+    except Exception as exc:
+        return False, f"xlrd hiányzik ({first_error}); automatikus telepítés sem sikerült: {exc}"
+
+
 def _fpi_read_excel_bytes_v165(
     data: bytes,
     file_name: str,
     header=None,
 ) -> Dict[str, pd.DataFrame]:
-    """Excel fájl olvasása több motorral, régi .xls támogatással."""
+    """Excel fájl olvasása több motorral, stabil régi .xls támogatással."""
     ext = Path(str(file_name)).suffix.lower()
     errors: List[str] = []
 
-    attempts = []
+    # Régi OLE2 .xls: elsődlegesen xlrd. Ez a stabil, szerverfüggetlen út.
     if ext == ".xls":
-        attempts = [
-            {"engine": "xlrd"},
-            {"engine": "calamine"},
-            {},
-        ]
-    else:
-        attempts = [
-            {"engine": "openpyxl"},
-            {"engine": "calamine"},
-            {},
-        ]
+        xlrd_ok, xlrd_note = _fpi_ensure_xlrd_v166()
+        if xlrd_ok:
+            try:
+                sheets = pd.read_excel(
+                    io.BytesIO(data),
+                    sheet_name=None,
+                    header=header,
+                    engine="xlrd",
+                )
+                if sheets:
+                    return sheets
+                errors.append("xlrd: a munkafüzet nem tartalmaz olvasható lapot")
+            except Exception as exc:
+                errors.append(f"xlrd: {exc}")
+        else:
+            errors.append(xlrd_note)
 
+        # Opcionális calamine fallback.
+        try:
+            sheets = pd.read_excel(
+                io.BytesIO(data),
+                sheet_name=None,
+                header=header,
+                engine="calamine",
+            )
+            if sheets:
+                return sheets
+        except Exception as exc:
+            errors.append(f"calamine: {exc}")
+
+        # Helyi gépen / megfelelő szerveren LibreOffice fallback.
+        office = shutil.which("libreoffice") or shutil.which("soffice")
+        if office:
+            try:
+                with tempfile.TemporaryDirectory(prefix="fpi_xls_") as temp_dir:
+                    temp_path = Path(temp_dir)
+                    safe_name = Path(file_name).name or "polar_import.xls"
+                    input_path = temp_path / safe_name
+                    input_path.write_bytes(data)
+
+                    result = subprocess.run(
+                        [
+                            office,
+                            "--headless",
+                            "--convert-to", "xlsx",
+                            "--outdir", str(temp_path),
+                            str(input_path),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=90,
+                        check=False,
+                    )
+                    converted = temp_path / f"{input_path.stem}.xlsx"
+                    if converted.exists():
+                        sheets = pd.read_excel(
+                            converted,
+                            sheet_name=None,
+                            header=header,
+                            engine="openpyxl",
+                        )
+                        if sheets:
+                            return sheets
+                    errors.append(
+                        "LibreOffice: "
+                        + (result.stderr.strip() or result.stdout.strip() or "nem készült konvertált fájl")
+                    )
+            except Exception as exc:
+                errors.append(f"LibreOffice: {exc}")
+
+        raise ValueError(
+            "A régi Polar .xls fájl megnyitható, de a futtatókörnyezet nem tudja "
+            "feldolgozni. Telepítsd az `xlrd>=2.0.1` csomagot a requirements.txt-ben, "
+            "vagy mentsd a fájlt .xlsx formátumba. Részletek: "
+            + " | ".join(errors[-5:])
+        )
+
+    # Modern Excel formátumok.
+    attempts = [
+        {"engine": "openpyxl"},
+        {"engine": "calamine"},
+        {},
+    ]
     for kwargs in attempts:
         try:
-            return pd.read_excel(
+            sheets = pd.read_excel(
                 io.BytesIO(data),
                 sheet_name=None,
                 header=header,
                 **kwargs,
             )
+            if sheets:
+                return sheets
         except Exception as exc:
-            engine_name = kwargs.get("engine", "automatikus")
-            errors.append(f"{engine_name}: {exc}")
-
-    # Utolsó helyi fallback: LibreOffice headless konverzió, ha elérhető.
-    office = shutil.which("libreoffice") or shutil.which("soffice")
-    if office:
-        try:
-            with tempfile.TemporaryDirectory(prefix="fpi_xls_") as temp_dir:
-                temp_path = Path(temp_dir)
-                input_path = temp_path / Path(file_name).name
-                input_path.write_bytes(data)
-
-                result = subprocess.run(
-                    [
-                        office,
-                        "--headless",
-                        "--convert-to", "xlsx",
-                        "--outdir", str(temp_path),
-                        str(input_path),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=90,
-                    check=False,
-                )
-                converted = temp_path / f"{input_path.stem}.xlsx"
-                if converted.exists():
-                    return pd.read_excel(
-                        converted,
-                        sheet_name=None,
-                        header=header,
-                        engine="openpyxl",
-                    )
-                errors.append(
-                    "LibreOffice: "
-                    + (result.stderr.strip() or result.stdout.strip() or "nem készült konvertált fájl")
-                )
-        except Exception as exc:
-            errors.append(f"LibreOffice: {exc}")
+            errors.append(f"{kwargs.get('engine', 'automatikus')}: {exc}")
 
     raise ValueError(
-        "Az Excel fájl nem olvasható. Régi .xls fájlhoz telepítsd az "
-        "`xlrd>=2.0.1` csomagot, vagy mentsd .xlsx formátumba. "
-        + " | ".join(errors[-4:])
+        "Az Excel fájl nem olvasható. " + " | ".join(errors[-4:])
     )
 
 def _fpi_read_single_gps_file_v143(
@@ -12707,6 +12783,24 @@ def _fpi_read_single_gps_file_v143(
                 "Megjegyzés": "Automatikusan standardizált",
             }]
 
+        # Polar esetén az üres eredmény ne vesszen el néma Smart Mapper fallbackben.
+        if provider == "Polar Team Pro":
+            sheet_shapes = ", ".join(
+                f"{sheet_name}: {frame.shape[0]}x{frame.shape[1]}"
+                for sheet_name, frame in raw_sheets.items()
+                if isinstance(frame, pd.DataFrame)
+            )
+            return {}, [{
+                "Fájl": name,
+                "Státusz": "HIBA",
+                "Rendszer": provider,
+                "Sorok": 0,
+                "Megjegyzés": (
+                    "A Polar munkafüzet megnyílt, de az Összegzés fejlécét nem sikerült "
+                    "standardizálni. Lapok: " + (sheet_shapes or "nincs olvasható lap")
+                ),
+            }]
+
         # Generic fallback: keep all sheets and let the existing header detector + Smart Mapper work.
         generic = {}
         for sheet_name, raw in raw_sheets.items():
@@ -12721,7 +12815,14 @@ def _fpi_read_single_gps_file_v143(
             "Megjegyzés": "Általános Smart Mapper szükséges",
         }]
     except Exception as exc:
-        return {}, [{"Fájl": name, "Státusz": "HIBA", "Rendszer": "", "Sorok": 0, "Megjegyzés": str(exc)}]
+        inferred_system = "Polar Team Pro" if "polar" in name.lower() else ""
+        return {}, [{
+            "Fájl": name,
+            "Státusz": "HIBA",
+            "Rendszer": inferred_system,
+            "Sorok": 0,
+            "Megjegyzés": str(exc),
+        }]
 
 
 def _fpi_read_many_gps_files_v143(
