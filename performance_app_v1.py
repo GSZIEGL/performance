@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V159_CATAPULT_VECTOR_IMPORT_2026_07_19"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V161_DERIVED_MINUTES_HIGH_EFFORTS_2026_07_19"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -1606,6 +1606,26 @@ def enhanced_mapping_quality_df(raw_df: pd.DataFrame, mapping: Dict[str, Optiona
     return pd.DataFrame(rows)
 
 
+def _fpi_derived_mapping_fields(mapping: Dict[str, Optional[str]]) -> Dict[str, str]:
+    """Azokat a standard mezőket jelöli, amelyeket az app biztonságosan kiszámít."""
+    derived: Dict[str, str] = {}
+
+    if not mapping.get("match_minutes") and mapping.get("duration"):
+        derived["match_minutes"] = "Időtartamból"
+
+    effort_parts = [
+        key for key in ("sprints", "acc_high", "dec_high")
+        if mapping.get(key)
+    ]
+    if not mapping.get("high_efforts") and effort_parts:
+        derived["high_efforts"] = "Sprint + intenzív gyorsítás/lassítás"
+
+    if not mapping.get("distance_per_min") and mapping.get("total_distance") and mapping.get("duration"):
+        derived["distance_per_min"] = "Össztáv / időtartam"
+
+    return derived
+
+
 def mapping_compatibility_score(mapping: Dict[str, Optional[str]]) -> Tuple[int, List[str]]:
     weights = {
         "player_name": 20, "session_type": 15, "start_time": 15,
@@ -1614,11 +1634,12 @@ def mapping_compatibility_score(mapping: Dict[str, Optional[str]]) -> Tuple[int,
         "speed_zone_5": 7, "training_load": 5, "match_minutes": 4, "acc_high": 3,
         "dec_high": 3, "high_efforts": 4,
     }
+    derived = _fpi_derived_mapping_fields(mapping)
     total = sum(weights.values())
     got = 0
     missing = []
     for k, w in weights.items():
-        if mapping.get(k):
+        if mapping.get(k) or k in derived:
             got += w
         else:
             missing.append(mapper_label(k))
@@ -1627,14 +1648,27 @@ def mapping_compatibility_score(mapping: Dict[str, Optional[str]]) -> Tuple[int,
 
 def render_mapping_score(mapping: Dict[str, Optional[str]]) -> None:
     score, missing = mapping_compatibility_score(mapping)
+    derived = _fpi_derived_mapping_fields(mapping)
+
     if score >= 85:
         st.success(f"GPS fájl kompatibilitás: {score}% – nagyon jó")
     elif score >= 65:
         st.warning(f"GPS fájl kompatibilitás: {score}% – használható, de néhány mező hiányzik")
     else:
         st.error(f"GPS fájl kompatibilitás: {score}% – javítsd a mappinget")
+
+    if derived:
+        labels = []
+        if "match_minutes" in derived:
+            labels.append("Játékperc / szereplési idő")
+        if "high_efforts" in derived:
+            labels.append("High Efforts")
+        if "distance_per_min" in derived:
+            labels.append("Táv/perc")
+        st.caption("Automatikusan számított mezők: " + ", ".join(labels))
+
     if missing:
-        st.caption("Hiányzó fontos mezők: " + ", ".join(missing[:8]) + ("..." if len(missing) > 8 else ""))
+        st.caption("Valóban hiányzó fontos mezők: " + ", ".join(missing[:8]) + ("..." if len(missing) > 8 else ""))
 
 
 def normalize_combined_fields(out: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> pd.DataFrame:
@@ -2474,10 +2508,36 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
     out["sprint_distance"] = out["speed_zone_5"]
     out["acc_count"] = out[["acc_low", "acc_mid", "acc_high"]].sum(axis=1, min_count=1)
     out["dec_count"] = out[["dec_low", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
-    if "high_efforts" not in out.columns or out["high_efforts"].isna().all():
-        out["high_efforts"] = out[["acc_mid", "acc_high", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
+
+    # V161: ha nincs külön játékperc, a szereplési idő az adott sor időtartamából képződik.
+    # Meccsnél ez játékperc/exposure, edzésnél résztvevői idő.
+    if "match_minutes" not in out.columns:
+        out["match_minutes"] = out["duration_min"]
     else:
-        out["high_efforts"] = to_numeric(out["high_efforts"])
+        out["match_minutes"] = to_numeric(out["match_minutes"])
+        out["match_minutes"] = out["match_minutes"].where(
+            out["match_minutes"].notna() & (out["match_minutes"] > 0),
+            out["duration_min"],
+        )
+
+    # V161: külön High Efforts oszlop hiányában:
+    # sprintakciók + magas intenzitású gyorsítások + magas intenzitású lassítások.
+    derived_high_efforts = pd.concat(
+        [
+            to_numeric(out["sprints"]) if "sprints" in out.columns else pd.Series(0.0, index=out.index),
+            to_numeric(out["acc_high"]) if "acc_high" in out.columns else pd.Series(0.0, index=out.index),
+            to_numeric(out["dec_high"]) if "dec_high" in out.columns else pd.Series(0.0, index=out.index),
+        ],
+        axis=1,
+    ).sum(axis=1, min_count=1)
+
+    if "high_efforts" not in out.columns or out["high_efforts"].isna().all():
+        out["high_efforts"] = derived_high_efforts
+    else:
+        out["high_efforts"] = to_numeric(out["high_efforts"]).where(
+            to_numeric(out["high_efforts"]).notna(),
+            derived_high_efforts,
+        )
 
     out = normalize_combined_fields(out, mapping)
 
@@ -2535,10 +2595,36 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
     out["sprint_distance"] = out["speed_zone_5"]
     out["acc_count"] = out[["acc_low", "acc_mid", "acc_high"]].sum(axis=1, min_count=1)
     out["dec_count"] = out[["dec_low", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
-    if "high_efforts" not in out.columns or out["high_efforts"].isna().all():
-        out["high_efforts"] = out[["acc_mid", "acc_high", "dec_mid", "dec_high"]].sum(axis=1, min_count=1)
+
+    # V161: ha nincs külön játékperc, a szereplési idő az adott sor időtartamából képződik.
+    # Meccsnél ez játékperc/exposure, edzésnél résztvevői idő.
+    if "match_minutes" not in out.columns:
+        out["match_minutes"] = out["duration_min"]
     else:
-        out["high_efforts"] = to_numeric(out["high_efforts"])
+        out["match_minutes"] = to_numeric(out["match_minutes"])
+        out["match_minutes"] = out["match_minutes"].where(
+            out["match_minutes"].notna() & (out["match_minutes"] > 0),
+            out["duration_min"],
+        )
+
+    # V161: külön High Efforts oszlop hiányában:
+    # sprintakciók + magas intenzitású gyorsítások + magas intenzitású lassítások.
+    derived_high_efforts = pd.concat(
+        [
+            to_numeric(out["sprints"]) if "sprints" in out.columns else pd.Series(0.0, index=out.index),
+            to_numeric(out["acc_high"]) if "acc_high" in out.columns else pd.Series(0.0, index=out.index),
+            to_numeric(out["dec_high"]) if "dec_high" in out.columns else pd.Series(0.0, index=out.index),
+        ],
+        axis=1,
+    ).sum(axis=1, min_count=1)
+
+    if "high_efforts" not in out.columns or out["high_efforts"].isna().all():
+        out["high_efforts"] = derived_high_efforts
+    else:
+        out["high_efforts"] = to_numeric(out["high_efforts"]).where(
+            to_numeric(out["high_efforts"]).notna(),
+            derived_high_efforts,
+        )
     out = normalize_combined_fields(out, mapping)
 
     if "distance_per_min" not in out.columns or out["distance_per_min"].isna().all():
@@ -11880,6 +11966,7 @@ def _fpi_prepare_catapult_v143(
     col = c("total_duration")
     if col and col in grouped:
         out["Duration"] = grouped[col] / 60.0
+        out["Match Minutes"] = out["Duration"]
     col = c("total_distance")
     if col and col in grouped:
         out["Total Distance"] = grouped[col]
