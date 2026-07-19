@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V162_ADAPTIVE_SINGLE_SESSION_REPORT_2026_07_19"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V163_SINGLE_DAY_CATAPULT_REPORT_2026_07_19"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7497,10 +7497,15 @@ def _fpi_gps_week_metrics_v95(ctx: Dict[str, object], week: str) -> Dict[str, ob
     }
 
 def _fpi_single_session_profile_v162(ctx: Dict[str, object], week: str) -> Dict[str, object]:
-    """Felismeri az egyetlen GPS-eseményt, és abból önálló edzésprofilt készít."""
+    """Egyetlen edzésnap felismerése és önálló edzésprofil készítése.
+
+    Catapult esetén a Session és Period sorok ugyanahhoz az edzéshez tartozhatnak.
+    Ilyenkor a napi Session összesítő sort használjuk, és nem számoljuk külön eseménynek
+    a belső periódusokat.
+    """
     df = ctx.get("df")
     if not isinstance(df, pd.DataFrame) or df.empty:
-        return {"is_single_session": False, "session_count": 0}
+        return {"is_single_session": False, "session_count": 0, "day_count": 0}
 
     d = df.copy()
     if "week" in d.columns:
@@ -7508,26 +7513,58 @@ def _fpi_single_session_profile_v162(ctx: Dict[str, object], week: str) -> Dict[
         if not selected.empty:
             d = selected
 
-    # Egy esemény azonosítása: időpont + eseménynév + típus.
-    session_parts = []
-    for col in ("start_time", "session_name", "session_type"):
-        if col in d.columns:
-            values = d[col].astype(str).replace({"NaT": "", "nan": "", "None": ""})
-            session_parts.append(values)
-
-    if session_parts:
-        session_key = session_parts[0]
-        for values in session_parts[1:]:
-            session_key = session_key + "|" + values
-        session_key = session_key.str.strip("|")
-        meaningful = session_key[session_key.str.replace("|", "", regex=False).str.strip().ne("")]
-        session_count = int(meaningful.nunique()) if not meaningful.empty else 1
+    # Dátum meghatározása. Az azonos napon belüli eltérő Period Name nem új edzés.
+    if "start_time" in d.columns:
+        parsed_start = pd.to_datetime(d["start_time"], errors="coerce")
+        session_day = parsed_start.dt.date
+    elif "date" in d.columns:
+        parsed_start = pd.to_datetime(d["date"], errors="coerce")
+        session_day = parsed_start.dt.date
     else:
-        session_count = 1
+        parsed_start = pd.Series(pd.NaT, index=d.index)
+        session_day = pd.Series(pd.NaT, index=d.index)
 
-    is_single = session_count <= 1
+    valid_days = session_day.dropna()
+    day_count = int(valid_days.nunique()) if not valid_days.empty else 0
+
+    # Ha ugyanazon a napon van "Session" összesítő, azt preferáljuk a Period sorokkal szemben.
+    if "session_name" in d.columns:
+        names = d["session_name"].astype(str).str.strip().str.lower()
+        session_mask = names.eq("session") | names.str.contains(
+            r"^session$|full session|entire session|whole session|teljes edzés|teljes edzes",
+            regex=True,
+            na=False,
+        )
+        if session_mask.any():
+            # Naponta és játékosonként csak az összesítő Session sor maradjon.
+            d_session = d.loc[session_mask].copy()
+            if not d_session.empty:
+                d = d_session
+
+    # Egy játékoshoz ugyanazon a napon több technikai duplikátum is tartozhat.
     player_col = "player_name" if "player_name" in d.columns else None
-    player_count = int(d[player_col].dropna().astype(str).nunique()) if player_col else len(d)
+    if player_col:
+        dedupe_cols = [player_col]
+        if "start_time" in d.columns:
+            d["_fpi_session_day_v163"] = pd.to_datetime(
+                d["start_time"], errors="coerce"
+            ).dt.date.astype(str)
+            dedupe_cols.append("_fpi_session_day_v163")
+        elif "date" in d.columns:
+            d["_fpi_session_day_v163"] = pd.to_datetime(
+                d["date"], errors="coerce"
+            ).dt.date.astype(str)
+            dedupe_cols.append("_fpi_session_day_v163")
+        d = d.drop_duplicates(subset=dedupe_cols, keep="first").copy()
+
+    # Eseményszám napi alapon. Ha nincs értelmezhető dátum, fájlon belül egy eseményt feltételezünk.
+    session_count = day_count if day_count > 0 else 1
+    is_single = session_count == 1
+
+    player_count = (
+        int(d[player_col].dropna().astype(str).nunique())
+        if player_col else len(d)
+    )
 
     def num(col: str) -> pd.Series:
         if col not in d.columns:
@@ -7550,7 +7587,7 @@ def _fpi_single_session_profile_v162(ctx: Dict[str, object], week: str) -> Dict[
             continue
         mean = float(s.mean())
         std = float(s.std(ddof=0)) if len(s) > 1 else 0.0
-        cv = (std / mean * 100.0) if mean not in (0, np.nan) and abs(mean) > 1e-9 else 0.0
+        cv = (std / abs(mean) * 100.0) if abs(mean) > 1e-9 else 0.0
         metrics[col] = {
             "label": label,
             "unit": unit,
@@ -7562,7 +7599,6 @@ def _fpi_single_session_profile_v162(ctx: Dict[str, object], week: str) -> Dict[
             "count": int(s.notna().sum()),
         }
 
-    # Játékosonkénti szélsőértékek az össztáv és Player Load alapján.
     extremes = {}
     if player_col:
         for col in ("total_distance", "training_load", "high_efforts"):
@@ -7585,12 +7621,12 @@ def _fpi_single_session_profile_v162(ctx: Dict[str, object], week: str) -> Dict[
     return {
         "is_single_session": is_single,
         "session_count": session_count,
+        "day_count": day_count,
         "player_count": player_count,
-        "df": d,
+        "df": d.drop(columns=["_fpi_session_day_v163"], errors="ignore"),
         "metrics": metrics,
         "extremes": extremes,
     }
-
 
 def _fpi_single_session_conclusions_v162(
     ctx: Dict[str, object],
