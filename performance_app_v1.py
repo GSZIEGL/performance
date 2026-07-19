@@ -10,6 +10,9 @@ import hashlib
 import os
 import json
 import re
+import subprocess
+import tempfile
+import shutil
 import unicodedata
 import zipfile
 from pathlib import Path
@@ -68,7 +71,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V163_SINGLE_DAY_CATAPULT_REPORT_2026_07_19"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V165_POLAR_XLS_IMPORT_2026_07_19"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -1474,7 +1477,7 @@ STANDARD_COLUMNS = {
     "match_minutes": ["Játékperc", "Játékpercek", "Meccsperc", "Meccspercek", "Minutes played", "Minutes Played", "Playing Time", "Match Minutes", "Match minutes", "Player minutes", "On pitch minutes"],
     "total_distance": ["Teljes táv [m]", "Tel\xadjes táv [m]", "Total Distance", "Distance", "Össztáv", "Total distance (m)", "Total Dist", "Dist Total", "Distance [m]", "TD", "Total Distance m", "total_distance", "Distance (km)"],
     "distance_per_min": ["Táv/perc [m/min]", "Distance/min", "Distance Per Min", "m/min", "Distance per minute", "m per min", "m/minute", "Rel Distance", "Distance Per Min (m/min)", "meterage_per_minute", "Meterage Per Minute"],
-    "max_speed": ["Maximális sebesség [km/h]", "Max Speed", "Maximum Speed", "Top Speed", "Peak Speed", "Max Velocity", "Maximum Velocity", "Vmax", "Top Speed (km/h)", "max_vel"],
+    "max_speed": ["Maximális sebesség [km/h]", "Top Speed", "Max Speed", "Maximum Speed", "Top Speed", "Peak Speed", "Max Velocity", "Maximum Velocity", "Vmax", "Top Speed (km/h)", "max_vel"],
     "avg_speed": ["Átlagsebesség [km/h]", "Average Speed", "Avg Speed", "Mean Speed"],
     "sprints": ["Sprintek", "Sprints", "Sprint Count", "Number of Sprints", "Sprint #", "Sprint efforts", "Sprint Efforts", "Sprints count  ()", "Sprints count"],
     "speed_zone_3": ["Táv a sebesség célzónában 3 [m] (14.40 - 19.79 km/h)"],
@@ -1489,10 +1492,10 @@ STANDARD_COLUMNS = {
     "hrv": ["HRV (RMSSD)", "HRV", "RMSSD", "HRV RMSSD"],
     "acc_low": ["Gyorsulások száma (2.00 - 2.49 m/s²)"],
     "acc_mid": ["Gyorsulások száma (2.50 - 2.99 m/s²)"],
-    "acc_high": ["Gyorsulások száma (3.00 - 50.00 m/s²)", "Total Accelerations  ()", "Total Accelerations", "Accelerations (2+3)  ()", "Accelerations (2+3)", "Accelerations", "ACC High Intensity Nr (>2,5m/s)", "Acceleration B2-3 Total Efforts (Gen 2)", "gen2_acceleration_band3plus_total_effort_count"],
+    "acc_high": ["Gyorsulások száma (3.00 - 50.00 m/s²)", "Total Accelerations", "Total Accelerations  ()", "Total Accelerations", "Accelerations (2+3)  ()", "Accelerations (2+3)", "Accelerations", "ACC High Intensity Nr (>2,5m/s)", "Acceleration B2-3 Total Efforts (Gen 2)", "gen2_acceleration_band3plus_total_effort_count"],
     "dec_low": ["Gyorsulások száma (-2.49 - -2.00 m/s²)"],
     "dec_mid": ["Gyorsulások száma (-2.99 - -2.50 m/s²)"],
-    "dec_high": ["Gyorsulások száma (-50.00 - -3.00 m/s²)", "Total Decelerations  ()", "Total Decelerations", "Decelerations (2+3)  ()", "Decelerations (2+3)", "Decelerations", "DEC High Intensity Nr (> -2,5m/s)", "Deceleration B2-3 Total Efforts (Gen 2)"],
+    "dec_high": ["Gyorsulások száma (-50.00 - -3.00 m/s²)", "Total Decelerations", "Total Decelerations  ()", "Total Decelerations", "Decelerations (2+3)  ()", "Decelerations (2+3)", "Decelerations", "DEC High Intensity Nr (> -2,5m/s)", "Deceleration B2-3 Total Efforts (Gen 2)"],
     "high_efforts": ["High Efforts", "High Effort", "High efforts", "Nagy intenzitású erőfeszítések", "Nagy intenzitású akciók", "Explosive Efforts", "Explosive efforts", "High Intensity Efforts", "HIE", "Efforts High", "HI Efforts"],
 }
 
@@ -2187,6 +2190,23 @@ def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.D
 
     df = raw_df.copy()
 
+    # V164: a provider-specifikus importmotorok már valódi fejlécű,
+    # standardizált DataFrame-et adnak vissza. Ezeket tilos újra
+    # header=None táblaként értelmezni.
+    standardized_provider_cols = {"Player Name", "Session Type", "Start Time"}
+    if standardized_provider_cols.issubset(set(map(str, df.columns))):
+        df.columns = [
+            clean_col_name(c) if clean_col_name(c) else f"col_{i+1}"
+            for i, c in enumerate(df.columns)
+        ]
+        df = df.dropna(how="all").reset_index(drop=True)
+        for c in df.columns:
+            if df[c].dtype == object:
+                df[c] = df[c].apply(
+                    lambda x: str(x).strip() if pd.notna(x) else x
+                )
+        return df
+
     # 1) Ha header=None-ból jön, keressük meg a valódi fejlécsort.
     header_row = detect_header_row(df)
     if header_row is not None:
@@ -2382,7 +2402,7 @@ def _fpi_read_gps_upload_to_sheets_v136(uploaded_file) -> Tuple[Dict[str, pd.Dat
     def _read_single_file(data_bytes: bytes, name: str) -> None:
         low = str(name).lower()
         try:
-            if low.endswith((".xlsx", ".xls")):
+            if low.endswith((".xlsx", ".xls", ".xlsm")):
                 xls_sheets = pd.read_excel(io.BytesIO(data_bytes), sheet_name=None, header=None)
                 local_count = 0
                 local_rows = 0
@@ -2417,7 +2437,7 @@ def _fpi_read_gps_upload_to_sheets_v136(uploaded_file) -> Tuple[Dict[str, pd.Dat
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
                 names = [n for n in zf.namelist() if not n.endswith("/") and not Path(n).name.startswith(("~$", "."))]
-                supported = [n for n in names if n.lower().endswith((".xlsx", ".xls", ".csv"))]
+                supported = [n for n in names if n.lower().endswith((".xlsx", ".xls", ".xlsm", ".csv"))]
                 if not supported:
                     _add_report(upload_name, "Hiba", 0, 0, "A ZIP nem tartalmaz támogatott Excel/CSV fájlt")
                 for n in supported:
@@ -7476,6 +7496,14 @@ def _fpi_gps_week_metrics_v95(ctx: Dict[str, object], week: str) -> Dict[str, ob
     if not isinstance(df, pd.DataFrame) or df.empty:
         return {}
     d = df.copy()
+
+    if "session_name" in d.columns and "session_type" in d.columns:
+        training_hint_v164 = d["session_name"].astype(str).str.lower().str.contains(
+            r"\bmd-\d+\b|training|train|edzés|edzes",
+            regex=True, na=False
+        )
+        d.loc[training_hint_v164, "session_type"] = "Edzés"
+
     if "week" in d.columns:
         d = d[d["week"].astype(str) == str(week)].copy()
     if d.empty:
@@ -9345,7 +9373,7 @@ def build_fpi_gps_only_pdf_bytes(
         story.append(Spacer(1, 0.22*cm))
 
     story.append(PageBreak())
-    story.append(section("5. Heti csapat GPS profil", "#E0F2FE"))
+    story.append(section("5. Aktuális edzés összesített GPS profil" if single_session_mode else "5. Heti csapat GPS profil", "#E0F2FE"))
     wk = weekly.copy()
     if not wk.empty and "week" in wk.columns:
         wk = wk[wk["week"].astype(str) == str(week)].copy()
@@ -9353,7 +9381,7 @@ def build_fpi_gps_only_pdf_bytes(
     if not wk.empty:
         for _, r in wk.head(10).iterrows():
             gps_rows.append([
-                P(r.get("session_type",""), small),
+                P("Edzés" if single_session_mode else r.get("session_type",""), small),
                 P(_fpi_fmt_thousands_v97(r.get("total_distance",0)), small),
                 P(_fpi_fmt_thousands_v97(r.get("duration_min",0)), small),
                 P(f"{r.get('distance_per_min',0):.1f}", small),
@@ -9369,17 +9397,24 @@ def build_fpi_gps_only_pdf_bytes(
 
     story.append(Spacer(1, 0.22*cm))
     story.append(PageBreak())
-    story.append(section("6. Játékosszintű monitoring", "#FEE2E2"))
+    story.append(section("6. Aktuális edzés játékosszintű eltérései" if single_session_mode else "6. Játékosszintű monitoring", "#FEE2E2"))
     risk_rows = [[P("Játékos", head), P("Szint", head), P("Miért fontos?", head)]]
     if risk_df is not None and not risk_df.empty:
         player_col = "Játékos" if "Játékos" in risk_df.columns else "player_name" if "player_name" in risk_df.columns else risk_df.columns[0]
         level_col = "Kockázati szint" if "Kockázati szint" in risk_df.columns else None
         reason_col = "Fő okok" if "Fő okok" in risk_df.columns else "Fő ok" if "Fő ok" in risk_df.columns else None
         for _, r in risk_df.head(8).iterrows():
+            level_text_v164 = str(r.get(level_col, "Figyelendő")) if level_col else "Figyelendő"
+            reason_text_v164 = str(r.get(reason_col, "Monitoring")) if reason_col else "Monitoring"
+            if single_session_mode and level_text_v164.strip().lower() == "alacsony":
+                reason_text_v164 = (
+                    "Az aktuális edzésen nincs kiugró csapaton belüli eltérés. "
+                    "Saját előzményhez még nem hasonlítható."
+                )
             risk_rows.append([
                 P(str(r.get(player_col,"")), small),
-                P(str(r.get(level_col,"Figyelendő")) if level_col else "Figyelendő", small),
-                P(str(r.get(reason_col,"Monitoring")) if reason_col else "Monitoring", small),
+                P(level_text_v164, small),
+                P(reason_text_v164, small),
             ])
     else:
         risk_rows.append([P("Nincs kiemelt", small), P("Alacsony", small), P("Nincs azonnali beavatkozási jelzés.", small)])
@@ -11942,10 +11977,20 @@ def _fpi_prepare_brainsports_v143(
     if not candidates:
         return pd.DataFrame()
 
-    # Prefer the aggregate "Main table..." sheet. Player-specific tabs duplicate rows.
-    aggregate = [item for item in candidates if str(item[0]).lower().startswith("main table")]
-    selected = aggregate[:1] if aggregate else candidates[:1]
-    table = selected[0][1].copy()
+    # V164: az összes játékost tartalmazó aggregált lapot válasszuk.
+    ranked_candidates = []
+    for sheet_name, candidate_table in candidates:
+        low = str(sheet_name).lower().strip()
+        player_rows = max(0, len(candidate_table))
+        helper_penalty = 10000 if low.startswith(("ts ", "ti ")) else 0
+        single_player_penalty = 5000 if player_rows <= 2 else 0
+        main_bonus = -2000 if low.startswith("main table") else 0
+        ranked_candidates.append(
+            (helper_penalty + single_player_penalty + main_bonus - player_rows,
+             sheet_name, candidate_table)
+        )
+    ranked_candidates.sort(key=lambda x: x[0])
+    table = ranked_candidates[0][2].copy()
 
     def col_like(*needles):
         for c in table.columns:
@@ -11968,6 +12013,12 @@ def _fpi_prepare_brainsports_v143(
     c_hmld = col_like("hmld")
     c_acc = col_like("total accelerations")
     c_dec = col_like("total decelerations")
+    c_acc_1 = col_like("accelerations 1")
+    c_acc_2 = col_like("accelerations 2")
+    c_acc_3 = col_like("accelerations 3")
+    c_dec_1 = col_like("decelerations 1")
+    c_dec_2 = col_like("decelerations 2")
+    c_dec_3 = col_like("decelerations 3")
     c_hr = col_like("heart exertion")
 
     if c_name is None or c_start is None:
@@ -12001,9 +12052,27 @@ def _fpi_prepare_brainsports_v143(
         out["HMLD"] = table[c_hmld]
         out["Player Load"] = table[c_hmld]
     if c_acc:
-        out["Total Accelerations"] = table[c_acc]
+        out["Total Accelerations"] = pd.to_numeric(table[c_acc], errors="coerce")
+    else:
+        acc_parts = [
+            pd.to_numeric(table[c], errors="coerce")
+            for c in (c_acc_1, c_acc_2, c_acc_3) if c
+        ]
+        if acc_parts:
+            out["Total Accelerations"] = pd.concat(acc_parts, axis=1).sum(
+                axis=1, min_count=1
+            )
     if c_dec:
-        out["Total Decelerations"] = table[c_dec]
+        out["Total Decelerations"] = pd.to_numeric(table[c_dec], errors="coerce")
+    else:
+        dec_parts = [
+            pd.to_numeric(table[c], errors="coerce")
+            for c in (c_dec_1, c_dec_2, c_dec_3) if c
+        ]
+        if dec_parts:
+            out["Total Decelerations"] = pd.concat(dec_parts, axis=1).sum(
+                axis=1, min_count=1
+            )
     if c_hr:
         out["Heart Exertion"] = table[c_hr]
     return out.dropna(how="all").reset_index(drop=True)
@@ -12082,29 +12151,187 @@ def _fpi_prepare_polar_v143(
     forced_type: Optional[str],
     file_name: str,
 ) -> pd.DataFrame:
-    chosen = None
-    for sheet_name, raw in sheets.items():
-        header_idx = _fpi_find_header_row_v143(raw, ["játékos neve", "teljes táv", "kezdési idő"])
-        if header_idx is not None:
-            chosen = _fpi_table_from_raw_v143(raw, header_idx)
-            if not chosen.empty:
-                break
-    if chosen is None or chosen.empty:
-        return pd.DataFrame()
-    # Existing aliases already understand Polar Hungarian headings.
-    # Only force Training/Match when the user used the separated uploader.
-    type_col = None
-    for c in chosen.columns:
-        if clean_col_name(c).lower() in {"típus", "tipus", "type"}:
-            type_col = c
-            break
-    if forced_type in {"Edzés", "Meccs"}:
-        if type_col:
-            chosen[type_col] = forced_type
-        else:
-            chosen["Típus"] = forced_type
-    return chosen.reset_index(drop=True)
+    """Polar Team Pro magyar összegző export standardizálása."""
 
+    table = None
+    for _, raw in sheets.items():
+        header_idx = _fpi_find_header_row_v143(
+            raw,
+            ["játékos neve", "táv", "kezdési idő"],
+            max_scan=30,
+        )
+        if header_idx is None:
+            continue
+        candidate = _fpi_table_from_raw_v143(raw, header_idx)
+        normalized_headers = {
+            clean_col_name(c).lower() for c in candidate.columns
+        }
+        if (
+            any("játékos neve" in c or "jatekos neve" in c for c in normalized_headers)
+            and any("kezdési idő" in c or "kezdesi ido" in c for c in normalized_headers)
+        ):
+            table = candidate
+            break
+
+    if table is None or table.empty:
+        return pd.DataFrame()
+
+    def pick(*aliases: str):
+        exact = {
+            clean_col_name(c).lower(): c
+            for c in table.columns
+        }
+        for alias in aliases:
+            key = clean_col_name(alias).lower()
+            if key in exact:
+                return exact[key]
+        for c in table.columns:
+            current = clean_col_name(c).lower()
+            for alias in aliases:
+                needle = clean_col_name(alias).lower()
+                if needle and needle in current:
+                    return c
+        return None
+
+    def numeric(col):
+        if col is None:
+            return pd.Series(np.nan, index=table.index, dtype=float)
+        return pd.to_numeric(table[col], errors="coerce")
+
+    def duration_minutes(col):
+        if col is None:
+            return pd.Series(np.nan, index=table.index, dtype=float)
+        source = table[col]
+        td = pd.to_timedelta(source.astype(str).str.strip(), errors="coerce")
+        result = td.dt.total_seconds() / 60.0
+        numeric_value = pd.to_numeric(source, errors="coerce")
+        # Excel időtöredék esetén nap -> perc; tiszta nagy szám esetén perc.
+        fallback = numeric_value.where(
+            numeric_value.abs() > 2,
+            numeric_value * 24.0 * 60.0,
+        )
+        return result.where(result.notna(), fallback)
+
+    c_name = pick("Játékos neve", "Jatekos neve")
+    c_type = pick("Típus", "Tipus", "Type")
+    c_session = pick("Szakasz neve", "Edzésszakasz neve")
+    c_start = pick("Kezdési idő", "Kezdesi ido")
+    c_end = pick("Befejezési idő", "Befejezesi ido")
+    c_duration = pick("Időtartam", "Idotartam")
+    c_distance = pick("Teljes táv [m]", "Tel­jes táv [m]")
+    c_dpm = pick("Táv/perc [m/min]")
+    c_max_speed = pick("Maximális sebesség [km/h]")
+    c_avg_speed = pick("Átlagsebesség [km/h]")
+    c_sprints = pick("Sprintek")
+    c_zone3 = pick("Táv a sebesség célzónában 3")
+    c_zone4 = pick("Táv a sebesség célzónában 4")
+    c_zone5 = pick("Táv a sebesség célzónában 5")
+    c_load = pick("Edzési terhelési pontérték")
+    c_cardio = pick("Kardióterhelés")
+    c_recovery = pick("Regenerálódási idő [h]")
+    c_muscle = pick("Izomterhelés")
+    c_hr_avg = pick("Átlagos pulzus [bpm]")
+    c_hr_max = pick("Maximális pulzus [bpm]")
+    c_hrv = pick("HRV (RMSSD)")
+    c_dec_high = pick("Gyorsulások száma (-50.00 - -3.00 m/s²)")
+    c_dec_mid = pick("Gyorsulások száma (-2.99 - -2.00 m/s²)")
+    c_acc_mid = pick("Gyorsulások száma (2.00 - 2.99 m/s²)")
+    c_acc_high = pick("Gyorsulások száma (3.00 - 50.00 m/s²)")
+
+    if c_name is None or c_start is None:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(index=table.index)
+    out["Player Name"] = table[c_name].astype(str).str.strip()
+
+    if forced_type in {"Edzés", "Meccs"}:
+        out["Session Type"] = forced_type
+    elif c_type:
+        out["Session Type"] = table[c_type].astype(str).apply(normalize_session_type)
+        raw_type = table[c_type].astype(str).str.lower()
+        out.loc[raw_type.str.contains("meccs|match|game", regex=True, na=False), "Session Type"] = "Meccs"
+        out.loc[raw_type.str.contains("edzés|edzes|training|train", regex=True, na=False), "Session Type"] = "Edzés"
+        out["Session Type"] = out["Session Type"].where(
+            out["Session Type"].isin(["Edzés", "Meccs"]),
+            "Edzés",
+        )
+    else:
+        out["Session Type"] = _fpi_session_type_from_hint_v143(
+            pd.Series([""] * len(table), index=table.index),
+            forced_type,
+            file_name,
+        )
+
+    out["Session Name"] = (
+        table[c_session].astype(str).str.strip()
+        if c_session else Path(file_name).stem
+    )
+    out["Start Time"] = pd.to_datetime(table[c_start], errors="coerce")
+    if c_end:
+        out["End Time"] = pd.to_datetime(table[c_end], errors="coerce")
+
+    out["Duration"] = duration_minutes(c_duration)
+    out["Match Minutes"] = out["Duration"]
+    out["Total Distance"] = numeric(c_distance)
+    out["Distance Per Min"] = numeric(c_dpm)
+    out["Top Speed"] = numeric(c_max_speed)
+    if c_avg_speed:
+        out["Average Speed"] = numeric(c_avg_speed)
+    out["Sprints"] = numeric(c_sprints)
+
+    zone3 = numeric(c_zone3)
+    zone4 = numeric(c_zone4)
+    zone5 = numeric(c_zone5)
+    if c_zone3:
+        out["Speed Zone 3 Distance"] = zone3
+    if c_zone4:
+        out["HSR Distance"] = zone4
+    if c_zone5:
+        out["Sprint Distance"] = zone5
+
+    out["Player Load"] = numeric(c_load)
+    if c_cardio:
+        out["Cardio Load"] = numeric(c_cardio)
+    if c_recovery:
+        out["Recovery Time"] = numeric(c_recovery)
+    if c_muscle:
+        out["Muscle Load"] = numeric(c_muscle)
+    if c_hr_avg:
+        out["Average HR"] = numeric(c_hr_avg)
+    if c_hr_max:
+        out["Max HR"] = numeric(c_hr_max)
+    if c_hrv:
+        out["HRV"] = numeric(c_hrv)
+
+    # A Polar külön gyorsulási/lassulási zónákat ad.
+    # A kompatibilitáshoz a nagy intenzitású kategóriákat használjuk.
+    acc_high = numeric(c_acc_high)
+    dec_high = numeric(c_dec_high)
+    out["Total Accelerations"] = acc_high
+    out["Total Decelerations"] = dec_high
+
+    high_effort_parts = [
+        numeric(c_sprints),
+        acc_high,
+        dec_high,
+    ]
+    out["High Efforts"] = pd.concat(
+        high_effort_parts,
+        axis=1,
+    ).sum(axis=1, min_count=1)
+
+    # Kiegészítő közepes intenzitású mozgások a későbbi elemzéshez.
+    if c_acc_mid:
+        out["Medium Accelerations"] = numeric(c_acc_mid)
+    if c_dec_mid:
+        out["Medium Decelerations"] = numeric(c_dec_mid)
+
+    out = out.replace([np.inf, -np.inf], np.nan)
+    out = out[
+        out["Player Name"].ne("")
+        & out["Player Name"].str.lower().ne("nan")
+    ]
+    return out.dropna(how="all").reset_index(drop=True)
 
 def _fpi_prepare_catapult_vector_v160(
     sheets: Dict[str, pd.DataFrame],
@@ -12151,14 +12378,34 @@ def _fpi_prepare_catapult_vector_v160(
         "Position": ("Position Name",),
         "Total Distance": ("Total Distance",),
         "Distance Per Min": ("Meterage Per Minute",),
-        "Top Speed": ("Max Velocity (km/h)",),
+        "Top Speed": (
+            "Max Velocity (km/h)", "Maximum Velocity (km/h)",
+            "Max Velocity", "Maximum Velocity", "Top Speed (km/h)"
+        ),
         "Player Load": ("Total Player Load",),
         "Player Load Per Min": ("Player Load Per Minute",),
-        "HSR Distance": ("High Speed Running (19,2 - 25,2 km/h) (m)",),
-        "Sprint Distance": ("Sprint Distance (>25 km/h)",),
-        "Sprints": ("Sprint Efforts",),
-        "Total Accelerations": ("Acceleration B3 Efforts (Gen 2)", "Acceleration Band 3 Total Effort Count"),
-        "Total Decelerations": ("Deceleration B3 Efforts (Gen 2)", "Deceleration B2-3 Total Efforts (Gen 2)"),
+        "HSR Distance": (
+            "High Speed Running (19,2 - 25,2 km/h) (m)",
+            "High Speed Running Distance", "HSR Distance"
+        ),
+        "Sprint Distance": (
+            "Sprint Distance (>25 km/h)", "Sprint Distance", "Sprint Distance (m)"
+        ),
+        "Sprints": ("Sprint Efforts", "Sprint Count", "Sprints"),
+        "Total Accelerations": (
+            "Acceleration B3 Efforts (Gen 2)",
+            "Acceleration Band 3 Total Effort Count",
+            "Acceleration B2-3 Total Efforts (Gen 2)",
+            "Acceleration B3+ Efforts (Gen 2)",
+            "Total Accelerations"
+        ),
+        "Total Decelerations": (
+            "Deceleration B3 Efforts (Gen 2)",
+            "Deceleration B2-3 Total Efforts (Gen 2)",
+            "Deceleration Band 3 Total Effort Count",
+            "Deceleration B3+ Efforts (Gen 2)",
+            "Total Decelerations"
+        ),
         "Average HR": ("Avg Heart Rate",),
         "Max HR": ("Maximum Heart Rate",),
     }
@@ -12305,6 +12552,84 @@ def _fpi_prepare_catapult_v143(
     return out.reset_index(drop=True)
 
 
+def _fpi_read_excel_bytes_v165(
+    data: bytes,
+    file_name: str,
+    header=None,
+) -> Dict[str, pd.DataFrame]:
+    """Excel fájl olvasása több motorral, régi .xls támogatással."""
+    ext = Path(str(file_name)).suffix.lower()
+    errors: List[str] = []
+
+    attempts = []
+    if ext == ".xls":
+        attempts = [
+            {"engine": "xlrd"},
+            {"engine": "calamine"},
+            {},
+        ]
+    else:
+        attempts = [
+            {"engine": "openpyxl"},
+            {"engine": "calamine"},
+            {},
+        ]
+
+    for kwargs in attempts:
+        try:
+            return pd.read_excel(
+                io.BytesIO(data),
+                sheet_name=None,
+                header=header,
+                **kwargs,
+            )
+        except Exception as exc:
+            engine_name = kwargs.get("engine", "automatikus")
+            errors.append(f"{engine_name}: {exc}")
+
+    # Utolsó helyi fallback: LibreOffice headless konverzió, ha elérhető.
+    office = shutil.which("libreoffice") or shutil.which("soffice")
+    if office:
+        try:
+            with tempfile.TemporaryDirectory(prefix="fpi_xls_") as temp_dir:
+                temp_path = Path(temp_dir)
+                input_path = temp_path / Path(file_name).name
+                input_path.write_bytes(data)
+
+                result = subprocess.run(
+                    [
+                        office,
+                        "--headless",
+                        "--convert-to", "xlsx",
+                        "--outdir", str(temp_path),
+                        str(input_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=90,
+                    check=False,
+                )
+                converted = temp_path / f"{input_path.stem}.xlsx"
+                if converted.exists():
+                    return pd.read_excel(
+                        converted,
+                        sheet_name=None,
+                        header=header,
+                        engine="openpyxl",
+                    )
+                errors.append(
+                    "LibreOffice: "
+                    + (result.stderr.strip() or result.stdout.strip() or "nem készült konvertált fájl")
+                )
+        except Exception as exc:
+            errors.append(f"LibreOffice: {exc}")
+
+    raise ValueError(
+        "Az Excel fájl nem olvasható. Régi .xls fájlhoz telepítsd az "
+        "`xlrd>=2.0.1` csomagot, vagy mentsd .xlsx formátumba. "
+        + " | ".join(errors[-4:])
+    )
+
 def _fpi_read_single_gps_file_v143(
     uploaded_file,
     forced_type: Optional[str] = None,
@@ -12350,7 +12675,11 @@ def _fpi_read_single_gps_file_v143(
         if ext == ".csv":
             raw_sheets = {"CSV": _fpi_read_csv_bytes_v143(data, name)}
         elif ext in {".xlsx", ".xlsm", ".xls"}:
-            raw_sheets = pd.read_excel(io.BytesIO(data), sheet_name=None, header=None)
+            raw_sheets = _fpi_read_excel_bytes_v165(
+                data,
+                name,
+                header=None,
+            )
         else:
             return {}, [{"Fájl": name, "Státusz": "KIHAGYVA", "Rendszer": "", "Sorok": 0, "Megjegyzés": "Nem támogatott kiterjesztés"}]
 
