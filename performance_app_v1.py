@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V161_DERIVED_MINUTES_HIGH_EFFORTS_2026_07_19"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V162_ADAPTIVE_SINGLE_SESSION_REPORT_2026_07_19"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7496,6 +7496,213 @@ def _fpi_gps_week_metrics_v95(ctx: Dict[str, object], week: str) -> Dict[str, ob
         "summary": ctx.get("summary", ""),
     }
 
+def _fpi_single_session_profile_v162(ctx: Dict[str, object], week: str) -> Dict[str, object]:
+    """Felismeri az egyetlen GPS-eseményt, és abból önálló edzésprofilt készít."""
+    df = ctx.get("df")
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return {"is_single_session": False, "session_count": 0}
+
+    d = df.copy()
+    if "week" in d.columns:
+        selected = d[d["week"].astype(str) == str(week)].copy()
+        if not selected.empty:
+            d = selected
+
+    # Egy esemény azonosítása: időpont + eseménynév + típus.
+    session_parts = []
+    for col in ("start_time", "session_name", "session_type"):
+        if col in d.columns:
+            values = d[col].astype(str).replace({"NaT": "", "nan": "", "None": ""})
+            session_parts.append(values)
+
+    if session_parts:
+        session_key = session_parts[0]
+        for values in session_parts[1:]:
+            session_key = session_key + "|" + values
+        session_key = session_key.str.strip("|")
+        meaningful = session_key[session_key.str.replace("|", "", regex=False).str.strip().ne("")]
+        session_count = int(meaningful.nunique()) if not meaningful.empty else 1
+    else:
+        session_count = 1
+
+    is_single = session_count <= 1
+    player_col = "player_name" if "player_name" in d.columns else None
+    player_count = int(d[player_col].dropna().astype(str).nunique()) if player_col else len(d)
+
+    def num(col: str) -> pd.Series:
+        if col not in d.columns:
+            return pd.Series(dtype=float)
+        return pd.to_numeric(d[col], errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+    metrics = {}
+    for col, label, unit in [
+        ("total_distance", "Össztáv", "m"),
+        ("duration_min", "Időtartam", "perc"),
+        ("distance_per_min", "Intenzitás", "m/perc"),
+        ("hsr_distance", "HSR", "m"),
+        ("sprint_distance", "Sprinttáv", "m"),
+        ("sprints", "Sprintek", "db"),
+        ("high_efforts", "High Efforts", "db"),
+        ("training_load", "Player Load", ""),
+    ]:
+        s = num(col).dropna()
+        if s.empty:
+            continue
+        mean = float(s.mean())
+        std = float(s.std(ddof=0)) if len(s) > 1 else 0.0
+        cv = (std / mean * 100.0) if mean not in (0, np.nan) and abs(mean) > 1e-9 else 0.0
+        metrics[col] = {
+            "label": label,
+            "unit": unit,
+            "mean": mean,
+            "median": float(s.median()),
+            "min": float(s.min()),
+            "max": float(s.max()),
+            "cv": float(cv),
+            "count": int(s.notna().sum()),
+        }
+
+    # Játékosonkénti szélsőértékek az össztáv és Player Load alapján.
+    extremes = {}
+    if player_col:
+        for col in ("total_distance", "training_load", "high_efforts"):
+            if col not in d.columns:
+                continue
+            tmp = d[[player_col, col]].copy()
+            tmp[col] = pd.to_numeric(tmp[col], errors="coerce")
+            tmp = tmp.dropna(subset=[player_col, col])
+            if tmp.empty:
+                continue
+            grouped = tmp.groupby(player_col, dropna=False)[col].sum().sort_values()
+            if not grouped.empty:
+                extremes[col] = {
+                    "low_name": str(grouped.index[0]),
+                    "low_value": float(grouped.iloc[0]),
+                    "high_name": str(grouped.index[-1]),
+                    "high_value": float(grouped.iloc[-1]),
+                }
+
+    return {
+        "is_single_session": is_single,
+        "session_count": session_count,
+        "player_count": player_count,
+        "df": d,
+        "metrics": metrics,
+        "extremes": extremes,
+    }
+
+
+def _fpi_single_session_conclusions_v162(
+    ctx: Dict[str, object],
+    readiness: int,
+    week: str,
+    limit: int = 6,
+) -> List[str]:
+    profile = _fpi_single_session_profile_v162(ctx, week)
+    if not profile.get("is_single_session"):
+        return []
+
+    metrics = profile.get("metrics", {})
+    extremes = profile.get("extremes", {})
+    players = int(profile.get("player_count", 0) or 0)
+    out: List[str] = [
+        f"Egyszeri edzésértékelés: {players} játékos adata áll rendelkezésre. Heti trend és meccsreferencia még nem számítható, ezért a riport az aktuális edzés belső profilját értékeli."
+    ]
+
+    dist = metrics.get("total_distance")
+    dur = metrics.get("duration_min")
+    dpm = metrics.get("distance_per_min")
+    if dist:
+        text = f"Terjedelem: játékosonként átlagosan {dist['mean']:.0f} m"
+        if dur:
+            text += f", {dur['mean']:.1f} perc alatt"
+        if dpm:
+            text += f", {dpm['mean']:.1f} m/perc átlagintenzitással"
+        out.append(text + ".")
+
+    hsr = metrics.get("hsr_distance")
+    sprint_d = metrics.get("sprint_distance")
+    sprint_n = metrics.get("sprints")
+    speed_parts = []
+    if hsr:
+        speed_parts.append(f"HSR {hsr['mean']:.0f} m/fő")
+    if sprint_d:
+        speed_parts.append(f"sprinttáv {sprint_d['mean']:.0f} m/fő")
+    if sprint_n:
+        speed_parts.append(f"{sprint_n['mean']:.1f} sprint/fő")
+    if speed_parts:
+        out.append("Sebességi expozíció: " + ", ".join(speed_parts) + ".")
+
+    high = metrics.get("high_efforts")
+    load = metrics.get("training_load")
+    neu_parts = []
+    if high:
+        neu_parts.append(f"High Efforts {high['mean']:.1f}/fő")
+    if load:
+        neu_parts.append(f"Player Load {load['mean']:.1f}/fő")
+    if neu_parts:
+        out.append("Neuromuszkuláris terhelés: " + ", ".join(neu_parts) + ".")
+
+    # Szóródás: az aktuális edzés belső egyenletessége.
+    variation_source = load or dist or high
+    if variation_source:
+        cv = float(variation_source.get("cv", 0.0))
+        if cv < 12:
+            judgement = "egyenletes"
+        elif cv < 25:
+            judgement = "mérsékelten differenciált"
+        else:
+            judgement = "erősen szóródó"
+        out.append(
+            f"Terheléseloszlás: {judgement}; a játékosok közötti relatív szóródás {cv:.0f}%. "
+            "A szélsőértékeket egyénileg érdemes ellenőrizni."
+        )
+
+    ext = extremes.get("training_load") or extremes.get("total_distance")
+    if ext:
+        out.append(
+            f"Szélsőértékek: a legmagasabb terhelést {ext['high_name']}, "
+            f"a legalacsonyabbat {ext['low_name']} kapta. "
+            "A különbséget a szerepkörrel, játékidővel és esetleges részleges részvétellel együtt kell értelmezni."
+        )
+
+    # Egyetlen alkalomból ne állítson hosszú távú readiness-tényeket.
+    out.append(
+        f"Az aktuális {readiness}/100 readiness csak előzetes munkamutató. "
+        "Megbízható trendhez több egymást követő edzés és lehetőleg meccsadat szükséges."
+    )
+
+    uniq, seen = [], set()
+    for text in out:
+        cleaned = _fpi_clean_sentence_v82(text, 220)
+        if cleaned and cleaned not in seen:
+            uniq.append(cleaned)
+            seen.add(cleaned)
+    return uniq[:limit]
+
+
+def _fpi_single_session_summary_table_v162(profile: Dict[str, object]) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    metrics = profile.get("metrics", {}) if isinstance(profile, dict) else {}
+    order = [
+        "duration_min", "total_distance", "distance_per_min", "hsr_distance",
+        "sprint_distance", "sprints", "high_efforts", "training_load",
+    ]
+    for key in order:
+        m = metrics.get(key)
+        if not m:
+            continue
+        rows.append({
+            "Mutató": m.get("label", key),
+            "Átlag": m.get("mean"),
+            "Medián": m.get("median"),
+            "Minimum": m.get("min"),
+            "Maximum": m.get("max"),
+            "Szóródás %": m.get("cv"),
+            "Egység": m.get("unit", ""),
+        })
+    return rows
+
 def _fpi_gps_only_conclusions_v95(ctx: Dict[str, object], priorities: List[dict], readiness: int, week: str, limit: int = 6) -> List[str]:
     out = []
     gps = _fpi_gps_week_metrics_v95(ctx, week)
@@ -8850,6 +9057,10 @@ def _fpi_gps_only_md_plan_v99(ctx: Dict[str, object], readiness: int, priorities
     return _fpi_structured_md_rows_v121(base, readiness, trend_txt)
 
 def _fpi_gps_only_conclusions_v99(ctx: Dict[str, object], priorities: List[dict], readiness: int, week: str, limit: int = 6) -> List[str]:
+    single = _fpi_single_session_profile_v162(ctx, week)
+    if single.get("is_single_session"):
+        return _fpi_single_session_conclusions_v162(ctx, readiness, week, limit=limit)
+
     out = _fpi_gps_only_conclusions_v95(ctx, priorities, readiness, week, limit=limit)
     trend = _fpi_gps_trend_summary_v99(ctx, week)
     if trend.get("signals"):
@@ -8891,6 +9102,8 @@ def build_fpi_gps_only_pdf_bytes(
     weekly = ctx.get("weekly") if isinstance(ctx.get("weekly"), pd.DataFrame) else pd.DataFrame()
     player_week = ctx.get("player_week") if isinstance(ctx.get("player_week"), pd.DataFrame) else pd.DataFrame()
     periodization_type = _fpi_pdf_week_type_label_v126(ctx, demo_label)
+    single_session_profile = _fpi_single_session_profile_v162(ctx, str(week))
+    single_session_mode = bool(single_session_profile.get("is_single_session"))
     conclusions = _fpi_gps_only_conclusions_v99(ctx, priorities, readiness, str(week), limit=6)
     shared_md_rows_v153 = _fpi_contextual_md_plan_rows_v151(
         {},
@@ -8972,21 +9185,36 @@ def build_fpi_gps_only_pdf_bytes(
 
     # Cover / executive GPS-only
     label_prefix = f"{demo_label} | " if demo_label else ""
-    story.append(P("Football Performance Intelligence – GPS-only riport", title))
-    story.append(P(f"{label_prefix}Hét: {format_week_label(str(week))} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
+    report_title_v162 = (
+        "Football Performance Intelligence – egyszeri GPS-edzésriport"
+        if single_session_mode
+        else "Football Performance Intelligence – GPS-only riport"
+    )
+    report_scope_v162 = (
+        f"Adatkör: 1 edzés | {int(single_session_profile.get('player_count', 0) or 0)} játékos"
+        if single_session_mode
+        else f"Hét: {format_week_label(str(week))}"
+    )
+    story.append(P(report_title_v162, title))
+    story.append(P(f"{label_prefix}{report_scope_v162} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime('%Y-%m-%d %H:%M')}", sub))
     story.append(P(_fpi_pdf_match_context_line_v122(demo_label), sub))
     story.append(P(f"Referencia profil: {_fpi_reference_profile_v97().get('label', 'Felnőtt NB2')}", sub))
     story.append(Spacer(1, 0.25*cm))
     high_risk, med_risk = _fpi_count_risk_levels_v126(risk_df)
     story.append(Table([[
-        kpi("READINESS", f"{readiness}/100", score_to_label(readiness), "#166534" if readiness >= 75 else "#1E3A8A" if readiness >= 60 else "#991B1B"),
+        kpi(
+            "ELŐZETES STATUS" if single_session_mode else "READINESS",
+            f"{readiness}/100",
+            "egy alkalom, trend nélkül" if single_session_mode else score_to_label(readiness),
+            "#1E3A8A" if single_session_mode else ("#166534" if readiness >= 75 else "#1E3A8A" if readiness >= 60 else "#991B1B"),
+        ),
         kpi("HIGH RISK", f"{high_risk} fő", "egyéni kontroll", "#7F1D1D" if high_risk else "#166534"),
         kpi("MEDIUM RISK", f"{med_risk} fő", "figyelendő", "#92400E" if med_risk else "#166534"),
-        kpi("FORRÁS", "GPS only", "önálló erőnléti riport", "#0369A1"),
+        kpi("MÓD" if single_session_mode else "FORRÁS", "1 edzés" if single_session_mode else "GPS only", "session analysis" if single_session_mode else "önálló erőnléti riport", "#0369A1"),
     ]], colWidths=[6.9*cm]*4))
     story.append(Spacer(1, 0.25*cm))
 
-    story.append(section("1. GPS-only vezetői konklúziók", "#DBEAFE"))
+    story.append(section("1. Egyszeri edzés vezetői konklúziók" if single_session_mode else "1. GPS-only vezetői konklúziók", "#DBEAFE"))
     c_rows = [[P("#", head), P("Konklúzió", head)]]
     for i, c in enumerate(conclusions, 1):
         c_rows.append([P(str(i), small), P(c, small)])
@@ -8994,23 +9222,61 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(Spacer(1, 0.22*cm))
 
     story.append(PageBreak())
-    story.append(section("2. Edzés–meccs arányok választott korosztály/szint referenciával", "#FEF3C7"))
-    if ratio_df is None or ratio_df.empty:
-        story.append(P("Nincs elég adat az edzés/meccs arányokhoz. Kell legalább egy edzés és egy meccs típusú esemény.", body))
+    if single_session_mode:
+        story.append(section("2. Az aktuális edzés csapatprofilja", "#FEF3C7"))
+        session_rows_v162 = _fpi_single_session_summary_table_v162(single_session_profile)
+        if not session_rows_v162:
+            story.append(P("Az esemény beolvasható, de nincs elegendő numerikus GPS mutató a csapatprofilhoz.", body))
+        else:
+            rr = [[
+                P("Mutató", head), P("Átlag", head), P("Medián", head),
+                P("Minimum", head), P("Maximum", head), P("Relatív szóródás", head)
+            ]]
+            for r in session_rows_v162:
+                unit = str(r.get("Egység", "") or "")
+                def fmt_value(value):
+                    if value is None or pd.isna(value):
+                        return "—"
+                    suffix = f" {unit}" if unit else ""
+                    return f"{float(value):.1f}{suffix}"
+                rr.append([
+                    P(str(r.get("Mutató", "")), small),
+                    P(fmt_value(r.get("Átlag")), small),
+                    P(fmt_value(r.get("Medián")), small),
+                    P(fmt_value(r.get("Minimum")), small),
+                    P(fmt_value(r.get("Maximum")), small),
+                    P(f"{float(r.get('Szóródás %', 0) or 0):.0f}%", small),
+                ])
+            story.append(tbl(
+                rr,
+                [5.0*cm, 4.2*cm, 4.2*cm, 4.2*cm, 4.2*cm, 5.9*cm],
+                header_bg="#92400E",
+                row_bgs=[colors.HexColor("#FFFBEB"), colors.white],
+            ))
+            story.append(Spacer(1, 0.18*cm))
+            story.append(P(
+                "Értelmezés: ez a tábla az aktuális edzésen belüli játékoseloszlást mutatja. "
+                "Nem heti trend és nem meccsreferencia; ezek több esemény feltöltése után jelennek meg.",
+                small,
+            ))
     else:
-        rr = [[P("Mutató", head), P("Heti edzés / meccs", head), P("Edzésátlag / meccs", head), P("Referencia", head), P("Értelmezés", head)]]
-        for _, r in ratio_df.iterrows():
-            rr.append([
-                P(str(r.get("Mutató","")), small),
-                P(_fpi_fmt_pct_v93(r.get("Edzés/heti meccs %")), small),
-                P(_fpi_fmt_pct_v93(r.get("Edzésátlag/meccs %")), small),
-                P(f"Heti: {r.get('NB2 felnőtt heti ref.','')}<br/>Edzésátlag: {r.get('NB2 felnőtt edzésátlag ref.','')}", small),
-                P(str(r.get("Értékelés","")), small),
-            ])
-        story.append(tbl(rr, [4.0*cm, 4.0*cm, 4.0*cm, 5.6*cm, 10.1*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"), colors.white]))
+        story.append(section("2. Edzés–meccs arányok választott korosztály/szint referenciával", "#FEF3C7"))
+        if ratio_df is None or ratio_df.empty:
+            story.append(P("Nincs elég adat az edzés/meccs arányokhoz. Kell legalább egy edzés és egy meccs típusú esemény.", body))
+        else:
+            rr = [[P("Mutató", head), P("Heti edzés / meccs", head), P("Edzésátlag / meccs", head), P("Referencia", head), P("Értelmezés", head)]]
+            for _, r in ratio_df.iterrows():
+                rr.append([
+                    P(str(r.get("Mutató","")), small),
+                    P(_fpi_fmt_pct_v93(r.get("Edzés/heti meccs %")), small),
+                    P(_fpi_fmt_pct_v93(r.get("Edzésátlag/meccs %")), small),
+                    P(f"Heti: {r.get('NB2 felnőtt heti ref.','')}<br/>Edzésátlag: {r.get('NB2 felnőtt edzésátlag ref.','')}", small),
+                    P(str(r.get("Értékelés","")), small),
+                ])
+            story.append(tbl(rr, [4.0*cm, 4.0*cm, 4.0*cm, 5.6*cm, 10.1*cm], header_bg="#92400E", row_bgs=[colors.HexColor("#FFFBEB"), colors.white]))
 
     story.append(PageBreak())
-    story.append(section("3. GPS-alapú mikrociklus terv", "#EDE9FE"))
+    story.append(section("3. Következő terhelési nap javaslata" if single_session_mode else "3. GPS-alapú mikrociklus terv", "#EDE9FE"))
     md_rows = [[P("Nap", head), P("Erőnléti fókusz", head), P("Taktikai fókusz", head), P("Edzői megjegyzés", head)]]
     for d, fgoal, tactical_goal, recommendation in md_plan:
         md_rows.append([
@@ -9023,7 +9289,7 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(Spacer(1, 0.22*cm))
 
     trend_v99 = _fpi_gps_trend_summary_v99(ctx, str(week))
-    if isinstance(trend_v99.get("totals"), pd.DataFrame) and not trend_v99.get("totals").empty:
+    if (not single_session_mode) and isinstance(trend_v99.get("totals"), pd.DataFrame) and not trend_v99.get("totals").empty:
         story.append(PageBreak())
         story.append(section("4. Előző hetek trendje – mikrociklus alapja", "#ECFDF5"))
         tr = [[P("Hét", head), P("Volumen", head), P("HSR", head), P("Sprint táv", head), P("Sprint db", head), P("High Eff.", head), P("Load", head)]]
