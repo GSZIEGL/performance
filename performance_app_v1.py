@@ -68,7 +68,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V158_GENERIC_DEMO_NAMES_2026_07_12"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V159_CATAPULT_VECTOR_IMPORT_2026_07_19"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -1466,33 +1466,33 @@ _fpi_apply_v119_all_light_readable_patch()
 STANDARD_COLUMNS = {
     "player_name": ["Játékos neve", "Player", "Player Name", "Name", "name", "Név", "Nev", "Játékos", "Jatekos", "Athlete", "Athlete Name", "athlete_name", "Player full name", "Full Name"],
     "session_type": ["Típus", "Type", "Session Type", "Edzés/Meccs", "SessionType", "Activity Type", "Drill Type", "Event Type", "Training/Match", "Tags", "day_name"],
-    "session_name": ["Szakasz neve", "Session", "Session Name", "Activity", "Drill", "Exercise", "Event", "Session title", "Session Title", "activity_name", "Split Name"],
-    "position": ["Poszt", "Position", "Player Position", "Role", "Playing Position", "Post", "Pos", "position_name"],
+    "session_name": ["Szakasz neve", "Session", "Session Name", "Activity", "Drill", "Exercise", "Event", "Session title", "Session Title", "activity_name", "Split Name", "Period Name"],
+    "position": ["Poszt", "Position", "Player Position", "Role", "Playing Position", "Post", "Pos", "position_name", "Position Name"],
     "start_time": ["Kezdési idő", "Start Time", "Start", "Dátum", "Date", "Session Date", "Day", "Datum", "Kezdés", "Start date", "StartTime", "Split", "date", "start_time", "Split Start Time"],
     "end_time": ["Befejezési idő", "End Time", "End", "Finish", "Befejezés", "EndTime"],
-    "duration": ["Időtartam", "Duration", "Time", "Minutes", "Idő", "Időtartam [perc]", "Duration [min]", "Duration min", "Duration (mm:ss)", "total_duration"],
+    "duration": ["Időtartam", "Duration", "Time", "Minutes", "Idő", "Időtartam [perc]", "Duration [min]", "Duration min", "Duration (mm:ss)", "total_duration", "Total Duration"],
     "match_minutes": ["Játékperc", "Játékpercek", "Meccsperc", "Meccspercek", "Minutes played", "Minutes Played", "Playing Time", "Match Minutes", "Match minutes", "Player minutes", "On pitch minutes"],
     "total_distance": ["Teljes táv [m]", "Tel\xadjes táv [m]", "Total Distance", "Distance", "Össztáv", "Total distance (m)", "Total Dist", "Dist Total", "Distance [m]", "TD", "Total Distance m", "total_distance", "Distance (km)"],
-    "distance_per_min": ["Táv/perc [m/min]", "Distance/min", "Distance Per Min", "m/min", "Distance per minute", "m per min", "m/minute", "Rel Distance", "Distance Per Min (m/min)", "meterage_per_minute"],
-    "max_speed": ["Maximális sebesség [km/h]", "Max Speed", "Maximum Speed", "Top Speed", "Peak Speed", "Max Velocity", "Vmax", "Top Speed (km/h)", "max_vel"],
+    "distance_per_min": ["Táv/perc [m/min]", "Distance/min", "Distance Per Min", "m/min", "Distance per minute", "m per min", "m/minute", "Rel Distance", "Distance Per Min (m/min)", "meterage_per_minute", "Meterage Per Minute"],
+    "max_speed": ["Maximális sebesség [km/h]", "Max Speed", "Maximum Speed", "Top Speed", "Peak Speed", "Max Velocity", "Maximum Velocity", "Vmax", "Top Speed (km/h)", "max_vel"],
     "avg_speed": ["Átlagsebesség [km/h]", "Average Speed", "Avg Speed", "Mean Speed"],
-    "sprints": ["Sprintek", "Sprints", "Sprint Count", "Number of Sprints", "Sprint #", "Sprint efforts", "Sprints count  ()", "Sprints count"],
+    "sprints": ["Sprintek", "Sprints", "Sprint Count", "Number of Sprints", "Sprint #", "Sprint efforts", "Sprint Efforts", "Sprints count  ()", "Sprints count"],
     "speed_zone_3": ["Táv a sebesség célzónában 3 [m] (14.40 - 19.79 km/h)"],
-    "speed_zone_4": ["Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)", "Distance(4+5)  (m)", "Distance(4+5)", "Distance 4+5", "HSR Distance", "velocity2_band3_total_distance"],
-    "speed_zone_5": ["Táv a sebesség célzónában 5 [m] (25.00- km/h)", "Total sprints distance  (m)", "Total sprints distance", "Sprint distance", "Sprint Distance", "Sprint Distance (m)", "velocity2_band4_total_distance"],
-    "training_load": ["Edzési terhelési pontérték", "Terhelési pont", "Player Load", "Load", "Training Load", "Total Load", "Workload", "Load Score", "total_player_load", "HMLD"],
+    "speed_zone_4": ["Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)", "Distance(4+5)  (m)", "Distance(4+5)", "Distance 4+5", "HSR Distance", "High Speed Distance (>19,8 km/h)", "High Speed Distance", "velocity2_band3_total_distance"],
+    "speed_zone_5": ["Táv a sebesség célzónában 5 [m] (25.00- km/h)", "Total sprints distance  (m)", "Total sprints distance", "Sprint distance", "Sprint Distance", "Sprint Distance (m)", "Sprint Distance (>25 km/h)", "velocity2_band4_total_distance"],
+    "training_load": ["Edzési terhelési pontérték", "Terhelési pont", "Player Load", "Total Player Load", "Load", "Training Load", "Total Load", "Workload", "Load Score", "total_player_load", "HMLD"],
     "cardio_load": ["Kardióterhelés", "Cardio Load"],
     "recovery_hours": ["Regenerálódási idő [h]", "Recovery Time", "Recovery"],
     "muscle_load": ["Izomterhelés", "Muscle Load", "Muscular Load", "Mechanical Load"],
     "hr_avg": ["Átlagos pulzus [bpm]", "Average HR", "Avg HR", "Mean HR", "HR avg", "Avg Heart Rate"],
-    "hr_max": ["Maximális pulzus [bpm]", "Max HR", "Maximum HR", "Peak HR", "Max Heart Rate"],
+    "hr_max": ["Maximális pulzus [bpm]", "Max HR", "Maximum HR", "Peak HR", "Max Heart Rate", "Maximum Heart Rate"],
     "hrv": ["HRV (RMSSD)", "HRV", "RMSSD", "HRV RMSSD"],
     "acc_low": ["Gyorsulások száma (2.00 - 2.49 m/s²)"],
     "acc_mid": ["Gyorsulások száma (2.50 - 2.99 m/s²)"],
-    "acc_high": ["Gyorsulások száma (3.00 - 50.00 m/s²)", "Total Accelerations  ()", "Total Accelerations", "Accelerations (2+3)  ()", "Accelerations (2+3)", "Accelerations", "gen2_acceleration_band3plus_total_effort_count"],
+    "acc_high": ["Gyorsulások száma (3.00 - 50.00 m/s²)", "Total Accelerations  ()", "Total Accelerations", "Accelerations (2+3)  ()", "Accelerations (2+3)", "Accelerations", "ACC High Intensity Nr (>2,5m/s)", "Acceleration B2-3 Total Efforts (Gen 2)", "gen2_acceleration_band3plus_total_effort_count"],
     "dec_low": ["Gyorsulások száma (-2.49 - -2.00 m/s²)"],
     "dec_mid": ["Gyorsulások száma (-2.99 - -2.50 m/s²)"],
-    "dec_high": ["Gyorsulások száma (-50.00 - -3.00 m/s²)", "Total Decelerations  ()", "Total Decelerations", "Decelerations (2+3)  ()", "Decelerations (2+3)", "Decelerations"],
+    "dec_high": ["Gyorsulások száma (-50.00 - -3.00 m/s²)", "Total Decelerations  ()", "Total Decelerations", "Decelerations (2+3)  ()", "Decelerations (2+3)", "Decelerations", "DEC High Intensity Nr (> -2,5m/s)", "Deceleration B2-3 Total Efforts (Gen 2)"],
     "high_efforts": ["High Efforts", "High Effort", "High efforts", "Nagy intenzitású erőfeszítések", "Nagy intenzitású akciók", "Explosive Efforts", "Explosive efforts", "High Intensity Efforts", "HIE", "Efforts High", "HI Efforts"],
 }
 
@@ -2067,6 +2067,79 @@ def detect_header_row(raw_df: pd.DataFrame) -> Optional[int]:
 
     return best_i if best_score >= 24 else None
 
+
+def _fpi_enrich_catapult_vector_v159(df: pd.DataFrame, raw_df: pd.DataFrame, sheet_name: str = "") -> pd.DataFrame:
+    """Catapult Vector/OpenField export felismerése és előkészítése.
+
+    A Catapult CSV-k gyakran 8-10 metaadatsor után tartalmazzák a valódi fejlécet.
+    A normál fejlécfelismerő ezt már megtalálja; ez a kiegészítés a Catapult-specifikus
+    dátumot, eseménytípust és mezőneveket teszi automatikusan használhatóvá.
+    Más GPS-formátumot nem módosít.
+    """
+    if df is None or df.empty:
+        return df
+
+    cols = {clean_col_name(c) for c in df.columns}
+    is_catapult = (
+        "Player Name" in cols
+        and "Period Name" in cols
+        and ("Total Player Load" in cols or "Player Load Per Minute" in cols)
+        and ("Total Distance" in cols or "Meterage Per Minute" in cols)
+    )
+    if not is_catapult:
+        return df
+
+    df = df.copy()
+    df.attrs["fpi_source_system"] = "Catapult Vector / OpenField"
+
+    # Metaadatok kiolvasása a fejléc előtti sorokból.
+    metadata = {}
+    try:
+        scan = raw_df.head(20)
+        for _, row in scan.iterrows():
+            vals = [x for x in row.tolist() if pd.notna(x)]
+            if len(vals) >= 2:
+                key = str(vals[0]).strip().strip('"').rstrip(":").strip().lower()
+                metadata[key] = vals[1]
+    except Exception:
+        metadata = {}
+
+    # A soronkénti Unix idő a legpontosabb. Catapultnál másodperc alapú epoch.
+    catapult_start = None
+    if "Unix Start Time" in df.columns:
+        unix_s = pd.to_numeric(df["Unix Start Time"], errors="coerce")
+        catapult_start = pd.to_datetime(unix_s, unit="s", errors="coerce")
+        plausible = catapult_start.dt.year.between(2015, 2035) if len(catapult_start) else pd.Series(dtype=bool)
+        if len(catapult_start) and plausible.mean() >= 0.60:
+            df["Kezdési idő"] = catapult_start
+
+    # Ha nincs használható Unix idő, a CSV meta Date + Start Time mezőit használjuk.
+    if "Kezdési idő" not in df.columns:
+        date_val = metadata.get("date")
+        time_val = metadata.get("start time")
+        combined = " ".join(str(x).strip() for x in [date_val, time_val] if x is not None and str(x).strip())
+        dt = pd.to_datetime(combined, errors="coerce", dayfirst=True) if combined else pd.NaT
+        if pd.notna(dt):
+            df["Kezdési idő"] = dt
+
+    # Catapult esemény/szakasz mezők átvezetése az app standard mezőire.
+    if "Period Name" in df.columns:
+        period = df["Period Name"].astype(str).str.strip()
+        if "Szakasz neve" not in df.columns:
+            df["Szakasz neve"] = period
+        if "Típus" not in df.columns:
+            context = (period + " " + str(sheet_name)).str.lower()
+            is_match = context.str.contains(r"match|game|meccs|mérk", regex=True, na=False)
+            df["Típus"] = np.where(is_match, "Meccs", "Edzés")
+
+    # Egyértelmű magyar alias a játékosnévhez; a többi Catapult-fejlécet a
+    # STANDARD_COLUMNS aliaslistája kezeli.
+    if "Játékos neve" not in df.columns and "Player Name" in df.columns:
+        df["Játékos neve"] = df["Player Name"]
+
+    return df
+
+
 def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.DataFrame:
     """Egy munkalap megtisztítása az app számára.
     Kezeli:
@@ -2084,14 +2157,21 @@ def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.D
     header_row = detect_header_row(df)
     if header_row is not None:
         new_cols = []
+        seen_cols: Dict[str, int] = {}
         for j, x in enumerate(df.iloc[header_row].tolist()):
-            name = clean_col_name(x)
-            new_cols.append(name if name and name.lower() not in ["nan", "none"] else f"col_{j+1}")
+            base_name = clean_col_name(x)
+            base_name = base_name if base_name and base_name.lower() not in ["nan", "none"] else f"col_{j+1}"
+            seen_cols[base_name] = seen_cols.get(base_name, 0) + 1
+            name = base_name if seen_cols[base_name] == 1 else f"{base_name}__{seen_cols[base_name]}"
+            new_cols.append(name)
         df = df.iloc[header_row + 1:].copy()
         df.columns = new_cols
     else:
         # 2) Ha mégis header=0 jelleggel jönne.
         df.columns = [clean_col_name(c) if clean_col_name(c) else f"col_{i+1}" for i, c in enumerate(df.columns)]
+
+    # Catapult Vector/OpenField speciális metaadat- és dátumkezelés.
+    df = _fpi_enrich_catapult_vector_v159(df, raw_df, sheet_name)
 
     # Üres és Unnamed oszlopok törlése.
     df = df.dropna(how="all")
@@ -2194,13 +2274,41 @@ def read_excel_all(file) -> Dict[str, pd.DataFrame]:
 # V136 - ZIP / multi-session GPS import
 # =========================================================
 def _fpi_read_csv_bytes_v136(data: bytes, name: str = "") -> pd.DataFrame:
-    """CSV beolvasás több tipikus kódolással és automatikus elválasztóval."""
+    """CSV beolvasás több kódolással, Catapult meta-fejléc támogatással.
+
+    A Catapult Vector/OpenField CSV elején rövid, kétoszlopos metaadatblokk áll,
+    majd egy 1500+ oszlopos valódi fejléc következik. Ezt a pandas hagyományos
+    header=None olvasása ragged CSV-ként elutasítja, ezért előbb megkeressük a
+    Player Name / Period Name fejlécsort, és csak onnantól olvasunk.
+    """
     last_err = None
-    for enc in ["utf-8-sig", "utf-8", "latin2", "cp1250", "iso-8859-2"]:
+    encodings = ["utf-8-sig", "utf-8", "latin2", "cp1250", "iso-8859-2"]
+    for enc in encodings:
         try:
+            text = data.decode(enc)
+        except Exception as e:
+            last_err = e
+            continue
+
+        lines = text.splitlines()
+        catapult_header = None
+        for i, line in enumerate(lines[:80]):
+            probe = line.lstrip("\ufeff").strip()
+            if "Player Name" in probe and "Period Name" in probe and "Total Distance" in probe:
+                catapult_header = i
+                break
+
+        try:
+            if catapult_header is not None:
+                trimmed = "\n".join(lines[catapult_header:]).encode(enc, errors="replace")
+                df = pd.read_csv(io.BytesIO(trimmed), sep=",", engine="python", encoding=enc, header=None)
+                df.attrs["fpi_catapult_header_row"] = int(catapult_header)
+                df.attrs["fpi_source_system"] = "Catapult Vector / OpenField"
+                return df
             return pd.read_csv(io.BytesIO(data), sep=None, engine="python", encoding=enc, header=None)
         except Exception as e:
             last_err = e
+
     raise ValueError(f"CSV beolvasási hiba ({name}): {last_err}")
 
 
@@ -2261,7 +2369,10 @@ def _fpi_read_gps_upload_to_sheets_v136(uploaded_file) -> Tuple[Dict[str, pd.Dat
                 if key in sheets:
                     key = f"{Path(name).stem} / {len(sheets)+1}"
                 sheets[key] = df_csv
-                _add_report(name, "OK", len(df_csv), 1, "CSV beolvasva")
+                catapult_hint = "Catapult Vector/OpenField CSV beolvasva" if any(
+                    str(x).strip().strip('"') == "Player Name" for x in df_csv.head(15).fillna("").astype(str).values.ravel()
+                ) else "CSV beolvasva"
+                _add_report(name, "OK", len(df_csv), 1, catapult_hint)
             else:
                 _add_report(name, "Kihagyva", 0, 0, "Nem támogatott fájltípus")
         except Exception as e:
