@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V167_WEEK_MATCH_REFERENCE_FIXED_2026_07_19"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V168_POLAR_MATCH_REFERENCE_FIXED_2026_07_19"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7676,11 +7676,28 @@ def _fpi_gps_week_metrics_v95(ctx: Dict[str, object], week: str) -> Dict[str, ob
     d = df.copy()
 
     if "session_name" in d.columns and "session_type" in d.columns:
-        training_hint_v164 = d["session_name"].astype(str).str.lower().str.contains(
+        # V168: a session_name csak akkor lehet típus-fallback, ha a Típus mező
+        # nem tartalmaz egyértelmű Edzés/Meccs értéket.
+        #
+        # Polar Team Pro esetén a meccssorok szakaszneve is gyakran
+        # "Teljes edzésszakasz". A korábbi logika ezért a valódi Meccs sorokat
+        # tévesen Edzésre írta át, így a meccsreferencia 0 lett.
+        current_kind_v168 = d["session_type"].apply(_fpi_session_kind_v93)
+        unknown_type_v168 = current_kind_v168.eq("other")
+
+        training_hint_v168 = d["session_name"].astype(str).str.lower().str.contains(
             r"\bmd-\d+\b|training|train|edzés|edzes",
-            regex=True, na=False
+            regex=True,
+            na=False,
         )
-        d.loc[training_hint_v164, "session_type"] = "Edzés"
+        match_hint_v168 = d["session_name"].astype(str).str.lower().str.contains(
+            r"match|game|meccs|mérkőzés|merkozes",
+            regex=True,
+            na=False,
+        )
+
+        d.loc[unknown_type_v168 & training_hint_v168, "session_type"] = "Edzés"
+        d.loc[unknown_type_v168 & match_hint_v168, "session_type"] = "Meccs"
 
     if "week" in d.columns:
         d = d[d["week"].astype(str) == str(week)].copy()
