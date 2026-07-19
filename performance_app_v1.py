@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V168_POLAR_MATCH_REFERENCE_FIXED_2026_07_19"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V200_UNIVERSAL_GPS_ENGINE_2026_07_19"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -1707,6 +1707,518 @@ def normalize_combined_fields(out: pd.DataFrame, mapping: Dict[str, Optional[str
     out["sprint_distance"] = out["speed_zone_5"]
     return out
 
+# =============================================================================
+# FPI V200 – Universal GPS Engine
+# =============================================================================
+
+FPI_V200_PROVIDER_SIGNATURES = {
+    "Polar Team Pro": {
+        "tokens": [
+            "teljes tav", "kezdesi ido", "edzesi terhelesi pontertek",
+            "sebesseg celzonaban", "izomterhelesi pontertek",
+        ],
+        "file_tokens": ["polar", "team pro"],
+    },
+    "Catapult": {
+        "tokens": [
+            "total distance", "player load", "max velocity",
+            "meterage per minute", "explosive efforts",
+        ],
+        "file_tokens": ["catapult", "openfield", "vector"],
+    },
+    "PlayerTek": {
+        "tokens": [
+            "playertek", "total distance", "sprint distance",
+            "power plays", "impacts",
+        ],
+        "file_tokens": ["playertek"],
+    },
+    "Brainsports": {
+        "tokens": [
+            "brainsports", "athlete", "session date",
+            "high intensity running", "training load",
+        ],
+        "file_tokens": ["brainsports"],
+    },
+    "STATSports": {
+        "tokens": [
+            "statsports", "dynamic stress load", "hsr distance",
+            "high metabolic load distance",
+        ],
+        "file_tokens": ["statsports", "apex"],
+    },
+    "GPSports": {
+        "tokens": [
+            "gpsports", "body load", "zone distance", "top speed",
+        ],
+        "file_tokens": ["gpsports"],
+    },
+}
+
+
+def _fpi_v200_norm(value: object) -> str:
+    return _norm_mapping_text(value)
+
+
+def _fpi_v200_detect_provider_from_frame(
+    df: pd.DataFrame,
+    file_name: str = "",
+    current_provider: Optional[str] = None,
+) -> Tuple[str, Dict[str, int]]:
+    """Providerfelismerés fejléc-, fájlnév- és adattartalom-jelzésekből."""
+    if df is None:
+        return current_provider or "Ismeretlen / Smart Mapper", {}
+
+    columns_text = " | ".join(_fpi_v200_norm(c) for c in df.columns)
+    file_text = _fpi_v200_norm(file_name)
+    sample_parts: List[str] = []
+    for col in list(df.columns)[:15]:
+        try:
+            vals = df[col].dropna().astype(str).head(5).tolist()
+            sample_parts.extend(vals)
+        except Exception:
+            continue
+    sample_text = _fpi_v200_norm(" ".join(sample_parts))
+    full_text = f"{columns_text} {sample_text}"
+
+    scores: Dict[str, int] = {}
+    for provider, signature in FPI_V200_PROVIDER_SIGNATURES.items():
+        score = 0
+        for token in signature["tokens"]:
+            if _fpi_v200_norm(token) in full_text:
+                score += 3
+        for token in signature["file_tokens"]:
+            if _fpi_v200_norm(token) in file_text:
+                score += 5
+        scores[provider] = score
+
+    best = max(scores, key=scores.get) if scores else ""
+    if scores.get(best, 0) >= 5:
+        return best, scores
+    if current_provider and current_provider not in {"", "Ismeretlen", "Általános / Smart Mapper"}:
+        return current_provider, scores
+    return "Ismeretlen / Smart Mapper", scores
+
+
+def _fpi_v200_first_existing(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    norm_map = {_fpi_v200_norm(col): col for col in df.columns}
+    for candidate in candidates:
+        found = norm_map.get(_fpi_v200_norm(candidate))
+        if found is not None:
+            return found
+    return None
+
+
+def _fpi_v200_numeric(df: pd.DataFrame, col: str) -> pd.Series:
+    if col not in df.columns:
+        return pd.Series(np.nan, index=df.index, dtype=float)
+    return pd.to_numeric(df[col], errors="coerce")
+
+
+def _fpi_v200_session_kind(value: object) -> str:
+    text = _fpi_v200_norm(value)
+    if any(token in text for token in [
+        "meccs", "merkozes", "match", "game", "fixture", "competition",
+    ]):
+        return "match"
+    if any(token in text for token in [
+        "edzes", "training", "train", "practice", "session",
+    ]):
+        return "training"
+    return "other"
+
+
+def _fpi_v200_normalize_session_type(
+    df: pd.DataFrame,
+    recovery_log: List[str],
+) -> pd.DataFrame:
+    """Az explicit Típus elsőbbséget élvez; névből csak hiány esetén következtet."""
+    data = df.copy()
+
+    type_source = _fpi_v200_first_existing(data, [
+        "session_type", "Session Type", "Típus", "Tipus", "Type",
+        "Training/Match", "Edzés/Meccs", "Event Type", "Activity Type",
+    ])
+    name_source = _fpi_v200_first_existing(data, [
+        "session_name", "Session Name", "Szakasz neve", "Activity",
+        "Drill", "Event", "Period Name", "Split Name",
+    ])
+
+    if "session_type" not in data.columns and type_source is not None:
+        data["session_type"] = data[type_source]
+        recovery_log.append(f"Session Type helyreállítva ebből: {type_source}")
+
+    if "session_type" not in data.columns:
+        data["session_type"] = pd.NA
+
+    explicit_kind = data["session_type"].apply(_fpi_v200_session_kind)
+    unknown = explicit_kind.eq("other")
+
+    if name_source is not None and unknown.any():
+        inferred = data[name_source].apply(_fpi_v200_session_kind)
+        training_mask = unknown & inferred.eq("training")
+        match_mask = unknown & inferred.eq("match")
+        if training_mask.any():
+            data.loc[training_mask, "session_type"] = "Edzés"
+            recovery_log.append(
+                f"{int(training_mask.sum())} ismeretlen típus Edzésként felismerve ebből: {name_source}"
+            )
+        if match_mask.any():
+            data.loc[match_mask, "session_type"] = "Meccs"
+            recovery_log.append(
+                f"{int(match_mask.sum())} ismeretlen típus Meccsként felismerve ebből: {name_source}"
+            )
+
+    final_kind = data["session_type"].apply(_fpi_v200_session_kind)
+    data["session_type"] = final_kind.map({
+        "training": "Edzés",
+        "match": "Meccs",
+        "other": "Egyéb",
+    })
+    return data
+
+
+def _fpi_v200_normalize_dates(
+    df: pd.DataFrame,
+    recovery_log: List[str],
+) -> pd.DataFrame:
+    data = df.copy()
+    start_source = _fpi_v200_first_existing(data, [
+        "start_time", "Start Time", "Kezdési idő", "Kezdesi ido",
+        "Session Date", "Dátum", "Datum", "Date", "Start",
+    ])
+    end_source = _fpi_v200_first_existing(data, [
+        "end_time", "End Time", "Befejezési idő", "Finish", "End",
+    ])
+
+    if "start_time" not in data.columns and start_source is not None:
+        data["start_time"] = data[start_source]
+        recovery_log.append(f"Kezdési idő helyreállítva ebből: {start_source}")
+
+    if "start_time" in data.columns:
+        data["start_time"] = pd.to_datetime(data["start_time"], errors="coerce")
+        data["session_date"] = data["start_time"].dt.normalize()
+        iso = data["start_time"].dt.isocalendar()
+        data["week"] = (
+            iso["year"].astype("Int64").astype(str)
+            + "-W"
+            + iso["week"].astype("Int64").astype(str).str.zfill(2)
+        )
+        data.loc[data["start_time"].isna(), "week"] = pd.NA
+
+    if (
+        ("duration_min" not in data.columns or _fpi_v200_numeric(data, "duration_min").notna().sum() == 0)
+        and "start_time" in data.columns
+        and end_source is not None
+    ):
+        end_time = pd.to_datetime(data[end_source], errors="coerce")
+        data["duration_min"] = (end_time - data["start_time"]).dt.total_seconds() / 60.0
+        recovery_log.append(f"Időtartam helyreállítva: {end_source} - start_time")
+
+    return data
+
+
+def _fpi_v200_recover_metrics(
+    df: pd.DataFrame,
+    recovery_log: List[str],
+) -> pd.DataFrame:
+    """Providerfüggetlen, óvatos self-healing mutatómotor."""
+    data = df.copy()
+
+    alias_map = {
+        "player_name": ["Player Name", "Játékos neve", "Name", "Athlete", "Név"],
+        "total_distance": ["Total Distance", "Teljes táv [m]", "Distance", "Össztáv", "TD"],
+        "duration_min": ["Duration Min", "Minutes", "Időtartam [perc]", "Duration"],
+        "distance_per_min": ["Distance Per Min", "m/min", "Táv/perc [m/min]", "Meterage Per Minute"],
+        "max_speed": ["Max Speed", "Top Speed", "Maximum Velocity", "Maximális sebesség [km/h]"],
+        "sprints": ["Sprints", "Sprint Count", "Sprintek", "Number of Sprints"],
+        "speed_zone_4": ["Speed Zone 4", "Zone 4 Distance", "HSR Distance"],
+        "speed_zone_5": ["Speed Zone 5", "Sprint Distance", "Sprint táv"],
+        "hsr_distance": ["HSR Distance", "High Speed Running Distance", "High Speed Distance"],
+        "sprint_distance": ["Sprint Distance", "Sprint táv", "Zone 5 Distance"],
+        "training_load": ["Training Load", "Player Load", "Edzési terhelési pontérték"],
+        "acc_high": ["High Accelerations", "Total Accelerations", "Gyorsulások száma (3.00 - 50.00 m/s²)"],
+        "dec_high": ["High Decelerations", "Total Decelerations", "Gyorsulások száma (-50.00 - -3.00 m/s²)"],
+        "high_efforts": ["High Efforts", "Explosive Efforts", "High Intensity Efforts"],
+        "match_minutes": ["Match Minutes", "Minutes Played", "Játékperc", "Játékpercek"],
+    }
+
+    for target, aliases in alias_map.items():
+        existing_ok = target in data.columns and _fpi_v200_numeric(data, target).notna().sum() > 0
+        if target == "player_name":
+            existing_ok = target in data.columns and data[target].notna().sum() > 0
+        if existing_ok:
+            continue
+        source = _fpi_v200_first_existing(data, [target] + aliases)
+        if source is not None and source != target:
+            data[target] = data[source]
+            recovery_log.append(f"{target} helyreállítva ebből: {source}")
+
+    numeric_targets = [
+        "total_distance", "duration_min", "distance_per_min", "max_speed",
+        "sprints", "speed_zone_4", "speed_zone_5", "hsr_distance",
+        "sprint_distance", "training_load", "acc_high", "dec_high",
+        "high_efforts", "match_minutes",
+    ]
+    for col in numeric_targets:
+        if col in data.columns:
+            data[col] = pd.to_numeric(data[col], errors="coerce")
+
+    # Duration oszlopból perc, ha még nincs duration_min.
+    if "duration_min" not in data.columns or data["duration_min"].notna().sum() == 0:
+        duration_source = _fpi_v200_first_existing(data, ["duration", "Duration", "Időtartam"])
+        if duration_source is not None:
+            data["duration_min"] = data[duration_source].apply(duration_to_minutes)
+            recovery_log.append(f"duration_min helyreállítva ebből: {duration_source}")
+
+    z4 = _fpi_v200_numeric(data, "speed_zone_4")
+    z5 = _fpi_v200_numeric(data, "speed_zone_5")
+
+    if "sprint_distance" not in data.columns or _fpi_v200_numeric(data, "sprint_distance").notna().sum() == 0:
+        if z5.notna().sum() > 0:
+            data["sprint_distance"] = z5
+            recovery_log.append("Sprint Distance helyreállítva ebből: Speed Zone 5")
+
+    if "hsr_distance" not in data.columns or _fpi_v200_numeric(data, "hsr_distance").notna().sum() == 0:
+        if z4.notna().sum() > 0 or z5.notna().sum() > 0:
+            data["hsr_distance"] = z4.fillna(0) + z5.fillna(0)
+            recovery_log.append("HSR helyreállítva ebből: Speed Zone 4 + Speed Zone 5")
+
+    if (
+        "distance_per_min" not in data.columns
+        or _fpi_v200_numeric(data, "distance_per_min").notna().sum() == 0
+    ):
+        distance = _fpi_v200_numeric(data, "total_distance")
+        duration = _fpi_v200_numeric(data, "duration_min")
+        valid = duration.gt(0)
+        if valid.any() and distance.notna().any():
+            data["distance_per_min"] = distance / duration.where(valid)
+            recovery_log.append("Distance/min helyreállítva: Total Distance / Duration")
+
+    if (
+        "match_minutes" not in data.columns
+        or _fpi_v200_numeric(data, "match_minutes").notna().sum() == 0
+    ):
+        if "duration_min" in data.columns:
+            data["match_minutes"] = _fpi_v200_numeric(data, "duration_min")
+            recovery_log.append("Match Minutes helyreállítva ebből: Duration")
+
+    if (
+        "high_efforts" not in data.columns
+        or _fpi_v200_numeric(data, "high_efforts").notna().sum() == 0
+    ):
+        effort_parts = []
+        for col in ["sprints", "acc_high", "dec_high"]:
+            if col in data.columns:
+                effort_parts.append(_fpi_v200_numeric(data, col))
+        if effort_parts:
+            data["high_efforts"] = pd.concat(effort_parts, axis=1).sum(axis=1, min_count=1)
+            recovery_log.append("High Efforts helyreállítva: Sprint + High Acc + High Dec")
+
+    return data
+
+
+def _fpi_v200_filter_non_player_rows(
+    df: pd.DataFrame,
+    recovery_log: List[str],
+) -> pd.DataFrame:
+    data = df.copy()
+    if "player_name" not in data.columns:
+        return data
+
+    names = data["player_name"].astype(str).str.strip()
+    non_player = names.str.lower().str.contains(
+        r"benchmark|átlag|atlag|összesen|osszesen|team average|squad average",
+        regex=True,
+        na=False,
+    )
+    empty = names.eq("") | names.str.lower().isin({"nan", "none"})
+    remove = non_player | empty
+    if remove.any():
+        recovery_log.append(f"{int(remove.sum())} nem játékos/összesítő sor kiszűrve")
+        data = data.loc[~remove].copy()
+    return data
+
+
+def _fpi_v200_quality_report(
+    df: pd.DataFrame,
+    provider: str,
+    recovery_log: List[str],
+    provider_scores: Optional[Dict[str, int]] = None,
+) -> Dict[str, object]:
+    data = df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    rows = len(data)
+
+    def coverage(col: str) -> float:
+        if rows == 0 or col not in data.columns:
+            return 0.0
+        if col == "player_name":
+            valid = data[col].astype(str).str.strip().replace({"nan": "", "None": ""}).ne("")
+        else:
+            valid = data[col].notna()
+        return float(valid.mean())
+
+    weights = {
+        "player_name": 15,
+        "session_type": 14,
+        "start_time": 14,
+        "total_distance": 10,
+        "duration_min": 7,
+        "distance_per_min": 6,
+        "max_speed": 6,
+        "hsr_distance": 8,
+        "sprint_distance": 7,
+        "sprints": 5,
+        "high_efforts": 4,
+        "training_load": 4,
+    }
+    weighted = sum(coverage(col) * weight for col, weight in weights.items())
+    total_weight = sum(weights.values())
+    score = int(round(100 * weighted / total_weight)) if total_weight else 0
+
+    kinds = (
+        data["session_type"].apply(_fpi_v200_session_kind)
+        if "session_type" in data.columns
+        else pd.Series(dtype=object)
+    )
+    start = pd.to_datetime(data.get("start_time"), errors="coerce") if "start_time" in data.columns else pd.Series(dtype="datetime64[ns]")
+
+    warnings: List[str] = []
+    critical = ["player_name", "session_type", "start_time"]
+    for col in critical:
+        if coverage(col) < 0.90:
+            warnings.append(f"Kritikus mező gyenge lefedettsége: {col} ({coverage(col):.0%})")
+    for col in ["total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts"]:
+        if coverage(col) < 0.50:
+            warnings.append(f"Hiányos mutató: {col} ({coverage(col):.0%})")
+
+    if score >= 90:
+        label = "Kiváló"
+    elif score >= 75:
+        label = "Jó"
+    elif score >= 60:
+        label = "Használható"
+    else:
+        label = "Javítandó"
+
+    weeks = 0
+    if "week" in data.columns:
+        weeks = int(data["week"].dropna().nunique())
+    elif not start.empty:
+        weeks = int(start.dt.to_period("W").nunique())
+
+    return {
+        "provider": provider,
+        "provider_scores": provider_scores or {},
+        "rows": rows,
+        "players": int(data["player_name"].dropna().astype(str).nunique()) if "player_name" in data.columns else 0,
+        "weeks": weeks,
+        "training_rows": int(kinds.eq("training").sum()),
+        "match_rows": int(kinds.eq("match").sum()),
+        "other_rows": int(kinds.eq("other").sum()),
+        "date_min": start.min() if not start.empty else pd.NaT,
+        "date_max": start.max() if not start.empty else pd.NaT,
+        "quality_score": score,
+        "quality_label": label,
+        "recoveries": list(dict.fromkeys(recovery_log)),
+        "warnings": warnings,
+        "available_metrics": [
+            col for col in weights
+            if col in data.columns and coverage(col) >= 0.50
+        ],
+    }
+
+
+def _fpi_v200_universal_postprocess(
+    df: pd.DataFrame,
+    provider: Optional[str] = None,
+    file_name: str = "",
+) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    """Minden provider és Smart Mapper közös végső normalizáló/validáló rétege."""
+    if df is None or df.empty:
+        report = _fpi_v200_quality_report(
+            pd.DataFrame(),
+            provider or "Ismeretlen / Smart Mapper",
+            ["Üres input"],
+        )
+        return pd.DataFrame(), report
+
+    recovery_log: List[str] = []
+    detected_provider, provider_scores = _fpi_v200_detect_provider_from_frame(
+        df,
+        file_name=file_name,
+        current_provider=provider,
+    )
+
+    data = df.copy()
+    data = _fpi_v200_normalize_session_type(data, recovery_log)
+    data = _fpi_v200_normalize_dates(data, recovery_log)
+    data = _fpi_v200_recover_metrics(data, recovery_log)
+    data = _fpi_v200_filter_non_player_rows(data, recovery_log)
+
+    if "player_name" in data.columns:
+        data["player_name"] = data["player_name"].astype(str).str.strip()
+
+    # Értelmezhetetlen dátumú sorok nem kerülhetnek heti elemzésbe.
+    if "start_time" in data.columns:
+        bad_dates = data["start_time"].isna()
+        if bad_dates.any():
+            recovery_log.append(f"{int(bad_dates.sum())} értelmezhetetlen dátumú sor kihagyva")
+            data = data.loc[~bad_dates].copy()
+
+    # Csak a standard session címkék maradjanak.
+    if "session_type" in data.columns:
+        kind = data["session_type"].apply(_fpi_v200_session_kind)
+        data["session_type"] = kind.map({
+            "training": "Edzés",
+            "match": "Meccs",
+            "other": "Egyéb",
+        })
+
+    report = _fpi_v200_quality_report(
+        data,
+        detected_provider,
+        recovery_log,
+        provider_scores=provider_scores,
+    )
+    data.attrs["fpi_import_diagnostics"] = report
+    data.attrs["fpi_provider"] = detected_provider
+    data.attrs["fpi_import_quality"] = report["quality_score"]
+    return data.reset_index(drop=True), report
+
+
+def _fpi_v200_report_row(
+    file_name: str,
+    report: Dict[str, object],
+    status: str = "OK",
+) -> Dict[str, object]:
+    warnings = report.get("warnings", []) or []
+    recoveries = report.get("recoveries", []) or []
+    note_parts = [
+        f"Minőség: {report.get('quality_score', 0)}% ({report.get('quality_label', '')})",
+        f"Játékosok: {report.get('players', 0)}",
+        f"Hetek: {report.get('weeks', 0)}",
+        f"Edzés: {report.get('training_rows', 0)}",
+        f"Meccs: {report.get('match_rows', 0)}",
+    ]
+    if recoveries:
+        note_parts.append("Öngyógyítás: " + "; ".join(recoveries[:3]))
+    if warnings:
+        note_parts.append("Figyelem: " + "; ".join(warnings[:2]))
+
+    return {
+        "Fájl": file_name,
+        "Státusz": status,
+        "Rendszer": report.get("provider", "Ismeretlen / Smart Mapper"),
+        "Sorok": report.get("rows", 0),
+        "Import minőség": f"{report.get('quality_score', 0)}%",
+        "Játékosok": report.get("players", 0),
+        "Hetek": report.get("weeks", 0),
+        "Edzés sor": report.get("training_rows", 0),
+        "Meccs sor": report.get("match_rows", 0),
+        "Megjegyzés": " | ".join(note_parts),
+    }
+
 # -----------------------------------------------------------------------------
 # V4.5 - Smart Mapper fallback helpers
 # -----------------------------------------------------------------------------
@@ -2571,6 +3083,11 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
     out = out[out["player_name"].str.len() > 0]
     out = out[~out["player_name"].str.lower().str.contains("benchmark|átlag|atlag|összesen|osszesen", na=False)]
     out = finalize_exposure_columns(add_position_group(out))
+    out, _v200_report = _fpi_v200_universal_postprocess(
+        out,
+        provider="Általános / Smart Mapper",
+        file_name="Smart Mapper import",
+    )
 
     return out, mapping, []
 
@@ -2656,6 +3173,11 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
     out = out[out["player_name"].str.len() > 0]
     out = out[~out["player_name"].str.lower().str.contains("benchmark|átlag|atlag|összesen|osszesen", na=False)]
     out = finalize_exposure_columns(add_position_group(out))
+    out, _v200_report = _fpi_v200_universal_postprocess(
+        out,
+        provider="Általános / Smart Mapper",
+        file_name="Kézi mapping import",
+    )
     return out, fixed_mapping, []
 
 
@@ -7282,7 +7804,11 @@ def _fpi_prepare_ratio_input_v167(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
 
-    data = df.copy()
+    data, _v200_ratio_report = _fpi_v200_universal_postprocess(
+        df,
+        provider=str(getattr(df, "attrs", {}).get("fpi_provider", "") or ""),
+        file_name="Heti referencia",
+    )
 
     def norm(x: object) -> str:
         return _norm_mapping_text(x)
@@ -12967,14 +13493,15 @@ def _fpi_read_single_gps_file_v143(
                 prepared = _fpi_prepare_catapult_v143(raw_sheets, forced_type, name)
 
         if not prepared.empty:
-            key = f"{Path(name).stem}__{provider}"
-            return {key: prepared}, [{
-                "Fájl": name,
-                "Státusz": "OK",
-                "Rendszer": provider,
-                "Sorok": len(prepared),
-                "Megjegyzés": "Automatikusan standardizált",
-            }]
+            prepared, v200_report = _fpi_v200_universal_postprocess(
+                prepared,
+                provider=provider,
+                file_name=name,
+            )
+            key = f"{Path(name).stem}__{v200_report.get('provider', provider)}"
+            return {key: prepared}, [
+                _fpi_v200_report_row(name, v200_report, status="OK")
+            ]
 
         # Polar esetén az üres eredmény ne vesszen el néma Smart Mapper fallbackben.
         if provider == "Polar Team Pro":
@@ -12994,18 +13521,50 @@ def _fpi_read_single_gps_file_v143(
                 ),
             }]
 
-        # Generic fallback: keep all sheets and let the existing header detector + Smart Mapper work.
+        # V200 generic fallback: először automatikus standardizálás minden lapon.
         generic = {}
+        generic_reports = []
         for sheet_name, raw in raw_sheets.items():
             if raw is None or raw.empty:
                 continue
-            generic[f"{Path(name).stem}__{sheet_name}"] = raw
+            try:
+                standardized, _mapping, missing_core = standardize_dataframe(raw)
+            except Exception:
+                standardized, missing_core = pd.DataFrame(), ["standardizálási hiba"]
+
+            if not standardized.empty and not missing_core:
+                standardized, v200_report = _fpi_v200_universal_postprocess(
+                    standardized,
+                    provider=provider,
+                    file_name=f"{name} / {sheet_name}",
+                )
+                generic[f"{Path(name).stem}__{sheet_name}"] = standardized
+                generic_reports.append(v200_report)
+            else:
+                # Ha nem standardizálható, megmarad a Smart Mapper számára.
+                generic[f"{Path(name).stem}__{sheet_name}"] = raw
+
+        if generic_reports:
+            best_report = max(
+                generic_reports,
+                key=lambda item: (item.get("quality_score", 0), item.get("rows", 0)),
+            )
+            return generic, [
+                _fpi_v200_report_row(name, best_report, status="OK")
+            ]
+
+        fallback_rows = sum(len(x) for x in generic.values())
         return generic, [{
             "Fájl": name,
             "Státusz": "MAPPER",
             "Rendszer": provider,
-            "Sorok": sum(len(x) for x in generic.values()),
-            "Megjegyzés": "Általános Smart Mapper szükséges",
+            "Sorok": fallback_rows,
+            "Import minőség": "",
+            "Játékosok": "",
+            "Hetek": "",
+            "Edzés sor": "",
+            "Meccs sor": "",
+            "Megjegyzés": "V200 nem talált biztonságosan standardizálható lapot; Smart Mapper szükséges",
         }]
     except Exception as exc:
         inferred_system = "Polar Team Pro" if "polar" in name.lower() else ""
