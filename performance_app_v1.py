@@ -11398,10 +11398,24 @@ def _fpi_bytes_from_upload_v143(uploaded_file) -> bytes:
 
 
 def _fpi_read_csv_bytes_v143(data: bytes, name: str = "") -> pd.DataFrame:
+    """Robusztus CSV-olvasó Catapult Vector/OpenField meta-fejléccel is."""
     last_err = None
     for enc in ["utf-8-sig", "utf-8", "cp1250", "latin2", "iso-8859-2", "cp1252"]:
         try:
-            return pd.read_csv(io.BytesIO(data), sep=None, engine="python", encoding=enc, header=None)
+            text = data.decode(enc)
+            lines = text.splitlines()
+            header_idx = None
+            for i, line in enumerate(lines[:80]):
+                normalized = line.lstrip("\ufeff").strip()
+                if (normalized.startswith('"Player Name",') or normalized.startswith("Player Name,")) and "Period Name" in normalized:
+                    header_idx = i
+                    break
+            if header_idx is not None:
+                trimmed = "\n".join(lines[header_idx:])
+                df = pd.read_csv(io.StringIO(trimmed), sep=",", engine="c", header=None, low_memory=False)
+                df.attrs["fpi_source_system"] = "Catapult Vector / OpenField"
+                return df
+            return pd.read_csv(io.StringIO(text), sep=None, engine="python", header=None)
         except Exception as exc:
             last_err = exc
     raise ValueError(f"CSV beolvasási hiba ({name}): {last_err}")
@@ -11488,7 +11502,9 @@ def _fpi_detect_provider_v143(sheets: Dict[str, pd.DataFrame], file_name: str = 
         return "Brainsports"
     if "polar" in name or "edzési terhelési pontérték" in sample_text or "kardióterhelés" in sample_text:
         return "Polar Team Pro"
-    if "catapult" in name or all(x in sample_text for x in ["athlete_name", "activity_name", "total_player_load"]):
+    old_catapult = all(x in sample_text for x in ["athlete_name", "activity_name", "total_player_load"])
+    vector_catapult = all(x in sample_text for x in ["player name", "period name", "total player load"]) and ("meterage per minute" in sample_text or "max velocity" in sample_text)
+    if "catapult" in name or old_catapult or vector_catapult:
         return "Catapult"
     return "Egyéb / Smart Mapper"
 
@@ -11702,6 +11718,81 @@ def _fpi_prepare_polar_v143(
     return chosen.reset_index(drop=True)
 
 
+def _fpi_prepare_catapult_vector_v160(
+    sheets: Dict[str, pd.DataFrame],
+    forced_type: Optional[str],
+    file_name: str,
+) -> pd.DataFrame:
+    """Catapult Vector/OpenField 1500+ oszlopos széles CSV standardizálása."""
+    table = None
+    for _, raw in sheets.items():
+        idx = _fpi_find_header_row_v143(raw, ["player name", "period name", "total distance", "total player load"], max_scan=80)
+        if idx is None:
+            continue
+        candidate = _fpi_table_from_raw_v143(raw, idx)
+        cols = {clean_col_name(c).lower() for c in candidate.columns}
+        if "player name" in cols and "period name" in cols:
+            table = candidate
+            break
+    if table is None or table.empty:
+        return pd.DataFrame()
+
+    def pick(*names):
+        norm = {clean_col_name(c).lower(): c for c in table.columns}
+        for name in names:
+            key = clean_col_name(name).lower()
+            if key in norm:
+                return norm[key]
+        return None
+
+    c_name = pick("Player Name")
+    c_period = pick("Period Name")
+    if c_name is None or c_period is None:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(index=table.index)
+    out["Player Name"] = table[c_name].astype(str).str.strip()
+    out["Session Name"] = table[c_period].astype(str).str.strip()
+    if forced_type in {"Edzés", "Meccs"}:
+        out["Session Type"] = forced_type
+    else:
+        hint = (table[c_period].astype(str) + " " + str(file_name)).str.lower()
+        out["Session Type"] = np.where(hint.str.contains(r"match|game|meccs|mérk", regex=True, na=False), "Meccs", "Edzés")
+
+    mapping = {
+        "Position": ("Position Name",),
+        "Total Distance": ("Total Distance",),
+        "Distance Per Min": ("Meterage Per Minute",),
+        "Top Speed": ("Max Velocity (km/h)",),
+        "Player Load": ("Total Player Load",),
+        "Player Load Per Min": ("Player Load Per Minute",),
+        "HSR Distance": ("High Speed Running (19,2 - 25,2 km/h) (m)",),
+        "Sprint Distance": ("Sprint Distance (>25 km/h)",),
+        "Sprints": ("Sprint Efforts",),
+        "Total Accelerations": ("Acceleration B3 Efforts (Gen 2)", "Acceleration Band 3 Total Effort Count"),
+        "Total Decelerations": ("Deceleration B3 Efforts (Gen 2)", "Deceleration B2-3 Total Efforts (Gen 2)"),
+        "Average HR": ("Avg Heart Rate",),
+        "Max HR": ("Maximum Heart Rate",),
+    }
+    for target, aliases in mapping.items():
+        col = pick(*aliases)
+        if col is not None:
+            out[target] = table[col] if target == "Position" else pd.to_numeric(table[col], errors="coerce")
+
+    c_start = pick("Unix Start Time", "Period Start Time")
+    if c_start is not None:
+        out["Start Time"] = pd.to_datetime(pd.to_numeric(table[c_start], errors="coerce"), unit="s", errors="coerce")
+
+    c_duration = pick("Total Duration")
+    if c_duration is not None:
+        td = pd.to_timedelta(table[c_duration].astype(str).str.strip(), errors="coerce")
+        num = pd.to_numeric(table[c_duration], errors="coerce") / 60.0
+        out["Duration"] = (td.dt.total_seconds() / 60.0).where(td.notna(), num)
+
+    out = out[out["Player Name"].ne("") & out["Player Name"].str.lower().ne("nan")]
+    return out.dropna(how="all").reset_index(drop=True)
+
+
 def _fpi_prepare_catapult_v143(
     sheets: Dict[str, pd.DataFrame],
     forced_type: Optional[str],
@@ -11884,7 +11975,9 @@ def _fpi_read_single_gps_file_v143(
         elif provider == "Polar Team Pro":
             prepared = _fpi_prepare_polar_v143(raw_sheets, forced_type, name)
         elif provider == "Catapult":
-            prepared = _fpi_prepare_catapult_v143(raw_sheets, forced_type, name)
+            prepared = _fpi_prepare_catapult_vector_v160(raw_sheets, forced_type, name)
+            if prepared.empty:
+                prepared = _fpi_prepare_catapult_v143(raw_sheets, forced_type, name)
 
         if not prepared.empty:
             key = f"{Path(name).stem}__{provider}"
