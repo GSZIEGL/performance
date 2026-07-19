@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V166_POLAR_XLS_RUNTIME_FIXED_2026_07_19"
+FPI_IMPORT_ENGINE_VERSION = "FPI_TACTICAL_MERGE_V167_WEEK_MATCH_REFERENCE_FIXED_2026_07_19"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7270,6 +7270,167 @@ def _fpi_event_count_v93(df: pd.DataFrame) -> int:
         return int(tmp.nunique())
     return 1
 
+def _fpi_prepare_ratio_input_v167(df: pd.DataFrame) -> pd.DataFrame:
+    """A heti edzés–meccs referencia előtt egységesíti a szükséges mezőket.
+
+    Kezeli azt az esetet is, amikor az importált tábla:
+    - még eredeti magyar Polar-fejléceket tartalmaz;
+    - Title Case provider-fejlécekkel érkezik;
+    - nem tartalmaz külön `week` vagy `session_date` oszlopot;
+    - a Típus mező magyar vagy angol értékeket tartalmaz.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    data = df.copy()
+
+    def norm(x: object) -> str:
+        return _norm_mapping_text(x)
+
+    normalized_columns = {norm(c): c for c in data.columns}
+
+    aliases = {
+        "session_type": [
+            "session_type", "Session Type", "Típus", "Tipus", "Type",
+            "Edzés/Meccs", "Training/Match",
+        ],
+        "start_time": [
+            "start_time", "Start Time", "Kezdési idő", "Kezdesi ido",
+            "Date", "Dátum", "Datum", "Session Date",
+        ],
+        "session_date": [
+            "session_date", "Session Date", "Dátum", "Date",
+        ],
+        "session_name": [
+            "session_name", "Session Name", "Szakasz neve",
+            "Edzésszakasz neve", "Activity", "Period Name",
+        ],
+        "total_distance": [
+            "total_distance", "Total Distance", "Teljes táv [m]",
+            "Tel­jes táv [m]", "Össztáv",
+        ],
+        "hsr_distance": [
+            "hsr_distance", "HSR Distance", "High Speed Distance",
+            "Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)",
+        ],
+        "sprint_distance": [
+            "sprint_distance", "Sprint Distance",
+            "Táv a sebesség célzónában 5 [m] (25.00- km/h)",
+        ],
+        "sprints": [
+            "sprints", "Sprints", "Sprint Count", "Sprintek",
+        ],
+        "high_efforts": [
+            "high_efforts", "High Efforts", "High Effort",
+        ],
+        "training_load": [
+            "training_load", "Training Load", "Player Load",
+            "Edzési terhelési pontérték",
+        ],
+        "acc_high": [
+            "acc_high", "Total Accelerations",
+            "Gyorsulások száma (3.00 - 50.00 m/s²)",
+        ],
+        "dec_high": [
+            "dec_high", "Total Decelerations",
+            "Gyorsulások száma (-50.00 - -3.00 m/s²)",
+        ],
+    }
+
+    def source_for(target: str):
+        if target in data.columns:
+            return target
+        for alias in aliases.get(target, []):
+            found = normalized_columns.get(norm(alias))
+            if found is not None:
+                return found
+        return None
+
+    # Standard oszlopok visszaállítása az eredeti/provider fejlécekből.
+    for target in [
+        "session_type", "start_time", "session_date", "session_name",
+        "total_distance", "hsr_distance", "sprint_distance",
+        "sprints", "high_efforts", "training_load", "acc_high", "dec_high",
+    ]:
+        if target not in data.columns:
+            source = source_for(target)
+            if source is not None:
+                data[target] = data[source]
+
+    # A Polar HSR értéke a 4. és 5. sebességzóna együtt.
+    z4_source = normalized_columns.get(
+        norm("Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)")
+    )
+    z5_source = normalized_columns.get(
+        norm("Táv a sebesség célzónában 5 [m] (25.00- km/h)")
+    )
+    if z4_source is not None:
+        z4 = pd.to_numeric(data[z4_source], errors="coerce")
+        z5 = (
+            pd.to_numeric(data[z5_source], errors="coerce")
+            if z5_source is not None
+            else pd.Series(0.0, index=data.index)
+        )
+        # HSR = minden 19,8 km/h fölötti futás, ezért z4 + z5.
+        if "hsr_distance" not in data.columns or pd.to_numeric(
+            data["hsr_distance"], errors="coerce"
+        ).notna().sum() == 0:
+            data["hsr_distance"] = z4.fillna(0) + z5.fillna(0)
+
+    # High Efforts fallback: sprint + nagy gyorsulás + nagy lassítás.
+    if (
+        "high_efforts" not in data.columns
+        or pd.to_numeric(data["high_efforts"], errors="coerce").notna().sum() == 0
+    ):
+        parts = []
+        for col in ["sprints", "acc_high", "dec_high"]:
+            if col in data.columns:
+                parts.append(pd.to_numeric(data[col], errors="coerce"))
+        if parts:
+            data["high_efforts"] = pd.concat(parts, axis=1).sum(axis=1, min_count=1)
+
+    # Numerikus mezők tisztítása.
+    for col in [
+        "total_distance", "hsr_distance", "sprint_distance",
+        "sprints", "high_efforts", "training_load",
+    ]:
+        if col in data.columns:
+            data[col] = pd.to_numeric(data[col], errors="coerce")
+
+    # Típusértékek egységesítése.
+    if "session_type" in data.columns:
+        kinds = data["session_type"].apply(_fpi_session_kind_v93)
+        data["session_type"] = kinds.map(
+            {"training": "Edzés", "match": "Meccs", "other": "Egyéb"}
+        )
+
+    # Dátum és ISO-hét előállítása a Kezdési időből.
+    if "start_time" in data.columns:
+        data["start_time"] = pd.to_datetime(data["start_time"], errors="coerce")
+
+    if "session_date" not in data.columns and "start_time" in data.columns:
+        data["session_date"] = data["start_time"].dt.normalize()
+    elif "session_date" in data.columns:
+        data["session_date"] = pd.to_datetime(data["session_date"], errors="coerce")
+
+    if "week" not in data.columns or data["week"].isna().all():
+        date_source = None
+        if "start_time" in data.columns:
+            date_source = pd.to_datetime(data["start_time"], errors="coerce")
+        elif "session_date" in data.columns:
+            date_source = pd.to_datetime(data["session_date"], errors="coerce")
+
+        if date_source is not None:
+            iso = date_source.dt.isocalendar()
+            data["week"] = (
+                iso["year"].astype("Int64").astype(str)
+                + "-W"
+                + iso["week"].astype("Int64").astype(str).str.zfill(2)
+            )
+            data.loc[date_source.isna(), "week"] = pd.NA
+
+    return data
+
 def _fpi_match_ratio_reference_df_v93(df: pd.DataFrame, week: str) -> pd.DataFrame:
     """Edzés összes / meccs összes és edzésátlag / meccs arány.
     választott referenciazónával.
@@ -7277,9 +7438,24 @@ def _fpi_match_ratio_reference_df_v93(df: pd.DataFrame, week: str) -> pd.DataFra
     if df is None or df.empty:
         return pd.DataFrame()
 
-    data = df.copy()
-    if "week" in data.columns and week is not None:
-        data = data[data["week"].astype(str) == str(week)].copy()
+    data = _fpi_prepare_ratio_input_v167(df)
+    if data.empty:
+        return pd.DataFrame()
+
+    # A kiválasztott hét formátumát is normalizáljuk. Ha a kapott hét nem
+    # található, de pontosan egy értelmezhető hét van, azt használjuk.
+    available_weeks = [
+        str(x) for x in data.get("week", pd.Series(dtype=object)).dropna().unique()
+    ]
+    selected_week = str(week) if week is not None else None
+    if selected_week and selected_week in available_weeks:
+        data = data[data["week"].astype(str) == selected_week].copy()
+    elif len(available_weeks) == 1:
+        data = data[data["week"].astype(str) == available_weeks[0]].copy()
+    elif selected_week:
+        # Ne számoljunk másik héttel csendben, de maradjon diagnosztizálható.
+        data = data[data["week"].astype(str) == selected_week].copy()
+
     if data.empty or "session_type" not in data.columns:
         return pd.DataFrame()
 
