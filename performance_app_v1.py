@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V200_UNIVERSAL_GPS_ENGINE_2026_07_19"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V201_TRAINING_ATTENDANCE_2026_07_20"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -2129,6 +2129,214 @@ def _fpi_v200_quality_report(
     }
 
 
+
+def _fpi_v201_training_session_key(df: pd.DataFrame) -> pd.Series:
+    """Providerfüggetlen edzésazonosító.
+
+    Elsődlegesen a pontos kezdési időt használja. Ha az nincs, akkor a dátum és
+    session_name kombinációját. Így egy edzés belső Period/Split sorai nem
+    számítanak külön edzésnek.
+    """
+    if df is None or df.empty:
+        return pd.Series(dtype="object")
+
+    data = df.copy()
+    index = data.index
+
+    if "start_time" in data.columns:
+        start = pd.to_datetime(data["start_time"], errors="coerce")
+    elif "session_date" in data.columns:
+        start = pd.to_datetime(data["session_date"], errors="coerce")
+    else:
+        start = pd.Series(pd.NaT, index=index)
+
+    day_text = start.dt.strftime("%Y-%m-%d").fillna("")
+    minute_text = start.dt.floor("min").dt.strftime("%Y-%m-%d %H:%M").fillna("")
+
+    if "session_name" in data.columns:
+        name_text = (
+            data["session_name"]
+            .astype(str)
+            .map(_fpi_v200_norm)
+            .replace({"nan": "", "none": ""})
+        )
+    else:
+        name_text = pd.Series("", index=index)
+
+    # Az ismert belső szakasznevek ne hozzanak létre külön eseményt.
+    generic_period = name_text.str.contains(
+        r"^period\b|^split\b|^drill\b|^quarter\b|^half\b|"
+        r"első félidő|masodik felido|második félidő|"
+        r"warm.?up|bemelegítés|bemelegites|cool.?down|levezetés|levezetes",
+        regex=True,
+        na=False,
+    )
+    clean_name = name_text.mask(generic_period, "session")
+
+    # Ha van pontos kezdési idő, az az elsődleges eseményazonosító.
+    key = minute_text.where(minute_text.ne(""), day_text + "|" + clean_name)
+    key = key.where(key.ne(""), pd.Series(index.astype(str), index=index))
+    return key.astype(str)
+
+
+def _fpi_v201_add_training_attendance(
+    df: pd.DataFrame,
+    recovery_log: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Heti csapatedzésszám és játékosrészvétel hozzáadása minden sorhoz."""
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+
+    data = df.copy()
+    required = {"player_name", "week", "session_type"}
+    if not required.issubset(data.columns):
+        return data
+
+    training_mask = data["session_type"].apply(_fpi_v200_session_kind).eq("training")
+    training = data.loc[training_mask].copy()
+    if training.empty:
+        data["team_training_sessions"] = 0
+        data["player_training_sessions"] = 0
+        data["training_availability_pct"] = np.nan
+        return data
+
+    training["_fpi_training_session_id"] = _fpi_v201_training_session_key(training)
+
+    # Csapatszint: hány külön edzés volt az adott héten.
+    team_sessions = (
+        training.groupby("week")["_fpi_training_session_id"]
+        .nunique()
+        .rename("team_training_sessions")
+    )
+
+    # Játékosszint: a játékos hány külön edzésen szerepelt.
+    player_sessions = (
+        training.drop_duplicates(
+            subset=["week", "player_name", "_fpi_training_session_id"]
+        )
+        .groupby(["week", "player_name"])
+        .size()
+        .rename("player_training_sessions")
+        .reset_index()
+    )
+
+    attendance = player_sessions.merge(
+        team_sessions.reset_index(),
+        on="week",
+        how="left",
+    )
+    attendance["training_availability_pct"] = np.where(
+        attendance["team_training_sessions"] > 0,
+        attendance["player_training_sessions"]
+        / attendance["team_training_sessions"]
+        * 100.0,
+        np.nan,
+    )
+    attendance["training_availability_pct"] = (
+        attendance["training_availability_pct"].clip(lower=0, upper=100)
+    )
+
+    data = data.merge(
+        attendance,
+        on=["week", "player_name"],
+        how="left",
+        suffixes=("", "_v201"),
+    )
+
+    # Ha újrafut a postprocess, ne keletkezzenek duplikált mezők.
+    for col in [
+        "team_training_sessions",
+        "player_training_sessions",
+        "training_availability_pct",
+    ]:
+        alt = f"{col}_v201"
+        if alt in data.columns:
+            data[col] = data[alt].combine_first(data.get(col))
+            data = data.drop(columns=[alt])
+
+    # Az adott héten csak meccsen szereplő játékos 0 edzésrészvételt kap.
+    data["team_training_sessions"] = (
+        data["week"].map(team_sessions).fillna(0).astype(int)
+    )
+    data["player_training_sessions"] = (
+        pd.to_numeric(data["player_training_sessions"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+    data["training_availability_pct"] = np.where(
+        data["team_training_sessions"] > 0,
+        data["player_training_sessions"]
+        / data["team_training_sessions"]
+        * 100.0,
+        np.nan,
+    )
+    data["training_availability_pct"] = (
+        pd.to_numeric(data["training_availability_pct"], errors="coerce")
+        .clip(lower=0, upper=100)
+    )
+
+    if recovery_log is not None:
+        recovery_log.append(
+            "Edzésrészvétel kiszámítva: játékos edzései / heti csapatedzések"
+        )
+
+    return data
+
+
+def _fpi_v201_week_attendance_summary(
+    df: pd.DataFrame,
+    week: str,
+) -> Dict[str, object]:
+    """Heti, deduplikált részvételi összefoglaló."""
+    if df is None or df.empty:
+        return {}
+
+    data = _fpi_v201_add_training_attendance(df)
+    selected = data[data["week"].astype(str) == str(week)].copy()
+    if selected.empty or "training_availability_pct" not in selected.columns:
+        return {}
+
+    player_rows = (
+        selected[
+            [
+                "player_name",
+                "team_training_sessions",
+                "player_training_sessions",
+                "training_availability_pct",
+            ]
+        ]
+        .drop_duplicates(subset=["player_name"])
+        .copy()
+    )
+    if player_rows.empty:
+        return {}
+
+    availability = pd.to_numeric(
+        player_rows["training_availability_pct"], errors="coerce"
+    )
+    valid = availability.dropna()
+
+    team_sessions = int(
+        pd.to_numeric(
+            player_rows["team_training_sessions"], errors="coerce"
+        ).max()
+        or 0
+    )
+
+    return {
+        "team_training_sessions": team_sessions,
+        "tracked_players": int(player_rows["player_name"].nunique()),
+        "mean_availability_pct": float(valid.mean()) if not valid.empty else np.nan,
+        "median_availability_pct": float(valid.median()) if not valid.empty else np.nan,
+        "full_attendance_players": int((availability >= 99.5).sum()),
+        "below_75_players": int((availability < 75).sum()),
+        "below_50_players": int((availability < 50).sum()),
+        "player_table": player_rows.sort_values(
+            ["training_availability_pct", "player_name"],
+            ascending=[True, True],
+        ).reset_index(drop=True),
+    }
+
 def _fpi_v200_universal_postprocess(
     df: pd.DataFrame,
     provider: Optional[str] = None,
@@ -2174,6 +2382,8 @@ def _fpi_v200_universal_postprocess(
             "match": "Meccs",
             "other": "Egyéb",
         })
+
+    data = _fpi_v201_add_training_attendance(data, recovery_log)
 
     report = _fpi_v200_quality_report(
         data,
@@ -3509,6 +3719,9 @@ def player_weekly(df: pd.DataFrame) -> pd.DataFrame:
         "hr_avg": "mean",
         "hrv": "mean",
         "is_goalkeeper": "max",
+        "team_training_sessions": "max",
+        "player_training_sessions": "max",
+        "training_availability_pct": "max",
     }
     usable = {k: v for k, v in agg_map.items() if k in work.columns}
     res = work.groupby(["player_name", "week", "session_type"], as_index=False).agg(usable)
@@ -4505,6 +4718,42 @@ def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: s
 
     row = current_week.iloc[0]
 
+    # 0. Edzésrészvétel / availability komponens
+    attendance_summary = _fpi_v201_week_attendance_summary(df, selected_week)
+    team_training_sessions = int(
+        attendance_summary.get("team_training_sessions", 0) or 0
+    )
+    mean_availability = attendance_summary.get(
+        "mean_availability_pct", np.nan
+    )
+    attendance_component = 65.0
+    if team_training_sessions >= 2 and pd.notna(mean_availability):
+        attendance_component = float(mean_availability)
+        if mean_availability < 60:
+            score -= 14
+            reasons.append(
+                f"Az átlagos edzésrészvétel alacsony "
+                f"({mean_availability:.0f}%); a heti csapatterhelés "
+                f"részben hiányzások miatt alacsony."
+            )
+        elif mean_availability < 75:
+            score -= 8
+            reasons.append(
+                f"Az edzésrészvétel csak {mean_availability:.0f}%; "
+                f"a heti terhelési értékeket a hiányzásokkal együtt kell értelmezni."
+            )
+        elif mean_availability < 90:
+            score -= 3
+            reasons.append(
+                f"Az edzésrészvétel {mean_availability:.0f}%; "
+                f"néhány játékos nem teljes hetet végzett."
+            )
+        else:
+            score += 3
+    components["training_availability"] = max(
+        0, min(100, attendance_component)
+    )
+
     # 1. Load trend komponens
     load_change = row.get("training_load_change", np.nan)
     if pd.notna(load_change):
@@ -5197,6 +5446,27 @@ def calculate_player_risk(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
     for _, row in cur.iterrows():
         player=row["player_name"]; hp=hist[hist["player_name"]==player]; score=20; reasons=[]
         is_gk = bool(row.get("is_goalkeeper", False))
+        team_sessions = int(row.get("team_training_sessions", 0) or 0)
+        player_sessions = int(row.get("player_training_sessions", 0) or 0)
+        availability = pd.to_numeric(
+            pd.Series([row.get("training_availability_pct", np.nan)]),
+            errors="coerce",
+        ).iloc[0]
+        low_attendance = (
+            team_sessions >= 2
+            and pd.notna(availability)
+            and availability < 75
+        )
+        if low_attendance:
+            if availability < 50:
+                score += 20
+            else:
+                score += 12
+            reasons.append(
+                f"Edzésrészvétel: {player_sessions}/{team_sessions} "
+                f"({availability:.0f}%)"
+            )
+
         # Kapusnál nem büntetjük ugyanúgy az alacsony sprint/HSR profilt.
         # A risk fő fókusza nála a teljes load, high efforts, lassítás/gyorsulás és játékperc.
         metric_pack = [
@@ -5211,8 +5481,26 @@ def calculate_player_risk(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
                 v=row.get(metric,np.nan); base=hp[metric].mean()
                 if pd.notna(v) and pd.notna(base) and base!=0:
                     d=(v-base)/base
-                    if d>hi: score+=18; reasons.append(f"{lab}: +{d:.0%} a saját átlaghoz képest")
-                    elif d<lo: score+=8; reasons.append(f"{lab}: {d:.0%} a saját átlaghoz képest")
+                    if d>hi:
+                        score += 18
+                        reasons.append(f"{lab}: +{d:.0%} a saját átlaghoz képest")
+                    elif d<lo:
+                        # Alacsony heti összterhelésnél különbséget teszünk:
+                        # hiányzás vagy teljes részvétel melletti alacsony inger.
+                        if low_attendance and metric in {
+                            "training_load", "high_efforts", "dec_count",
+                            "sprint_distance",
+                        }:
+                            if not any("alacsony heti érték fő oka" in x for x in reasons):
+                                reasons.append(
+                                    "Az alacsony heti érték fő oka valószínűleg "
+                                    "a hiányos edzésrészvétel."
+                                )
+                        else:
+                            score += 8
+                            reasons.append(
+                                f"{lab}: {d:.0%} a saját átlaghoz képest"
+                            )
         if "player_minutes" in row.index and "player_minutes" in hp.columns:
             v=row.get("player_minutes",np.nan); base=hp["player_minutes"].mean()
             if pd.notna(v) and pd.notna(base) and base>0 and abs((v-base)/base)>.35:
@@ -5223,7 +5511,24 @@ def calculate_player_risk(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
                 score+=14; reasons.append(f"Max sebesség: {(v-base)/base:.0%} a saját csúcshoz képest")
         score=int(max(0,min(100,score))); level="Magas" if score>=70 else ("Közepes" if score>=45 else "Alacsony")
         role = "Kapus" if is_gk else "Mezőny"
-        rows.append({"Játékos":player,"Szerep":role,"Típus":row.get("session_type",""),"Játékperc":round(row.get("player_minutes",0) or 0,1),"Kockázati pontszám":score,"Kockázati szint":level,"Fő okok":"; ".join(reasons[:3]) if reasons else "Nincs jelentős eltérés a saját előzményhez képest."})
+        attendance_text = (
+            f"{player_sessions}/{team_sessions} ({availability:.0f}%)"
+            if team_sessions > 0 and pd.notna(availability)
+            else "n.a."
+        )
+        rows.append({
+            "Játékos": player,
+            "Szerep": role,
+            "Típus": row.get("session_type", ""),
+            "Játékperc": round(row.get("player_minutes", 0) or 0, 1),
+            "Edzésrészvétel": attendance_text,
+            "Edzések": player_sessions,
+            "Csapatedzések": team_sessions,
+            "Részvétel %": round(float(availability), 1) if pd.notna(availability) else np.nan,
+            "Kockázati pontszám": score,
+            "Kockázati szint": level,
+            "Fő okok": "; ".join(reasons[:3]) if reasons else "Nincs jelentős eltérés a saját előzményhez képest.",
+        })
     res=pd.DataFrame(rows); return res.sort_values("Kockázati pontszám",ascending=False) if not res.empty else res
 
 def render_premium_kpi(label: str, value: str, note: str="", color: str="#22c55e") -> None:
@@ -8238,9 +8543,11 @@ def _fpi_gps_week_metrics_v95(ctx: Dict[str, object], week: str) -> Dict[str, ob
                 "avg_pct": r.get("Edzésátlag/meccs %"),
                 "eval": r.get("Értékelés", ""),
             }
+    attendance = _fpi_v201_week_attendance_summary(df, week)
     return {
         "ratio": ratio,
         "ratio_map": ratio_map,
+        "attendance": attendance,
         "periodization": ctx.get("periodization_type", "Nincs elég adat"),
         "summary": ctx.get("summary", ""),
     }
@@ -8492,6 +8799,16 @@ def _fpi_gps_only_conclusions_v95(ctx: Dict[str, object], priorities: List[dict]
     out = []
     gps = _fpi_gps_week_metrics_v95(ctx, week)
     ratio = gps.get("ratio")
+    attendance = gps.get("attendance", {}) or {}
+    team_sessions = int(attendance.get("team_training_sessions", 0) or 0)
+    mean_availability = attendance.get("mean_availability_pct", np.nan)
+    below_75 = int(attendance.get("below_75_players", 0) or 0)
+    if team_sessions > 0 and pd.notna(mean_availability):
+        out.append(
+            f"Edzésrészvétel: heti {team_sessions} csapatedzés, "
+            f"átlagosan {mean_availability:.0f}% játékosrészvétel; "
+            f"{below_75} játékos 75% alatt."
+        )
     if isinstance(ratio, pd.DataFrame) and not ratio.empty:
         for _, r in ratio.iterrows():
             mut = str(r.get("Mutató", ""))
