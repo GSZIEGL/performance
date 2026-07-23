@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V202_ADAPTIVE_GPS_MODES_2026_07_23"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V203_BARIN_MULTISHEET_IMPORT_2026_07_23"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -12221,7 +12221,9 @@ def render_fpi_clean_workspace_v101() -> None:
     with st.expander("📥 GPS fájlok feltöltése", expanded=True):
         st.caption(
             "A fájlok tartalmazhatnak egyetlen edzést/meccset vagy teljes időszakot. "
-            "Több Excel/CSV egyszerre is kijelölhető, illetve ZIP-ben több tíz vagy száz fájl is feltölthető."
+            "A Barin/Brainsports többmunkalapos exportból az FPI automatikusan kiválasztja "
+            "a csapatszintű sessionlapokat. Több Excel/CSV egyszerre is kijelölhető, "
+            "illetve ZIP-ben több tíz vagy száz fájl is feltölthető."
         )
         gps_a, gps_b, gps_c = st.columns(3)
         with gps_a:
@@ -13194,20 +13196,138 @@ def _fpi_prepare_brainsports_v143(
     if not candidates:
         return pd.DataFrame()
 
-    # V164: az összes játékost tartalmazó aggregált lapot válasszuk.
-    ranked_candidates = []
+    # V203: Barin / Brainsports többmunkalapos export.
+    #
+    # A teljes munkafüzetből csak a csapatszintű, egy sessiont tartalmazó
+    # főlapokat fűzzük össze. TS/TI, Overall és játékosonkénti lapok kimaradnak.
+    session_candidates = []
+    skipped_sheet_names = []
+    candidate_details = []
+
     for sheet_name, candidate_table in candidates:
-        low = str(sheet_name).lower().strip()
-        player_rows = max(0, len(candidate_table))
-        helper_penalty = 10000 if low.startswith(("ts ", "ti ")) else 0
-        single_player_penalty = 5000 if player_rows <= 2 else 0
-        main_bonus = -2000 if low.startswith("main table") else 0
-        ranked_candidates.append(
-            (helper_penalty + single_player_penalty + main_bonus - player_rows,
-             sheet_name, candidate_table)
+        low = str(sheet_name).strip().lower()
+        norm_cols = {
+            clean_col_name(c).lower(): c
+            for c in candidate_table.columns
+        }
+
+        name_col = next(
+            (original for normalized, original in norm_cols.items()
+             if normalized == "name" or normalized.endswith(" name")),
+            None,
         )
-    ranked_candidates.sort(key=lambda x: x[0])
-    table = ranked_candidates[0][2].copy()
+        split_col = next(
+            (original for normalized, original in norm_cols.items()
+             if "split" in normalized),
+            None,
+        )
+
+        if name_col is not None:
+            names = (
+                candidate_table[name_col]
+                .dropna()
+                .astype(str)
+                .str.strip()
+            )
+            names = names[
+                ~names.str.lower().isin(
+                    {"", "nan", "none", "overall", "name", "average", "avg"}
+                )
+            ]
+            unique_players = int(names.nunique())
+        else:
+            unique_players = 0
+
+        if split_col is not None:
+            splits = (
+                candidate_table[split_col]
+                .dropna()
+                .astype(str)
+                .str.strip()
+            )
+            splits = splits[
+                ~splits.str.lower().isin(
+                    {"", "nan", "none", "split", "session", "average", "avg"}
+                )
+            ]
+            unique_splits = int(splits.nunique())
+            split_values = splits.str.lower().unique().tolist()
+        else:
+            unique_splits = 0
+            split_values = []
+
+        helper_name = (
+            low.startswith(("ts ", "ti "))
+            or low in {"overall", "summary", "összesítés", "osszesites"}
+        )
+        overall_content = any(
+            value in {"overall", "summary", "összesítés", "osszesites"}
+            for value in split_values
+        )
+        team_session_sheet = (
+            not helper_name
+            and not overall_content
+            and unique_players >= 3
+            and unique_splits == 1
+        )
+
+        candidate_details.append({
+            "sheet": str(sheet_name),
+            "players": unique_players,
+            "sessions": unique_splits,
+            "selected": team_session_sheet,
+        })
+
+        if team_session_sheet:
+            frame = candidate_table.copy()
+            frame["_fpi_source_sheet"] = str(sheet_name)
+            session_candidates.append((sheet_name, frame))
+        else:
+            skipped_sheet_names.append(str(sheet_name))
+
+    # Kompatibilis fallback az egyszerű, egylapos Brainsports exportokra.
+    if session_candidates:
+        table = pd.concat(
+            [frame for _, frame in session_candidates],
+            ignore_index=True,
+            sort=False,
+        )
+        selected_sheet_names = [str(name) for name, _ in session_candidates]
+        selection_mode = "multi_session"
+    else:
+        ranked_candidates = []
+        for sheet_name, candidate_table in candidates:
+            low = str(sheet_name).lower().strip()
+            norm_cols = {
+                clean_col_name(c).lower(): c
+                for c in candidate_table.columns
+            }
+            name_col = next(
+                (original for normalized, original in norm_cols.items()
+                 if normalized == "name" or normalized.endswith(" name")),
+                None,
+            )
+            unique_players = (
+                int(candidate_table[name_col].dropna().astype(str).nunique())
+                if name_col is not None else 0
+            )
+            overall_penalty = 10000 if low in {
+                "overall", "summary", "összesítés", "osszesites"
+            } else 0
+            single_player_penalty = 5000 if unique_players <= 2 else 0
+            ranked_candidates.append(
+                (
+                    overall_penalty + single_player_penalty - unique_players,
+                    sheet_name,
+                    candidate_table,
+                )
+            )
+        ranked_candidates.sort(key=lambda item: item[0])
+        selected_name = ranked_candidates[0][1]
+        table = ranked_candidates[0][2].copy()
+        table["_fpi_source_sheet"] = str(selected_name)
+        selected_sheet_names = [str(selected_name)]
+        selection_mode = "legacy_fallback"
 
     def col_like(*needles):
         for c in table.columns:
@@ -13292,7 +13412,30 @@ def _fpi_prepare_brainsports_v143(
             )
     if c_hr:
         out["Heart Exertion"] = table[c_hr]
-    return out.dropna(how="all").reset_index(drop=True)
+
+    # Ismételt belső fejléc- és összesítő sorok eltávolítása.
+    if "Player Name" in out.columns:
+        player_text = out["Player Name"].astype(str).str.strip().str.lower()
+        out = out[
+            ~player_text.isin(
+                {"", "nan", "none", "name", "average", "avg", "overall"}
+            )
+        ].copy()
+
+    result = out.dropna(how="all").reset_index(drop=True)
+    result.attrs["fpi_barin_import"] = {
+        "selection_mode": selection_mode,
+        "workbook_sheet_count": len(sheets),
+        "candidate_sheet_count": len(candidates),
+        "selected_sheet_count": len(selected_sheet_names),
+        "selected_sheets": selected_sheet_names,
+        "skipped_sheet_count": max(0, len(sheets) - len(selected_sheet_names)),
+        "skipped_sheets": skipped_sheet_names,
+        "detected_sessions": int(
+            result["Session Name"].dropna().astype(str).nunique()
+        ) if "Session Name" in result.columns else len(selected_sheet_names),
+    }
+    return result
 
 
 def _fpi_prepare_playertek_v143(
@@ -13984,15 +14127,30 @@ def _fpi_read_single_gps_file_v143(
                 prepared = _fpi_prepare_catapult_v143(raw_sheets, forced_type, name)
 
         if not prepared.empty:
+            barin_meta = dict(prepared.attrs.get("fpi_barin_import", {}) or {})
             prepared, v200_report = _fpi_v200_universal_postprocess(
                 prepared,
                 provider=provider,
                 file_name=name,
             )
             key = f"{Path(name).stem}__{v200_report.get('provider', provider)}"
-            return {key: prepared}, [
-                _fpi_v200_report_row(name, v200_report, status="OK")
-            ]
+            report_row = _fpi_v200_report_row(name, v200_report, status="OK")
+
+            if provider == "Brainsports" and barin_meta:
+                selected_count = int(barin_meta.get("selected_sheet_count", 0) or 0)
+                total_count = int(barin_meta.get("workbook_sheet_count", 0) or 0)
+                detected_sessions = int(barin_meta.get("detected_sessions", 0) or 0)
+                selected_names = barin_meta.get("selected_sheets", []) or []
+                preview = ", ".join(str(x) for x in selected_names[:5])
+                if len(selected_names) > 5:
+                    preview += f", +{len(selected_names) - 5} további"
+                report_row["Megjegyzés"] += (
+                    f" | Barin multi-sheet: {selected_count}/{total_count} lap kiválasztva"
+                    f" | Felismert sessionök: {detected_sessions}"
+                    + (f" | Használt lapok: {preview}" if preview else "")
+                )
+
+            return {key: prepared}, [report_row]
 
         # Polar esetén az üres eredmény ne vesszen el néma Smart Mapper fallbackben.
         if provider == "Polar Team Pro":
