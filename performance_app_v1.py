@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V206_FULL_PACKAGE_ANALYSIS_2026_07_23"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V300_UNIFIED_CORE_ENGINE_2026_07_23"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7396,9 +7396,255 @@ def _fpi_latest_week(df: pd.DataFrame, selected_week: Optional[str] = None) -> O
     return weeks[-1] if weeks else selected_week
 
 
+
+# =============================================================================
+# V300 – Unified Core Engine
+# =============================================================================
+_FPI_V300_HALF_RE = re.compile(
+    r"(?:^|\b)(?:first|second|1st|2nd|1|2)\s*[-_. ]*(?:half|felido|felidő)\b"
+    r"|\b(?:half|felido|felidő)\s*[-_. ]*(?:1|2)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _fpi_v300_is_half(value: object) -> bool:
+    return bool(_FPI_V300_HALF_RE.search(_norm_mapping_text(str(value or ""))))
+
+
+def _fpi_v300_base_match_name(value: object) -> str:
+    text = str(value or "")
+    text = _FPI_V300_HALF_RE.sub("", text)
+    text = re.sub(r"\s+", " ", text).strip(" -_")
+    return text or "Meccs"
+
+
+def _fpi_v300_iso_week(series: pd.Series) -> pd.Series:
+    dt = pd.to_datetime(series, errors="coerce")
+    iso = dt.dt.isocalendar()
+    result = pd.Series(pd.NA, index=series.index, dtype="object")
+    ok = dt.notna()
+    result.loc[ok] = (
+        iso.loc[ok, "year"].astype(str)
+        + "-W"
+        + iso.loc[ok, "week"].astype(str).str.zfill(2)
+    )
+    return result
+
+
+def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    df = _fpi_to_standard_if_needed(data)
+    if df is None or df.empty:
+        return pd.DataFrame(), {
+            "sessions": 0, "training_sessions": 0,
+            "match_phase_sessions": 0, "match_events": 0,
+            "weeks": [], "date_min": None, "date_max": None,
+            "deduplicated_rows": 0,
+        }
+
+    out = df.copy()
+    for c in ["player_name", "session_name", "session_type", "start_time"]:
+        if c not in out.columns:
+            out[c] = pd.NA
+
+    out["start_time"] = pd.to_datetime(out["start_time"], errors="coerce")
+    out["session_name"] = out["session_name"].fillna("").astype(str).str.strip()
+
+    half_mask = out["session_name"].map(_fpi_v300_is_half)
+    out.loc[half_mask, "session_type"] = "Meccs"
+    out["session_type"] = out["session_type"].apply(normalize_session_type)
+    out["session_type"] = out["session_type"].where(
+        out["session_type"].isin(["Edzés", "Meccs"]), "Edzés"
+    )
+
+    # A hét mindig a tényleges sessiondátumból készül.
+    out["week"] = _fpi_v300_iso_week(out["start_time"])
+    out["session_date"] = out["start_time"].dt.normalize()
+    out["session_id"] = (
+        out["start_time"].dt.floor("min").astype(str)
+        + "|"
+        + out["session_name"].map(_norm_mapping_text)
+        + "|"
+        + out["session_type"].astype(str)
+    )
+
+    match_mask = out["session_type"].eq("Meccs")
+    out["match_event_id"] = pd.NA
+    out.loc[match_mask, "match_event_id"] = (
+        out.loc[match_mask, "session_date"].astype(str)
+        + "|"
+        + out.loc[match_mask, "session_name"].map(_fpi_v300_base_match_name).map(_norm_mapping_text)
+    )
+
+    before = len(out)
+    out, dedup = _fpi_v205_deduplicate_overlapping_exports(out)
+    removed = int(dedup.get("removed", before - len(out)))
+
+    # Deduplikálás után stabil kulcsok.
+    out["start_time"] = pd.to_datetime(out["start_time"], errors="coerce")
+    out["week"] = _fpi_v300_iso_week(out["start_time"])
+    out["session_date"] = out["start_time"].dt.normalize()
+    out["session_id"] = (
+        out["start_time"].dt.floor("min").astype(str)
+        + "|"
+        + out["session_name"].map(_norm_mapping_text)
+        + "|"
+        + out["session_type"].astype(str)
+    )
+    match_mask = out["session_type"].eq("Meccs")
+    out["match_event_id"] = pd.NA
+    out.loc[match_mask, "match_event_id"] = (
+        out.loc[match_mask, "session_date"].astype(str)
+        + "|"
+        + out.loc[match_mask, "session_name"].map(_fpi_v300_base_match_name).map(_norm_mapping_text)
+    )
+
+    starts = out["start_time"].dropna()
+    weeks = sorted(
+        out["week"].dropna().astype(str).unique().tolist(),
+        key=_fpi_week_sort_key_v99,
+    )
+    report = {
+        "sessions": int(out["session_id"].dropna().nunique()),
+        "training_sessions": int(
+            out.loc[out["session_type"].eq("Edzés"), "session_id"].dropna().nunique()
+        ),
+        "match_phase_sessions": int(
+            out.loc[out["session_type"].eq("Meccs"), "session_id"].dropna().nunique()
+        ),
+        "match_events": int(
+            out.loc[out["session_type"].eq("Meccs"), "match_event_id"].dropna().nunique()
+        ),
+        "weeks": weeks,
+        "date_min": starts.min() if not starts.empty else None,
+        "date_max": starts.max() if not starts.empty else None,
+        "deduplicated_rows": removed,
+    }
+    out.attrs["fpi_v300_master_report"] = report
+    return out, report
+
+
+def _fpi_v300_match_reference(master: pd.DataFrame) -> Dict[str, object]:
+    if master is None or master.empty:
+        return {"available": False}
+    matches = master[master["session_type"].eq("Meccs")].copy()
+    if matches.empty:
+        return {"available": False}
+
+    metrics = [
+        c for c in [
+            "duration_min", "total_distance", "hsr_distance",
+            "sprint_distance", "sprints", "high_efforts", "training_load"
+        ] if c in matches.columns
+    ]
+    for c in metrics:
+        matches[c] = pd.to_numeric(matches[c], errors="coerce")
+
+    player_match = matches.groupby(
+        ["match_event_id", "player_name"], dropna=False
+    )[metrics].sum(min_count=1).reset_index()
+
+    med = {}
+    for c in metrics:
+        vals = player_match[c].dropna()
+        med[c] = float(vals.median()) if not vals.empty else None
+
+    return {
+        "available": True,
+        "match_events": int(matches["match_event_id"].dropna().nunique()),
+        "player_match_rows": int(len(player_match)),
+        "metrics": med,
+    }
+
+
+def _fpi_v300_training_match_ratios(
+    analysis_df: pd.DataFrame,
+    master_df: pd.DataFrame,
+) -> pd.DataFrame:
+    ref = _fpi_v300_match_reference(master_df)
+    if not ref.get("available"):
+        return pd.DataFrame()
+
+    training = analysis_df[analysis_df["session_type"].eq("Edzés")].copy()
+    if training.empty:
+        return pd.DataFrame()
+
+    training["_v300_event"] = _fpi_v202_event_key(training)
+    rows = []
+    for label, col in [
+        ("Össztáv", "total_distance"),
+        ("HSR", "hsr_distance"),
+        ("Sprint táv", "sprint_distance"),
+        ("High Efforts", "high_efforts"),
+        ("Load", "training_load"),
+    ]:
+        if col not in training.columns:
+            continue
+        training[col] = pd.to_numeric(training[col], errors="coerce")
+        player_total = training.groupby("player_name")[col].sum(min_count=1)
+        event_player = training.groupby(["_v300_event", "player_name"])[col].sum(min_count=1)
+        event_medians = event_player.groupby(level=0).median() if not event_player.empty else pd.Series(dtype=float)
+        match_value = ref["metrics"].get(col)
+        weekly = float(player_total.median()) if player_total.notna().any() else None
+        session_avg = float(event_medians.median()) if not event_medians.empty else None
+        rows.append({
+            "Mutató": label,
+            "Heti edzés / meccs": (
+                weekly / match_value * 100
+                if weekly is not None and match_value not in {None, 0} else None
+            ),
+            "Edzésátlag / meccs": (
+                session_avg / match_value * 100
+                if session_avg is not None and match_value not in {None, 0} else None
+            ),
+            "Meccsreferencia": match_value,
+        })
+    return pd.DataFrame(rows)
+
+
+def _fpi_v300_microcycle_plan(master: pd.DataFrame, analysis: pd.DataFrame) -> pd.DataFrame:
+    match_dates = pd.to_datetime(
+        master.loc[master["session_type"].eq("Meccs"), "start_time"],
+        errors="coerce",
+    ).dropna().sort_values()
+    analysis_max = pd.to_datetime(analysis.get("start_time"), errors="coerce").max()
+
+    match_day = pd.NaT
+    if pd.notna(analysis_max) and not match_dates.empty:
+        future = match_dates[match_dates.dt.normalize() >= analysis_max.normalize()]
+        match_day = future.iloc[0].normalize() if not future.empty else match_dates.iloc[-1].normalize()
+    elif not match_dates.empty:
+        match_day = match_dates.iloc[-1].normalize()
+
+    manual = st.session_state.get("fpi_manual_match_date_v300")
+    if pd.isna(match_day) and manual:
+        match_day = pd.to_datetime(manual, errors="coerce")
+
+    if pd.isna(match_day):
+        return pd.DataFrame()
+
+    plan = {
+        4: ("Fő terhelési nap", "Volumen + HSR + kontrollált sprint", "A hét legnagyobb ingerét itt add."),
+        3: ("Specifikus intenzitás", "Rövid meccsszerű blokkok", "Magas minőség, mérsékelt volumen."),
+        2: ("Terheléscsökkentés", "Rövid gyorsasági érintés", "Ne halmozz új fáradtságot."),
+        1: ("Aktiváció", "Reakció, mobilitás, döntési sebesség", "A frissesség az elsődleges."),
+    }
+    rows = []
+    for md in [4, 3, 2, 1]:
+        focus, tactical, note = plan[md]
+        day = match_day - pd.Timedelta(days=md)
+        rows.append({
+            "Dátum": day.strftime("%Y-%m-%d"),
+            "Nap": f"MD-{md}",
+            "Erőnléti fókusz": focus,
+            "Taktikai fókusz": tactical,
+            "Edzői megjegyzés": note,
+        })
+    return pd.DataFrame(rows)
+
+
 def _fpi_report_context(data: pd.DataFrame, selected_week: Optional[str] = None, playstyle: str = "Kiegyensúlyozott") -> Dict[str, object]:
     """Riportok közös számítási magja. Ugyanezt használja a minta PDF és az éles PDF."""
-    df = _fpi_to_standard_if_needed(data)
+    df, master_report_v300 = _fpi_v300_master_dataset(data)
     week = _fpi_latest_week(df, selected_week)
     if df.empty or not week:
         return {"df": df, "selected_week": week, "error": "Nincs riportképes adat."}
@@ -7446,6 +7692,14 @@ def _fpi_report_context(data: pd.DataFrame, selected_week: Optional[str] = None,
             "weekly": weekly,
             "player_week": player_week,
             "fingerprints": fingerprints,
+            "master_report_v300": master_report_v300,
+            "match_reference_v300": _fpi_v300_match_reference(df),
+            "training_match_ratios_v300": _fpi_v300_training_match_ratios(
+                df[df["week"].astype(str).eq(str(week))].copy(), df
+            ),
+            "microcycle_plan_v300": _fpi_v300_microcycle_plan(
+                df, df[df["week"].astype(str).eq(str(week))].copy()
+            ),
         }
     except Exception as exc:
         return {"df": df, "selected_week": week, "error": str(exc)}
@@ -10628,15 +10882,22 @@ def build_fpi_gps_only_pdf_bytes(
         report_data_v205 = _fpi_to_standard_if_needed(data)
         if report_data_v205 is None or report_data_v205.empty:
             return None
-        report_data_v205, _ = _fpi_v205_deduplicate_overlapping_exports(report_data_v205)
+        report_data_v205, master_report_period_v300 = _fpi_v300_master_dataset(report_data_v205)
         period_label_v205 = _fpi_v205_period_label(report_data_v205)
         report_data_v205 = report_data_v205.copy()
+        # Teljes időszakhoz egy ideiglenes, közös riportablak készül,
+        # miközben az eredeti ISO-hetek megmaradnak a master metaadatban.
+        report_data_v205["_fpi_original_week_v300"] = report_data_v205["week"]
         report_data_v205["week"] = "__FULL_PERIOD__"
         selected_week = "__FULL_PERIOD__"
 
     ctx=_fpi_report_context(report_data_v205,selected_week,playstyle)
     if ctx.get("error"): return None
     df=ctx["df"]; week=str(ctx["selected_week"]); readiness=int(ctx.get("readiness_score",70) or 70)
+    master_report_v300 = ctx.get("master_report_v300", {})
+    match_reference_v300 = ctx.get("match_reference_v300", {})
+    ratios_v300 = ctx.get("training_match_ratios_v300", pd.DataFrame())
+    microcycle_v300 = ctx.get("microcycle_plan_v300", pd.DataFrame())
     mode=_fpi_v204_context(df,week); quality=_fpi_v204_quality_gate(df,week); blocked=set(quality.get("blocked",set()))
     sessions=_fpi_v204_session_summary(df,week,blocked); players=_fpi_v204_player_period(df,week,blocked)
     aligned=_fpi_v204_aligned_comparison(df,week,blocked)
@@ -10672,8 +10933,13 @@ def build_fpi_gps_only_pdf_bytes(
         ),
         Spacer(1,.2*cm)
     ]
-    kpis=[[P('MÓD',head),P('SESSION',head),P('ADATMINŐSÉG',head),P('READINESS STÁTUSZ',head)],[P(mode.get('label',''),body),P(str(len(sessions)),body),P(quality.get('severity',''),body),P('előzetes / nem heti' if mode.get('code')!='full_microcycle' else f'{readiness}/100',body)]]
-    story += [tbl(kpis,[7.0*cm,5.0*cm,7.0*cm,8.7*cm],'#0F766E'),Spacer(1,.2*cm),section('1. Vezetői konklúziók')]
+    real_sessions_v300 = int(master_report_v300.get("sessions", len(sessions)) or len(sessions))
+    real_matches_v300 = int(master_report_v300.get("match_events", 0) or 0)
+    kpis=[
+        [P('MÓD',head),P('SESSION',head),P('MECCS',head),P('ADATMINŐSÉG',head),P('READINESS STÁTUSZ',head)],
+        [P(mode.get('label',''),body),P(str(real_sessions_v300),body),P(str(real_matches_v300),body),P(quality.get('severity',''),body),P('előzetes / nem heti' if mode.get('code')!='full_microcycle' else f'{readiness}/100',body)]
+    ]
+    story += [tbl(kpis,[6.1*cm,3.4*cm,3.0*cm,6.0*cm,9.2*cm],'#0F766E'),Spacer(1,.2*cm),section('1. Vezetői konklúziók')]
     story.append(tbl([[P('#',head),P('Konklúzió',head)]]+[[P(str(i),small),P(c,small)] for i,c in enumerate(conclusions,1)],[1.0*cm,26.7*cm]))
     if quality.get('issues'):
         story += [Spacer(1,.18*cm),section('Adatminőségi kapu – letiltott vagy korlátozott mutatók','#FEE2E2'),tbl([[P('Státusz',head),P('Jelzés',head)]]+[[P('FIGYELEM',small),P(x,small)] for x in quality['issues']],[3.2*cm,24.5*cm],'#991B1B')]
@@ -10690,14 +10956,46 @@ def build_fpi_gps_only_pdf_bytes(
     story.append(tbl([[P('Időtáv',head),P('Fókusz',head),P('Edzői döntés',head)]]+[[P(a,small),P(b,small),P(c,small)] for a,b,c in recs],[4.2*cm,7.0*cm,16.5*cm],'#312E81'))
     if mode.get('code')=='preseason_block': story += [Spacer(1,.15*cm),P('Felkészülés alatt az app nem használ automatikus MD-4–MD-1 tervet. A döntések alapja a 3–5–7 napos gördülő terhelés, a meccspercek, a regenerációs idő és a kereten belüli terheléskülönbség.',small)]
     elif mode.get('code')=='week_in_progress': story += [Spacer(1,.15*cm),P('A hét még nem lezárt: az alacsony heti összterhelés önmagában nem alulterhelés. A következő feltöltéssel a riport automatikusan frissül.',small)]
-    story += [PageBreak(),section('4. Időarányos trend – azonos hétközi pontig','#ECFDF5')]
+    if ratios_v300 is not None and not ratios_v300.empty:
+        story += [PageBreak(),section('4. Edzés–meccs referencia','#FEF3C7')]
+        ratio_rows=[[P(x,head) for x in ['Mutató','Heti edzés / meccs','Edzésátlag / meccs','Meccsreferencia']]]
+        for _,r in ratios_v300.iterrows():
+            def pct(v): return 'n.a.' if pd.isna(v) else f'{float(v):.0f}%'
+            def num(v): return 'n.a.' if pd.isna(v) else f'{float(v):.0f}'
+            ratio_rows.append([
+                P(str(r.get('Mutató','')),small),
+                P(pct(r.get('Heti edzés / meccs')),small),
+                P(pct(r.get('Edzésátlag / meccs')),small),
+                P(num(r.get('Meccsreferencia')),small)
+            ])
+        story.append(tbl(ratio_rows,[5.2*cm,6.0*cm,6.0*cm,6.0*cm],'#92400E'))
+        story += [Spacer(1,.12*cm),P(
+            f"A referencia {int(match_reference_v300.get('match_events',0) or 0)} "
+            "felismert meccseseményből készült; a két félidő játékosonként összeadódik.",
+            small
+        )]
+
+    if microcycle_v300 is not None and not microcycle_v300.empty:
+        story += [PageBreak(),section('5. Heti ciklusterv – erőnléti + taktikai cél','#EDE9FE')]
+        md_rows=[[P(x,head) for x in ['Dátum','Nap','Erőnléti fókusz','Taktikai fókusz','Edzői megjegyzés']]]
+        for _,r in microcycle_v300.iterrows():
+            md_rows.append([
+                P(str(r.get('Dátum','')),small),
+                P(str(r.get('Nap','')),small),
+                P(str(r.get('Erőnléti fókusz','')),small),
+                P(str(r.get('Taktikai fókusz','')),small),
+                P(str(r.get('Edzői megjegyzés','')),small)
+            ])
+        story.append(tbl(md_rows,[2.5*cm,1.8*cm,5.0*cm,7.2*cm,11.2*cm],'#312E81'))
+
+    story += [PageBreak(),section('6. Időarányos trend – azonos hétközi pontig','#ECFDF5')]
     if aligned.empty: story.append(P('Nincs elegendő korábbi dátumozott adat az időarányos összevetéshez.'))
     else:
         rows=[[P(c,head) for c in aligned.columns]]
         for _,r in aligned.tail(6).iterrows(): rows.append([P('—' if pd.isna(r[c]) else (f'{float(r[c]):.0f}' if isinstance(r[c],(int,float,np.integer,np.floating)) else str(r[c])),small) for c in aligned.columns])
         story.append(tbl(rows,[3.2*cm,4.3*cm,5.0*cm,4.5*cm,4.5*cm,4.5*cm],'#047857'))
         story.append(Spacer(1,.15*cm)); story.append(P('Folyamatban lévő hétnél csak azonos hétközi pontig (például szerda estig) gyűlt korábbi terheléshez hasonlítunk, nem teljes hetekhez.',small))
-    story += [PageBreak(),section('5. Játékosonkénti kumulált terhelés és eltérések','#E0F2FE')]
+    story += [PageBreak(),section('7. Játékosonkénti kumulált terhelés és eltérések','#E0F2FE')]
     if players.empty: story.append(P('Nincs játékosonként aggregálható mutató.'))
     else:
         display=players.copy(); metric_cols=[c for c in ['sessions','duration_min','total_distance','hsr_distance','sprint_distance','sprints','high_efforts','training_load'] if c in display.columns]
@@ -10706,7 +11004,7 @@ def build_fpi_gps_only_pdf_bytes(
         cols=['player_name']+metric_cols; rows=[[P(labels.get(c,c),head) for c in cols]]
         for _,r in display.iterrows(): rows.append([P(str(r[c]) if c=='player_name' else ('—' if pd.isna(r[c]) else f'{float(r[c]):.0f}'),small) for c in cols])
         widths=[5.8*cm]+[(21.9/len(metric_cols))*cm for _ in metric_cols]; story.append(tbl(rows,widths,'#0369A1'))
-    story += [PageBreak(),section('6. Beavatkozást igénylő játékosok','#FEE2E2')]
+    story += [PageBreak(),section('8. Beavatkozást igénylő játékosok','#FEE2E2')]
     flags=[]
     if not risk_df.empty:
         pc='Játékos' if 'Játékos' in risk_df else ('player_name' if 'player_name' in risk_df else risk_df.columns[0]); lc='Kockázati szint' if 'Kockázati szint' in risk_df else None; rc='Fő okok' if 'Fő okok' in risk_df else ('Fő ok' if 'Fő ok' in risk_df else None)
@@ -12472,7 +12770,8 @@ def render_fpi_clean_workspace_v101() -> None:
     if missing_clean:
         st.stop()
 
-    df_clean, dedup_v205_clean = _fpi_v205_deduplicate_overlapping_exports(df_clean)
+    df_clean, master_report_v300_clean = _fpi_v300_master_dataset(df_clean)
+    dedup_v205_clean = {"removed": int(master_report_v300_clean.get("deduplicated_rows", 0))}
     if dedup_v205_clean.get("removed", 0) > 0:
         st.caption(
             f"Átfedő exportok tisztítása: {dedup_v205_clean['removed']} duplikált "
@@ -12522,10 +12821,14 @@ def render_fpi_clean_workspace_v101() -> None:
     match_rows_v205 = df_clean.get("session_type", pd.Series("", index=df_clean.index)).astype(str).eq("Meccs")
     match_events_v205 = int(event_key_v205[match_rows_v205].nunique()) if len(event_key_v205) else 0
     training_events_v205 = max(0, imported_events_v205 - match_events_v205)
+    v300_summary = master_report_v300_clean
     st.success(
         f"Importált időszak: {import_period_v205} | "
-        f"Felismert események: {imported_events_v205} "
-        f"({training_events_v205} edzés/fizikai session, {match_events_v205} meccs/félidő-session)."
+        f"Valódi sessionök: {v300_summary.get('sessions', imported_events_v205)} | "
+        f"Edzések: {v300_summary.get('training_sessions', training_events_v205)} | "
+        f"Meccsesemények: {v300_summary.get('match_events', 0)} "
+        f"({v300_summary.get('match_phase_sessions', match_events_v205)} félidő/session) | "
+        f"ISO-hetek: {', '.join(v300_summary.get('weeks', [])) or 'n.a.'}"
     )
 
     # 2. Heti kontextus és saját csapat heti profil
@@ -12557,6 +12860,13 @@ def render_fpi_clean_workspace_v101() -> None:
             help="A kézi választás felülírja az automatikus felismerést."
         )
         st.session_state["fpi_season_phase_v205"] = season_phase_clean_v205
+        manual_match_date_v300 = st.date_input(
+            "Következő meccsnap",
+            value=None,
+            key="clean_manual_match_date_v300",
+            help="A meccsfájlokból nem felismerhető következő meccsnél add meg kézzel."
+        )
+        st.session_state["fpi_manual_match_date_v300"] = manual_match_date_v300
     with q8:
         selected_playstyle_clean = st.selectbox("Riport játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=_fpi_idx_v113(FPI_PLAYMODEL_OPTIONS_V112, user_defaults_clean.get("playmodel_profile", "Kiegyensúlyozott"), 4), key="clean_playstyle_v137")
 
