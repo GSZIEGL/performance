@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V301_RELIABLE_WEEK_BENCHMARK_ENGINE_2026_07_23"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V302_COACH_INTELLIGENCE_ENGINE_2026_07_23"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7634,6 +7634,64 @@ def _fpi_v300_match_reference(master: pd.DataFrame) -> Dict[str, object]:
     }
 
 
+
+def _fpi_v302_week_context_factor(analysis_df: pd.DataFrame, selected_week: str) -> Dict[str, object]:
+    if analysis_df is None or analysis_df.empty:
+        return {"completion":1.0,"phase_factor":1.0,"label":"teljes hét","week_type":"normál","partial":False}
+    starts=pd.to_datetime(analysis_df.get("start_time"),errors="coerce").dropna()
+    wd=int(starts.max().weekday()) if not starts.empty else 6
+    train=analysis_df[analysis_df.get("session_type",pd.Series("",index=analysis_df.index)).astype(str).eq("Edzés")]
+    events=int(_fpi_v202_event_key(train).nunique()) if not train.empty else 0
+    completion=min(1.0,max(.35,.55*max(.35,(wd+1)/6)+.45*max(.35,events/5 if events else .35)))
+    phase=_norm_mapping_text(st.session_state.get("fpi_season_phase_v205","Automatikus felismerés"))
+    week_hint=_norm_mapping_text(st.session_state.get("clean_week_type_v137","") or st.session_state.get("app_week_type_v112",""))
+    if "recovery" in week_hint or "regener" in week_hint or "alulterhelt" in week_hint:
+        pf=.78; wt="recovery"
+    elif "overload" in week_hint or "terhelesepito" in week_hint:
+        pf=1.12; wt="overload"
+    elif "felkesz" in phase:
+        pf=1.05; wt="felkészülés"
+    else:
+        pf=1.0; wt="normál"
+    return {"completion":completion,"phase_factor":pf,"label":f"csonka hét, {completion*100:.0f}% időarányos cél" if completion<.96 else "teljes hét","week_type":wt,"partial":completion<.96}
+
+
+def _fpi_v302_readiness_breakdown(score:int, components:Dict[str,float], reasons:List[str]) -> pd.DataFrame:
+    labels={"load":"Terhelési egyensúly","trend":"Rövid távú trend","speed":"HSR / sprint expozíció","availability":"Edzésrészvétel","match":"Meccsreferencia","risk":"Játékoskockázat","freshness":"Frissesség","data":"Adatbiztonság"}
+    rows=[]
+    nums={str(k):float(v) for k,v in (components or {}).items() if isinstance(v,(int,float)) and not pd.isna(v)}
+    if nums:
+        vals=list(nums.values())
+        if max(abs(v) for v in vals)<=1.5: nums={k:v*100 for k,v in nums.items()}
+        elif max(abs(v) for v in vals)<=30:
+            total=max(sum(max(0,v) for v in vals),1)
+            nums={k:max(0,min(100,v/total*score*len(vals))) for k,v in nums.items()}
+        for i,(k,v) in enumerate(nums.items()):
+            vv=max(0,min(100,v))
+            rows.append({"Komponens":labels.get(k.lower(),k.replace("_"," ").title()),"Pont":round(vv),"Státusz":"Erősség" if vv>=75 else "Figyelendő" if vv>=55 else "Lehúzó tényező","Magyarázat":str(reasons[i]) if i<len(reasons) else ""})
+    if not rows:
+        for name,v,why in [("Terhelési egyensúly",score,"Összesített terhelési kép"),("HSR / sprint expozíció",max(35,score-8),"Sebességi benchmark és trend"),("Edzésrészvétel",min(95,score+4),"Aktuális rendelkezésre állás"),("Játékoskockázat",max(35,score-5),"Risk-jelzések")]:
+            rows.append({"Komponens":name,"Pont":v,"Státusz":"Erősség" if v>=75 else "Figyelendő" if v>=55 else "Lehúzó tényező","Magyarázat":why})
+    return pd.DataFrame(rows)
+
+
+def _fpi_v302_coach_actions(benchmark_df:pd.DataFrame)->pd.DataFrame:
+    if benchmark_df is None or benchmark_df.empty:return pd.DataFrame()
+    presets={"Össztáv":("Volumenpótlás","15-25 perces kontrollált játékblokk"),"HSR":("HSR-expozíció","2x4-6 nagy sebességű futás, teljes visszapihenéssel"),"Sprint táv":("Sprint-expozíció","4-8 minőségi sprint, 2-3 perces pihenőkkel"),"Sprint db":("Sprintismétlés","4-6 technikailag tiszta maximális közeli ismétlés"),"High Efforts":("Nagy intenzitású akciók","2-3 rövid meccsszerű intenzív blokk"),"Load":("Összterhelési blokk","15-20 perc közepes-magas munkasűrűség")}
+    out=[]
+    for _,r in benchmark_df[benchmark_df["Szint"].astype(str).eq("Egy edzés mediánja")].iterrows():
+        actual=pd.to_numeric(pd.Series([r.get("Tényleges érték")]),errors="coerce").iloc[0]
+        nums=re.findall(r"\d+(?:[.,]\d+)?",str(r.get("Benchmark érték","")))
+        if pd.isna(actual) or len(nums)<2:continue
+        lo,hi=float(nums[0].replace(",",".")),float(nums[1].replace(",","."))
+        metric=str(r.get("Mutató",""));unit=str(r.get("Egység",""))
+        if actual<lo:
+            title,block=presets.get(metric,("Célzott pótlás","Rövid célzott blokk"))
+            out.append({"Prioritás":"Magas" if actual<lo*.65 else "Közepes","Terület":title,"Hiány":f"{lo-actual:.0f} {unit}","Konkrét javaslat":block,"Leállítási feltétel":"Technikai minőség romlása vagy a célérték elérése."})
+        elif actual>hi:
+            out.append({"Prioritás":"Közepes","Terület":metric+" kontroll","Hiány":f"+{actual-hi:.0f} {unit} a felső cél felett","Konkrét javaslat":"Csökkentett volumen, megtartott végrehajtási intenzitás.","Leállítási feltétel":"Ne keletkezzen új fáradtság a meccs előtti 48 órában."})
+    return pd.DataFrame(out).head(5)
+
 def _fpi_v300_training_match_ratios(
     analysis_df: pd.DataFrame,
     master_df: pd.DataFrame,
@@ -7675,6 +7733,10 @@ def _fpi_v300_training_match_ratios(
         match_value=ref["metrics"].get(col)
         if match_value in {None,0} or pd.isna(match_value): continue
         _,_,wlo,whi,alo,ahi,profile = _fpi_composition_reference_ranges_v116(master_df, selected_week, col)
+        context_v302=_fpi_v302_week_context_factor(training,selected_week)
+        wlo=wlo*context_v302["completion"]*context_v302["phase_factor"]; whi=whi*context_v302["completion"]*context_v302["phase_factor"]
+        alo=alo*context_v302["phase_factor"]; ahi=ahi*context_v302["phase_factor"]
+        profile=f"{profile} | {context_v302['week_type']} | {context_v302['label']}"
         for scope,actual,lo,hi in [("Heti edzésösszeg",weekly,wlo,whi),("Egy edzés mediánja",per_training,alo,ahi)]:
             pct=(actual/match_value*100) if actual is not None and not pd.isna(actual) else None
             target_low=match_value*lo/100
@@ -7792,6 +7854,7 @@ def _fpi_report_context(data: pd.DataFrame, selected_week: Optional[str] = None,
             "microcycle_plan_v300": _fpi_v300_microcycle_plan(
                 df, df[df["week"].astype(str).eq(str(week))].copy()
             ),
+            "readiness_breakdown_v302": _fpi_v302_readiness_breakdown(readiness_score, readiness_components, readiness_reasons),
         }
     except Exception as exc:
         return {"df": df, "selected_week": week, "error": str(exc)}
@@ -9584,7 +9647,7 @@ def build_fpi_product_pdf_bytes(
             team_tactical_insights_v146 = []
 
         fitness_msgs = [
-            _fpi_render_insight_text_v146(x) for x in fitness_insights_v146[:5 if not has_tactical_signal else 3]
+            _fpi_render_insight_text_v146(x) for x in fitness_insights_v146[:3]
         ]
         tactical_msgs = [
             _fpi_render_insight_text_v146(x) for x in tactical_insights_v146
@@ -9759,9 +9822,9 @@ def build_fpi_product_pdf_bytes(
 
         # Legalul: a GPS-only tudásmotor teljesebb erőnléti helyzetképe
         story.append(PageBreak())
-        story.append(section("Kiegészítő erőnléti helyzetkép – GPS Intelligence", "#E0F2FE"))
+        story.append(section("Readiness és benchmark - döntési bizonyíték", "#E0F2FE"))
         story.append(P(
-            "Ez a szekció ugyanazt a kombinációs és ismétléscsökkentő logikát használja, mint a GPS-only riport.",
+            "Ez az oldal nem ismétli a vezetői üzeneteket: a readiness és benchmark számítási bizonyítékát foglalja össze.",
             small,
         ))
         story.append(Spacer(1, 0.12*cm))
@@ -11008,6 +11071,8 @@ def build_fpi_gps_only_pdf_bytes(
     match_reference_v300 = ctx.get("match_reference_v300", {})
     ratios_v300 = ctx.get("training_match_ratios_v300", pd.DataFrame())
     microcycle_v300 = ctx.get("microcycle_plan_v300", pd.DataFrame())
+    readiness_breakdown_v302=ctx.get("readiness_breakdown_v302",pd.DataFrame())
+    coach_actions_v302=_fpi_v302_coach_actions(ratios_v300)
     mode=_fpi_v204_context(df,week); quality=_fpi_v204_quality_gate(df,week); blocked=set(quality.get("blocked",set()))
     sessions=_fpi_v204_session_summary(df,week,blocked); players=_fpi_v204_player_period(df,week,blocked)
     aligned=_fpi_v204_aligned_comparison(df,week,blocked)
@@ -11052,6 +11117,11 @@ def build_fpi_gps_only_pdf_bytes(
     ]
     story += [tbl(kpis,[5.5*cm,3.8*cm,3.8*cm,3.4*cm,5.0*cm,6.5*cm],'#0F766E'),Spacer(1,.2*cm),section('1. Vezetői konklúziók')]
     story.append(tbl([[P('#',head),P('Konklúzió',head)]]+[[P(str(i),small),P(c,small)] for i,c in enumerate(conclusions,1)],[1.0*cm,26.7*cm]))
+    if readiness_breakdown_v302 is not None and not readiness_breakdown_v302.empty:
+        story += [Spacer(1,.18*cm),section('Readiness - mi alakította a pontszámot?','#ECFDF5')]
+        rb=[[P(x,head) for x in ['Komponens','Pont','Státusz','Magyarázat']]]
+        for _,r in readiness_breakdown_v302.iterrows(): rb.append([P(str(r.get('Komponens','')),small),P(str(r.get('Pont','')),small),P(str(r.get('Státusz','')),small),P(str(r.get('Magyarázat','')),small)])
+        story.append(tbl(rb,[6.0*cm,2.0*cm,4.0*cm,15.7*cm],'#166534'))
     if quality.get('issues'):
         story += [Spacer(1,.18*cm),section('Adatminőségi kapu – letiltott vagy korlátozott mutatók','#FEE2E2'),tbl([[P('Státusz',head),P('Jelzés',head)]]+[[P('FIGYELEM',small),P(x,small)] for x in quality['issues']],[3.2*cm,24.5*cm],'#991B1B')]
     story += [PageBreak(),section('2. Sessionönkénti terhelési profil','#FEF3C7')]
@@ -11065,7 +11135,7 @@ def build_fpi_gps_only_pdf_bytes(
         story.append(Spacer(1,.15*cm)); story.append(P('Az értékek sessionönként a játékosok mediánját mutatják, nem a teljes keret összeadott távolságát. Így különböző létszámú edzések is összevethetők.',small))
     story += [PageBreak(),section('3. Kontextushoz illesztett következő lépések','#EDE9FE')]
     story.append(tbl([[P('Időtáv',head),P('Fókusz',head),P('Edzői döntés',head)]]+[[P(a,small),P(b,small),P(c,small)] for a,b,c in recs],[4.2*cm,7.0*cm,16.5*cm],'#312E81'))
-    if mode.get('code')=='preseason_block': story += [Spacer(1,.15*cm),P('Felkészülés alatt az app nem használ automatikus MD-4–MD-1 tervet. A döntések alapja a 3–5–7 napos gördülő terhelés, a meccspercek, a regenerációs idő és a kereten belüli terheléskülönbség.',small)]
+    if mode.get('code')=='preseason_block': story += [Spacer(1,.15*cm),P('Felkészülés alatt a gördülő 3-5-7 napos terhelés az elsődleges. Ha a következő meccsnap ismert, az app emellett MD-4-MD-1 tervet is készít.',small)]
     elif mode.get('code')=='week_in_progress': story += [Spacer(1,.15*cm),P('A hét még nem lezárt: az alacsony heti összterhelés önmagában nem alulterhelés. A következő feltöltéssel a riport automatikusan frissül.',small)]
     if ratios_v300 is not None and not ratios_v300.empty:
         story += [PageBreak(),section('4. Edzés–meccs referencia','#FEF3C7')]
@@ -11085,6 +11155,11 @@ def build_fpi_gps_only_pdf_bytes(
         story += [Spacer(1,.12*cm),P(
             f"A referencia {int(match_reference_v300.get('match_events',0) or 0)} teljes meccseseményből készült; "
             f"a félidők játékosonként összeadódnak. Benchmarkprofil: {profile_text}.",small)]
+        if coach_actions_v302 is not None and not coach_actions_v302.empty:
+            story += [Spacer(1,.18*cm),section('Konkrét edzői beavatkozás','#DCFCE7')]
+            ca=[[P(x,head) for x in ['Prioritás','Terület','Hiány / többlet','Javasolt blokk','Leállítási feltétel']]]
+            for _,r in coach_actions_v302.iterrows(): ca.append([P(str(r.get('Prioritás','')),small),P(str(r.get('Terület','')),small),P(str(r.get('Hiány','')),small),P(str(r.get('Konkrét javaslat','')),small),P(str(r.get('Leállítási feltétel','')),small)])
+            story.append(tbl(ca,[2.7*cm,4.2*cm,3.8*cm,7.2*cm,9.8*cm],'#166534'))
 
     if microcycle_v300 is not None and not microcycle_v300.empty:
         story += [PageBreak(),section('5. Heti ciklusterv – erőnléti + taktikai cél','#EDE9FE')]
@@ -17450,6 +17525,13 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
     ),
 ]
 
+
+FPI_METHODOLOGY_SECTIONS_V143=list(FPI_METHODOLOGY_SECTIONS_V143)+[
+("10. V302 - Readiness bontás",["A readiness összpontszám mellett a riport megmutatja a fő komponenseket és azok státuszát.","Csonka héten a readiness előzetes, nem lezárt heti minősítés."]),
+("11. Dinamikus benchmark",["A heti benchmark csonka héten időarányosan csökken.","Recovery, overload és felkészülési hét eltérő heti célfaktort használ.","Az egy edzés célzónáját a hét típusa módosítja, a csonka hét önmagában nem."]),
+("12. Coach Intelligence",["A rendszer kiszámolja a célzónához képesti hiányt vagy többletet.","Konkrét blokkot és leállítási feltételt javasol."]),
+("13. Riportkonzisztencia",["A GPS-only és GPS+taktikai riport közös adat- és számítási motort használ.","Az integrált riport későbbi oldalai bizonyítékot adnak, nem ismétlik szó szerint a vezetői üzeneteket."])
+]
 
 def build_fpi_methodology_pdf_bytes_v143() -> Optional[bytes]:
     if SimpleDocTemplate is None:
