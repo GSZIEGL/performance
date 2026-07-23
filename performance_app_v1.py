@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V201_TRAINING_ATTENDANCE_2026_07_20"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V202_ADAPTIVE_GPS_MODES_2026_07_23"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -2336,6 +2336,158 @@ def _fpi_v201_week_attendance_summary(
             ascending=[True, True],
         ).reset_index(drop=True),
     }
+
+
+# =========================================================
+# V202 - Adaptive GPS analysis modes
+# =========================================================
+def _fpi_v202_event_key(df: pd.DataFrame) -> pd.Series:
+    # Providerfüggetlen eseménykulcs edzéshez és meccshez.
+    if df is None or df.empty:
+        return pd.Series(dtype="object")
+    data = df.copy()
+    if "start_time" in data.columns:
+        start = pd.to_datetime(data["start_time"], errors="coerce")
+    elif "session_date" in data.columns:
+        start = pd.to_datetime(data["session_date"], errors="coerce")
+    else:
+        start = pd.Series(pd.NaT, index=data.index)
+    day = start.dt.strftime("%Y-%m-%d").fillna("")
+    minute = start.dt.floor("min").dt.strftime("%Y-%m-%d %H:%M").fillna("")
+    name = data.get("session_name", pd.Series("", index=data.index)).astype(str).map(_fpi_v200_norm)
+    kind = data.get("session_type", pd.Series("", index=data.index)).apply(_fpi_v200_session_kind)
+    generic = name.str.contains(
+        r"^period\b|^split\b|^drill\b|^quarter\b|^half\b|warm.?up|cool.?down|"
+        r"bemelegítés|bemelegites|levezetés|levezetes|első félidő|masodik felido|második félidő",
+        regex=True, na=False,
+    )
+    name = name.mask(generic, "session")
+    fallback = day + "|" + kind.astype(str) + "|" + name
+    key = minute.where(minute.ne(""), fallback)
+    return key.where(key.ne("||"), pd.Series(data.index.astype(str), index=data.index)).astype(str)
+
+
+def _fpi_v202_detect_analysis_mode(df: pd.DataFrame, selected_week: Optional[str] = None) -> Dict[str, object]:
+    # Felismeri az elemzés üzemmódját.
+    default = {
+        "code": "no_data", "label": "Nincs adat", "icon": "⚪",
+        "description": "Nincs elemezhető GPS-adat.", "confidence": "alacsony",
+        "selected_week": selected_week, "training_sessions": 0, "match_sessions": 0,
+        "total_sessions": 0, "is_complete_week": False, "is_provisional": True,
+    }
+    if df is None or df.empty or "week" not in df.columns:
+        return default
+
+    data = df.copy()
+    data["week"] = data["week"].astype(str)
+    weeks = [w for w in data["week"].dropna().unique().tolist() if str(w).strip()]
+    if not weeks:
+        return default
+    week = str(selected_week) if selected_week is not None else str(weeks[-1])
+    current = data[data["week"] == week].copy()
+    if current.empty:
+        return default
+
+    current["_kind_v202"] = current.get("session_type", "").apply(_fpi_v200_session_kind)
+    current["_event_v202"] = _fpi_v202_event_key(current)
+    event_table = current[["_event_v202", "_kind_v202"]].drop_duplicates()
+    training_n = int((event_table["_kind_v202"] == "training").sum())
+    match_n = int((event_table["_kind_v202"] == "match").sum())
+    total_n = int(event_table["_event_v202"].nunique())
+
+    all_data = data.copy()
+    all_data["_kind_v202"] = all_data.get("session_type", "").apply(_fpi_v200_session_kind)
+    has_match_history = bool((all_data["_kind_v202"] == "match").any())
+    other_match_weeks = set(all_data.loc[all_data["_kind_v202"] == "match", "week"].astype(str)) - {week}
+
+    # A kiválasztott hét tekinthető a legfrissebbnek ISO hét szerinti vagy adatbeli sorrend alapján.
+    try:
+        latest_week = sorted(weeks, key=lambda x: tuple(int(v) for v in re.findall(r"\d+", str(x))[-2:]))[-1]
+    except Exception:
+        latest_week = weeks[-1]
+    is_latest = str(week) == str(latest_week)
+
+    if total_n <= 1:
+        code, label, icon = "single_session", "Egyszeri edzéselemzés", "🟦"
+        desc = "Egyetlen esemény pillanatképe. Trend, heti readiness és meccsreferencia még nem véglegesíthető."
+        confidence = "magas"
+    elif training_n > 0 and match_n > 0:
+        code, label, icon = "full_microcycle", "Teljes mikrociklus", "🟢"
+        desc = f"{training_n} edzés és {match_n} meccs alapján teljes heti elemzés készül."
+        confidence = "magas"
+    elif training_n > 0 and match_n == 0 and is_latest and bool(other_match_weeks):
+        code, label, icon = "week_in_progress", "Folyamatban lévő hét", "🟡"
+        desc = f"Eddig {training_n} edzés érkezett, a heti meccs még nincs az adatok között. A heti eredmények ideiglenesek."
+        confidence = "magas"
+    elif training_n > 1 and match_n == 0:
+        code, label, icon = "training_block", "Edzésblokk-elemzés", "🔵"
+        desc = f"{training_n} edzés elemzése meccs nélkül. Edzésprofil és részvétel értékelhető, meccsarány nem."
+        confidence = "magas" if not has_match_history else "közepes"
+    elif match_n > 0 and training_n == 0:
+        code, label, icon = "match_only", "Meccselemzés", "🟣"
+        desc = f"{match_n} meccsesemény érkezett edzésadat nélkül. A mérkőzésterhelés értékelhető, a mikrociklus nem."
+        confidence = "magas"
+    else:
+        code, label, icon = "limited_data", "Korlátozott GPS-elemzés", "⚪"
+        desc = "Az adat elemezhető, de nem alkot teljes heti edzés–meccs struktúrát."
+        confidence = "közepes"
+
+    complete = code == "full_microcycle"
+    return {
+        "code": code, "label": label, "icon": icon, "description": desc,
+        "confidence": confidence, "selected_week": week,
+        "training_sessions": training_n, "match_sessions": match_n,
+        "total_sessions": total_n, "is_complete_week": complete,
+        "is_provisional": not complete,
+    }
+
+
+def _fpi_v202_mode_guidance(mode: Dict[str, object]) -> List[str]:
+    code = str((mode or {}).get("code", "no_data"))
+    guidance = {
+        "single_session": [
+            "A session KPI-k és játékos-összehasonlítás használható.",
+            "A trend, heti terhelésváltozás és readiness csak előzetes jelzés.",
+            "Meccsreferencia nem számítható meccsadat nélkül.",
+        ],
+        "training_block": [
+            "Az edzésprofil, intenzitás, volumen és részvétel értékelhető.",
+            "A rendszer nem kényszerít meccsreferenciát a számításokra.",
+            "A heti readiness meccskészültségi része korlátozott.",
+        ],
+        "week_in_progress": [
+            "Az aktuális heti értékek ideiglenesek, a hét további feltöltéseivel frissülnek.",
+            "Az alacsony heti összterhelést a rendszer nem bünteti automatikusan.",
+            "A meccs feltöltése után automatikusan teljes mikrociklus módra vált.",
+        ],
+        "full_microcycle": [
+            "A teljes heti trend, readiness, részvétel és meccsreferencia használható.",
+        ],
+        "match_only": [
+            "A meccsterhelés elemezhető, de az edzésfelkészítés nem értékelhető.",
+        ],
+    }
+    return guidance.get(code, ["Az eredményeket a rendelkezésre álló adatmennyiség szerint kell értelmezni."])
+
+
+def _fpi_v202_render_mode_card(df: pd.DataFrame, selected_week: str) -> Dict[str, object]:
+    mode = _fpi_v202_detect_analysis_mode(df, selected_week)
+    guide = _fpi_v202_mode_guidance(mode)
+    details = " · ".join([
+        f"Edzés: {mode.get('training_sessions', 0)}",
+        f"Meccs: {mode.get('match_sessions', 0)}",
+        f"Biztonság: {mode.get('confidence', 'n.a.')}",
+    ])
+    bullets = "".join(f"<li>{html.escape(str(x))}</li>" for x in guide)
+    st.markdown(
+        f'''<div class="fpi-clean-card" style="border-left:8px solid #0f766e;">
+        <div style="font-size:1.15rem;font-weight:950;">{mode.get('icon','')} {html.escape(str(mode.get('label','GPS-elemzés')))}</div>
+        <div style="margin-top:5px;color:#334155;"><b>{html.escape(details)}</b></div>
+        <div style="margin-top:8px;">{html.escape(str(mode.get('description','')))}</div>
+        <ul style="margin:8px 0 0 18px;">{bullets}</ul>
+        </div>''', unsafe_allow_html=True,
+    )
+    return mode
 
 def _fpi_v200_universal_postprocess(
     df: pd.DataFrame,
@@ -4715,8 +4867,18 @@ def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: s
     score = 75.0
     components = {}
     reasons = []
+    analysis_mode = _fpi_v202_detect_analysis_mode(df, selected_week)
+    mode_code = str(analysis_mode.get("code", "limited_data"))
+    incomplete_week = mode_code in {"single_session", "training_block", "week_in_progress", "match_only", "limited_data"}
 
     row = current_week.iloc[0]
+
+    if mode_code == "single_session":
+        reasons.append("Egyszeri edzés: a readiness csak előzetes, nem teljes heti minősítés.")
+    elif mode_code == "training_block":
+        reasons.append("Meccs nélküli edzésblokk: a meccskészültségi komponensek korlátozottak.")
+    elif mode_code == "week_in_progress":
+        reasons.append("Folyamatban lévő hét: a readiness a további edzések és a meccs feltöltésével frissül.")
 
     # 0. Edzésrészvétel / availability komponens
     attendance_summary = _fpi_v201_week_attendance_summary(df, selected_week)
@@ -4756,7 +4918,11 @@ def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: s
 
     # 1. Load trend komponens
     load_change = row.get("training_load_change", np.nan)
-    if pd.notna(load_change):
+    if incomplete_week:
+        components["load_trend"] = 55
+        if pd.notna(load_change):
+            reasons.append("A heti terhelésváltozás még nem minősített: a kiválasztott időszak nem teljes mikrociklus.")
+    elif pd.notna(load_change):
         if load_change > 0.25:
             score -= 12
             reasons.append("A heti terhelés jelentősen nőtt az előző héthez képest.")
@@ -4791,7 +4957,7 @@ def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: s
 
     # 3. Taper / MD-1 / MD-2 kontroll
     taper_component = 65
-    if not daily.empty and "MD" in daily["md_label"].values:
+    if not incomplete_week and not daily.empty and "MD" in daily["md_label"].values:
         md1 = daily[daily["md_label"] == "MD-1"]
         md2 = daily[daily["md_label"] == "MD-2"]
         md34 = daily[daily["md_label"].isin(["MD-3", "MD-4"])]
@@ -4853,6 +5019,9 @@ def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: s
                 score += 3
 
     components["playstyle_fit"] = max(0, min(100, playstyle_component))
+    components["analysis_completeness"] = 100 if mode_code == "full_microcycle" else (
+        65 if mode_code in {"training_block", "week_in_progress"} else 45
+    )
 
     # 5. Meccskészültség végső skála
     score = int(max(0, min(100, round(score))))
@@ -8544,7 +8713,9 @@ def _fpi_gps_week_metrics_v95(ctx: Dict[str, object], week: str) -> Dict[str, ob
                 "eval": r.get("Értékelés", ""),
             }
     attendance = _fpi_v201_week_attendance_summary(df, week)
+    analysis_mode = _fpi_v202_detect_analysis_mode(df, week)
     return {
+        "analysis_mode": analysis_mode,
         "ratio": ratio,
         "ratio_map": ratio_map,
         "attendance": attendance,
@@ -8798,6 +8969,9 @@ def _fpi_single_session_summary_table_v162(profile: Dict[str, object]) -> List[D
 def _fpi_gps_only_conclusions_v95(ctx: Dict[str, object], priorities: List[dict], readiness: int, week: str, limit: int = 6) -> List[str]:
     out = []
     gps = _fpi_gps_week_metrics_v95(ctx, week)
+    mode = gps.get("analysis_mode", {}) or {}
+    if mode:
+        out.append(f"Elemzési mód: {mode.get('label', 'GPS-elemzés')}. {mode.get('description', '')}")
     ratio = gps.get("ratio")
     attendance = gps.get("attendance", {}) or {}
     team_sessions = int(attendance.get("team_training_sessions", 0) or 0)
@@ -16773,6 +16947,11 @@ filtered = df[
     & (df["session_type"].isin(selected_types))
     & (df["player_name"].isin(selected_players))
 ]
+
+# V202: a teljes, nem játékos-/típusszűrt adat alapján felismerjük az elemzési módot.
+# Így egy kikapcsolt Meccs szűrő nem változtatja meg tévesen a hét státuszát.
+fpi_analysis_mode_v202 = _fpi_v202_render_mode_card(df, selected_week)
+st.session_state["fpi_analysis_mode_v202"] = fpi_analysis_mode_v202
 
 
 # -----------------------------------------------------------------------------
