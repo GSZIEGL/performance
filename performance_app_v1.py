@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V205_PERIOD_MATCH_PHASE_ENGINE_2026_07_23"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V206_FULL_PACKAGE_ANALYSIS_2026_07_23"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -3152,10 +3152,13 @@ def normalize_uploaded_sheet(raw_df: pd.DataFrame, sheet_name: str = "") -> pd.D
 
 
 def prepare_uploaded_sheets(sheets: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-    """Munkalapok normalizálása.
-    - Data/adat lap elsődleges és első helyen jelenik meg.
-    - Segédlapok nem kerülnek az összesített adatlapba.
-    - Ha van Data lap, az lesz a default; ha nincs, csak a valószínű adatlapok összesülnek.
+    """V206: munkalapok és többfájlos csomag normalizálása.
+
+    Elsődleges elemzési forrás:
+    - Teljes feltöltött csomag
+
+    Az egyedi fájlok/lapok csak diagnosztikai szűrésre maradnak elérhetők.
+    A teljes csomag minden releváns importált fájlt összefűz.
     """
     prepared: Dict[str, pd.DataFrame] = {}
     relevant_frames: List[pd.DataFrame] = []
@@ -3176,21 +3179,23 @@ def prepare_uploaded_sheets(sheets: Dict[str, pd.DataFrame]) -> Dict[str, pd.Dat
             data_like_names.append(name)
 
     final: Dict[str, pd.DataFrame] = {}
-    data_names = [n for n in prepared if is_data_sheet_name(n)]
-    if data_names:
-        # Data lap legyen az elsődleges: a felhasználó ezt látja elsőként.
-        for n in data_names:
-            final[n] = prepared[n]
-        # Az összesített lap csak releváns adatlapokból épül, segédlapok nélkül.
-        frames = [prepared[n] for n in data_like_names if n in prepared]
-        if frames:
-            final["Összes releváns adatlap"] = pd.concat(frames, ignore_index=True)
-    elif relevant_frames:
-        final["Összes releváns adatlap"] = pd.concat(relevant_frames, ignore_index=True)
 
+    # V206: a teljes releváns többfájlos csomag mindig az első elem.
+    frames = [prepared[n] for n in data_like_names if n in prepared]
+    if not frames:
+        frames = list(prepared.values())
+
+    if frames:
+        full_package = pd.concat(frames, ignore_index=True, sort=False)
+        final["Teljes feltöltött csomag"] = full_package
+        # Régi név kompatibilitása.
+        final["Összes releváns adatlap"] = full_package
+
+    # Egyedi források diagnosztikai/ellenőrzési célra.
     for name, df_sheet in prepared.items():
         if name not in final:
             final[name] = df_sheet
+
     return final if final else sheets
 
 @st.cache_data(show_spinner=False)
@@ -12368,6 +12373,8 @@ def render_fpi_clean_workspace_v101() -> None:
                 st.session_state.pop("clean_mapped_df_override_v105", None)
                 st.session_state.pop("clean_manual_mapping_v105", None)
                 st.session_state["clean_active_upload_signature_v105"] = clean_sig_v143
+                st.session_state.pop("clean_sheet_select_v206", None)
+                st.session_state["clean_single_source_mode_v206"] = False
 
             with st.expander("📦 Importellenőrzés", expanded=False):
                 if gps_report_v143 is not None and not gps_report_v143.empty:
@@ -12383,18 +12390,42 @@ def render_fpi_clean_workspace_v101() -> None:
 
             sheets_clean = prepare_uploaded_sheets(gps_raw_sheets_v143)
             sheet_names_clean = list(sheets_clean.keys())
-            preferred_names = ["Összes releváns adatlap", "Data", "Összegzés"]
-            default_sheet_idx_v143 = 0
-            for preferred in preferred_names:
-                if preferred in sheet_names_clean:
-                    default_sheet_idx_v143 = sheet_names_clean.index(preferred)
-                    break
-            selected_sheet_clean = st.selectbox(
-                "Feldolgozott adatforrás",
-                sheet_names_clean,
-                index=default_sheet_idx_v143,
-                key="clean_sheet_select_v143",
+
+            # V206: az elemzés alapértelmezetten és láthatóan a teljes csomagot használja.
+            package_name_v206 = (
+                "Teljes feltöltött csomag"
+                if "Teljes feltöltött csomag" in sheets_clean
+                else sheet_names_clean[0]
             )
+
+            analyze_single_source_v206 = st.checkbox(
+                "Csak egyetlen fájl/lap elemzése (ellenőrzési mód)",
+                value=False,
+                key="clean_single_source_mode_v206",
+                help=(
+                    "Alapállapotban az FPI az összes feltöltött edzés- és meccsfájlt "
+                    "együtt elemzi. Ezt csak hibakereséshez vagy egy fájl ellenőrzéséhez kapcsold be."
+                ),
+            )
+
+            if analyze_single_source_v206:
+                diagnostic_sources_v206 = [
+                    name for name in sheet_names_clean
+                    if name not in {"Teljes feltöltött csomag", "Összes releváns adatlap"}
+                ]
+                selected_sheet_clean = st.selectbox(
+                    "Ellenőrzött egyedi adatforrás",
+                    diagnostic_sources_v206 or [package_name_v206],
+                    index=0,
+                    key="clean_sheet_select_v206",
+                )
+            else:
+                selected_sheet_clean = package_name_v206
+                st.success(
+                    f"Elemzési forrás: teljes feltöltött csomag "
+                    f"({len(gps_raw_sheets_v143)} feldolgozott fájl/adatforrás együtt)."
+                )
+
             raw_df_clean = sheets_clean[selected_sheet_clean]
         except Exception as exc:
             st.error(f"Nem sikerült beolvasni a GPS adatokat: {exc}")
@@ -12447,6 +12478,29 @@ def render_fpi_clean_workspace_v101() -> None:
             f"Átfedő exportok tisztítása: {dedup_v205_clean['removed']} duplikált "
             f"játékos-session sor eltávolítva."
         )
+
+    if "_fpi_source_file" in df_clean.columns:
+        source_files_v206 = int(
+            df_clean["_fpi_source_file"].dropna().astype(str).nunique()
+        )
+    else:
+        source_files_v206 = len(gps_raw_sheets_v143) if "gps_raw_sheets_v143" in locals() else 1
+
+    if "_fpi_upload_group" in df_clean.columns:
+        source_groups_v206 = sorted(
+            df_clean["_fpi_upload_group"].dropna().astype(str).unique().tolist()
+        )
+    else:
+        source_groups_v206 = []
+
+    st.caption(
+        f"Aktív elemzési adatbázis: {source_files_v206} feltöltött fájl"
+        + (
+            f" | csoportok: {', '.join(source_groups_v206)}"
+            if source_groups_v206 else ""
+        )
+        + f" | {len(df_clean):,} tisztított játékos-session sor".replace(",", " ")
+    )
 
     df_clean = add_position_group(df_clean)
     with st.expander("🧤 Választók: kapusok / posztlogika", expanded=False):
@@ -14445,7 +14499,12 @@ def _fpi_read_many_gps_files_v143(
                 while unique in all_sheets:
                     unique = f"{key}_{counter}"
                     counter += 1
-                all_sheets[unique] = frame
+
+                frame_with_source = frame.copy()
+                frame_with_source["_fpi_source_file"] = name
+                frame_with_source["_fpi_source_key"] = unique
+                frame_with_source["_fpi_upload_group"] = forced_type or "Vegyes"
+                all_sheets[unique] = frame_with_source
             for row in report:
                 row["Import típus"] = forced_type or "Vegyes / fájlból"
                 rows.append(row)
