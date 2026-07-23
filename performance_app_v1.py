@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V204_CONTEXT_AWARE_REPORTING_2026_07_23"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V205_PERIOD_MATCH_PHASE_ENGINE_2026_07_23"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -10354,6 +10354,70 @@ def _fpi_gps_only_conclusions_v99(ctx: Dict[str, object], priorities: List[dict]
 
 
 
+def _fpi_v205_deduplicate_overlapping_exports(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int]]:
+    """Átfedő Barin exportokból érkező duplikált játékos-session sorok kiszűrése.
+
+    Azonosnak tekintjük a sort, ha ugyanaz:
+    - játékos,
+    - kezdési idő,
+    - session neve,
+    - session típusa.
+
+    A legteljesebb (legtöbb kitöltött KPI-t tartalmazó) sort tartjuk meg.
+    """
+    if df is None or df.empty:
+        return df, {"before": 0, "after": 0, "removed": 0}
+
+    out = df.copy()
+    before = len(out)
+    required = ["player_name", "start_time", "session_name", "session_type"]
+    if not all(c in out.columns for c in required):
+        return out, {"before": before, "after": before, "removed": 0}
+
+    out["_v205_start"] = pd.to_datetime(out["start_time"], errors="coerce").dt.round("min")
+    out["_v205_player"] = out["player_name"].astype(str).str.strip().str.casefold()
+    out["_v205_session"] = out["session_name"].astype(str).map(_norm_mapping_text)
+    out["_v205_type"] = out["session_type"].astype(str).map(_norm_mapping_text)
+
+    metric_cols = [
+        c for c in [
+            "duration_min", "total_distance", "distance_per_min",
+            "hsr_distance", "sprint_distance", "sprints",
+            "high_efforts", "training_load", "max_speed"
+        ] if c in out.columns
+    ]
+    if metric_cols:
+        out["_v205_quality"] = out[metric_cols].notna().sum(axis=1)
+    else:
+        out["_v205_quality"] = 0
+
+    key_cols = ["_v205_player", "_v205_start", "_v205_session", "_v205_type"]
+    valid_key = (
+        out["_v205_player"].ne("")
+        & out["_v205_start"].notna()
+        & out["_v205_session"].ne("")
+    )
+
+    keyed = out[valid_key].sort_values("_v205_quality", ascending=False)
+    keyed = keyed.drop_duplicates(subset=key_cols, keep="first")
+    unkeyed = out[~valid_key]
+    out = pd.concat([keyed, unkeyed], ignore_index=True, sort=False)
+    out = out.drop(columns=[
+        "_v205_start", "_v205_player", "_v205_session",
+        "_v205_type", "_v205_quality"
+    ], errors="ignore")
+
+    after = len(out)
+    return out, {"before": before, "after": after, "removed": before - after}
+
+
+def _fpi_v205_period_label(df: pd.DataFrame) -> str:
+    starts = pd.to_datetime(df.get("start_time", pd.Series(dtype="datetime64[ns]")), errors="coerce").dropna()
+    if starts.empty:
+        return "Teljes feltöltött időszak"
+    return f"{starts.min().strftime('%Y-%m-%d')} – {starts.max().strftime('%Y-%m-%d')}"
+
+
 def _fpi_v204_numeric(df: pd.DataFrame, col: str) -> pd.Series:
     if col not in df.columns:
         return pd.Series(np.nan, index=df.index, dtype=float)
@@ -10376,16 +10440,34 @@ def _fpi_v204_context(df: pd.DataFrame, week: str) -> Dict[str, object]:
     two_a_day = bool(events.groupby("_date204").size().gt(1).any()) if events["_date204"].notna().any() else False
     coach_week = str((_fpi_get_coach_context_v97() or {}).get("coach_week_type", "") or "")
     coach_norm = _norm_mapping_text(coach_week)
-    preseason = (
+    phase_override = str(
+        st.session_state.get("fpi_season_phase_v205", "Automatikus felismerés")
+        or "Automatikus felismerés"
+    )
+    phase_norm = _norm_mapping_text(phase_override)
+
+    auto_preseason = (
         "felkesz" in coach_norm or "preseason" in coach_norm
         or matches >= 2 or (two_a_day and trainings >= 3)
     )
+
+    if "felkesz" in phase_norm or "preseason" in phase_norm:
+        preseason = True
+        phase_source = "edző által megadva"
+    elif "verseny" in phase_norm or "bajnoki" in phase_norm:
+        preseason = False
+        phase_source = "edző által megadva"
+    else:
+        preseason = auto_preseason
+        phase_source = "automatikusan felismerve"
     if preseason:
         mode = dict(mode)
         mode.update({
             "code": "preseason_block", "label": "Felkészülési terhelési blokk", "icon": "🟠",
-            "description": f"{trainings} edzés és {matches} meccs rendszertelen felkészülési struktúrában. A riport gördülő terhelést és regenerációt értékel, nem klasszikus MD-hetet.",
-            "is_complete_week": False, "is_provisional": True, "confidence": "magas",
+            "description": f"{trainings} edzés és {matches} meccs felkészülési struktúrában ({phase_source}). A riport gördülő terhelést és regenerációt értékel, nem klasszikus MD-hetet.",
+            "is_complete_week": False, "is_provisional": True,
+            "confidence": "magas" if phase_source == "edző által megadva" else "közepes",
+            "phase_source": phase_source,
         })
     mode["two_a_day"] = two_a_day
     return mode
@@ -10528,10 +10610,26 @@ def build_fpi_gps_only_pdf_bytes(
     playstyle: str = "Kiegyensúlyozott",
     demo_label: str = "",
 ) -> Optional[bytes]:
-    """V204 kontextusérzékeny GPS-only PDF."""
-    if SimpleDocTemplate is None: return None
+    """V205 kontextusérzékeny GPS-only PDF heti vagy teljes időszakos módban."""
+    if SimpleDocTemplate is None:
+        return None
     from reportlab.platypus import PageBreak
-    ctx=_fpi_report_context(data,selected_week,playstyle)
+
+    period_mode_v205 = str(selected_week) == "__ALL__"
+    period_label_v205 = ""
+    report_data_v205 = data
+
+    if period_mode_v205:
+        report_data_v205 = _fpi_to_standard_if_needed(data)
+        if report_data_v205 is None or report_data_v205.empty:
+            return None
+        report_data_v205, _ = _fpi_v205_deduplicate_overlapping_exports(report_data_v205)
+        period_label_v205 = _fpi_v205_period_label(report_data_v205)
+        report_data_v205 = report_data_v205.copy()
+        report_data_v205["week"] = "__FULL_PERIOD__"
+        selected_week = "__FULL_PERIOD__"
+
+    ctx=_fpi_report_context(report_data_v205,selected_week,playstyle)
     if ctx.get("error"): return None
     df=ctx["df"]; week=str(ctx["selected_week"]); readiness=int(ctx.get("readiness_score",70) or 70)
     mode=_fpi_v204_context(df,week); quality=_fpi_v204_quality_gate(df,week); blocked=set(quality.get("blocked",set()))
@@ -10557,7 +10655,18 @@ def build_fpi_gps_only_pdf_bytes(
         t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor(bg)),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),font_bold),('GRID',(0,0),(-1,-1),.25,colors.HexColor('#CBD5E1')),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),6),('RIGHTPADDING',(0,0),(-1,-1),6),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#F8FAFC')])]))
         return t
     report_title={'single_session':'Egyszeri edzés – GPS-pillanatkép','training_block':'Edzésblokk-elemzés','week_in_progress':'Folyamatban lévő hét – adatok eddig','preseason_block':'Felkészülési terhelési blokk','full_microcycle':'Teljes mikrociklus – GPS-riport','match_only':'Meccsterhelési riport'}.get(mode.get('code'),'GPS-only teljesítményriport')
-    story += [P(demo_label or f'Football Performance Intelligence – {report_title}',title),P(f'Hét/időszak: {week} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime("%Y-%m-%d %H:%M")}',sub),P(f'Elemzési mód: {mode.get("label")} | Adatbiztonság: {quality.get("severity")} | Sessionök: {len(sessions)}',sub),Spacer(1,.2*cm)]
+    display_period_v205 = period_label_v205 if period_mode_v205 else week
+    story += [
+        P(demo_label or f'Football Performance Intelligence – {report_title}',title),
+        P(f'Hét/időszak: {display_period_v205} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime("%Y-%m-%d %H:%M")}',sub),
+        P(
+            f'Elemzési mód: {mode.get("label")} | Adatbiztonság: {quality.get("severity")} '
+            f'| Sessionök: {len(sessions)}'
+            + (' | Teljes feltöltött időszak' if period_mode_v205 else ''),
+            sub
+        ),
+        Spacer(1,.2*cm)
+    ]
     kpis=[[P('MÓD',head),P('SESSION',head),P('ADATMINŐSÉG',head),P('READINESS STÁTUSZ',head)],[P(mode.get('label',''),body),P(str(len(sessions)),body),P(quality.get('severity',''),body),P('előzetes / nem heti' if mode.get('code')!='full_microcycle' else f'{readiness}/100',body)]]
     story += [tbl(kpis,[7.0*cm,5.0*cm,7.0*cm,8.7*cm],'#0F766E'),Spacer(1,.2*cm),section('1. Vezetői konklúziók')]
     story.append(tbl([[P('#',head),P('Konklúzió',head)]]+[[P(str(i),small),P(c,small)] for i,c in enumerate(conclusions,1)],[1.0*cm,26.7*cm]))
@@ -12332,6 +12441,13 @@ def render_fpi_clean_workspace_v101() -> None:
     if missing_clean:
         st.stop()
 
+    df_clean, dedup_v205_clean = _fpi_v205_deduplicate_overlapping_exports(df_clean)
+    if dedup_v205_clean.get("removed", 0) > 0:
+        st.caption(
+            f"Átfedő exportok tisztítása: {dedup_v205_clean['removed']} duplikált "
+            f"játékos-session sor eltávolítva."
+        )
+
     df_clean = add_position_group(df_clean)
     with st.expander("🧤 Választók: kapusok / posztlogika", expanded=False):
         df_clean = render_keeper_controls_and_apply(df_clean)
@@ -12341,6 +12457,22 @@ def render_fpi_clean_workspace_v101() -> None:
 
     weeks_clean = sorted(df_clean["week"].dropna().astype(str).unique().tolist(), key=_fpi_week_sort_key_v99)
     players_clean = sorted(df_clean["player_name"].dropna().astype(str).unique().tolist()) if "player_name" in df_clean.columns else []
+
+    event_key_v205 = _fpi_v202_event_key(df_clean)
+    imported_events_v205 = int(event_key_v205.nunique()) if len(event_key_v205) else 0
+    start_v205 = pd.to_datetime(df_clean.get("start_time"), errors="coerce")
+    import_period_v205 = (
+        f"{start_v205.min().strftime('%Y-%m-%d')} – {start_v205.max().strftime('%Y-%m-%d')}"
+        if start_v205.notna().any() else "ismeretlen időszak"
+    )
+    match_rows_v205 = df_clean.get("session_type", pd.Series("", index=df_clean.index)).astype(str).eq("Meccs")
+    match_events_v205 = int(event_key_v205[match_rows_v205].nunique()) if len(event_key_v205) else 0
+    training_events_v205 = max(0, imported_events_v205 - match_events_v205)
+    st.success(
+        f"Importált időszak: {import_period_v205} | "
+        f"Felismert események: {imported_events_v205} "
+        f"({training_events_v205} edzés/fizikai session, {match_events_v205} meccs/félidő-session)."
+    )
 
     # 2. Heti kontextus és saját csapat heti profil
     _fpi_section_header_v113("2. Heti kontextus", "Csak a legfontosabb kérdések: ellenfél, meccsnap, referencia, heti edzésszám és a saját csapat heti alapprofilja.", "settings")
@@ -12363,6 +12495,14 @@ def render_fpi_clean_workspace_v101() -> None:
         n_train_clean = st.number_input("Heti edzések száma", min_value=0, max_value=7, value=int(user_defaults_clean.get("training_days", 4)), step=1, key="clean_n_train_v137")
     with q7:
         week_type_clean = st.selectbox("Heti cél", FPI_COACH_WEEK_OPTIONS_V112, index=_fpi_idx_v113(FPI_COACH_WEEK_OPTIONS_V112, user_defaults_clean.get("coach_week_type", "Fenntartó hét"), 1), key="clean_week_type_v137")
+        season_phase_clean_v205 = st.selectbox(
+            "Időszak típusa",
+            ["Automatikus felismerés", "Felkészülési időszak", "Versenyidőszak"],
+            index=0,
+            key="clean_season_phase_v205",
+            help="A kézi választás felülírja az automatikus felismerést."
+        )
+        st.session_state["fpi_season_phase_v205"] = season_phase_clean_v205
     with q8:
         selected_playstyle_clean = st.selectbox("Riport játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=_fpi_idx_v113(FPI_PLAYMODEL_OPTIONS_V112, user_defaults_clean.get("playmodel_profile", "Kiegyensúlyozott"), 4), key="clean_playstyle_v137")
 
@@ -12489,14 +12629,25 @@ def render_fpi_clean_workspace_v101() -> None:
         "Az integrált riport ugyanazokat a GPS-megállapításokat használja, mint a GPS-only, és ugyanazokat a taktikai megállapításokat, mint a Taktikai-only.",
         "export",
     )
-    safe_week_clean = _safe_filename_week(selected_week_clean)
+    date_span_clean_v205 = (
+        pd.to_datetime(analysis_clean.get("start_time"), errors="coerce").max()
+        - pd.to_datetime(analysis_clean.get("start_time"), errors="coerce").min()
+    ).days if "start_time" in analysis_clean.columns else 0
+    full_period_pdf_clean_v205 = st.checkbox(
+        "GPS-only PDF: a teljes feltöltött időszak elemzése",
+        value=bool(date_span_clean_v205 >= 14),
+        key="clean_full_period_pdf_v205",
+        help="Kikapcsolva csak a fent kiválasztott hét kerül a GPS-only PDF-be."
+    )
+    gps_pdf_period_clean_v205 = "__ALL__" if full_period_pdf_clean_v205 else selected_week_clean
+    safe_week_clean = "teljes_idoszak" if full_period_pdf_clean_v205 else _safe_filename_week(selected_week_clean)
     canonical_bundle_v156 = _fpi_canonical_report_bundle_v156(
         analysis_clean, selected_week_clean, selected_playstyle_clean, clean_tactical_context
     )
 
     ex1, ex2, ex3, ex4, ex5 = st.columns(5)
     with ex1:
-        gps_pdf_clean = build_fpi_gps_only_pdf_bytes(analysis_clean, selected_week_clean, selected_playstyle_clean)
+        gps_pdf_clean = build_fpi_gps_only_pdf_bytes(analysis_clean, gps_pdf_period_clean_v205, selected_playstyle_clean)
         if gps_pdf_clean is not None:
             st.download_button("⬇️ GPS-only", gps_pdf_clean, f"fpi_gps_only_{safe_week_clean}.pdf", "application/pdf", use_container_width=True, key="clean_export_gps_v156")
     with ex2:
@@ -13118,19 +13269,44 @@ def _fpi_detect_provider_v143(sheets: Dict[str, pd.DataFrame], file_name: str = 
 
 
 def _fpi_session_type_from_hint_v143(series: pd.Series, forced_type: Optional[str], file_name: str = "") -> pd.Series:
+    """V205: sessiontípus-felismerés Barin félidőlapokkal.
+
+    A következő minták mindig meccsnek számítanak:
+    - first half / second half
+    - 1st half / 2nd half
+    - 1 half / 2 half
+    - half1 / half2
+    - 1. félidő / 2. félidő
+    """
     if forced_type in {"Edzés", "Meccs"}:
         return pd.Series([forced_type] * len(series), index=series.index)
-    hint = str(file_name).lower()
-    if any(x in hint for x in ["match", "game", "meccs"]):
+
+    hint = _norm_mapping_text(str(file_name))
+    match_pattern = re.compile(
+        r"(?:^|\b)(?:first|second|1st|2nd|1|2)\s*[-_. ]*half\b"
+        r"|\bhalf\s*[-_. ]*(?:1|2)\b"
+        r"|\b(?:1|2)\s*[-_. ]*felido\b"
+        r"|\b(?:match|game|meccs|merkozes)\b",
+        flags=re.IGNORECASE,
+    )
+
+    if match_pattern.search(hint):
         default = "Meccs"
-    elif any(x in hint for x in ["training", "train", "edzes", "edzés"]):
+    elif any(x in hint for x in ["training", "train", "edzes"]):
         default = "Edzés"
     else:
         default = "Edzés"
+
     if series is None:
         return pd.Series(dtype="object")
-    out = series.astype(str).apply(normalize_session_type)
-    out = out.where(out.isin(["Edzés", "Meccs"]), default)
+
+    raw = series.astype(str)
+    normalized = raw.apply(normalize_session_type)
+    normalized_hint = raw.apply(_norm_mapping_text)
+    half_or_match = normalized_hint.str.contains(match_pattern, regex=True, na=False)
+
+    out = normalized.where(normalized.isin(["Edzés", "Meccs"]), default)
+    out = out.mask(half_or_match, "Meccs")
     return out
 
 
@@ -17060,6 +17236,14 @@ with st.expander("⚙️ Meccskontextus és edzői beállítások", expanded=Fal
     reference_age_v97 = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=0, key="app_ref_age_v112")
     reference_level_v97 = st.selectbox("Szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=1, key="app_ref_level_v112")
     coach_week_type_v97 = st.selectbox("Mi a hét célja?", FPI_COACH_WEEK_OPTIONS_V112, index=1, key="app_week_type_v112")
+    season_phase_v205 = st.selectbox(
+        "Időszak típusa",
+        ["Automatikus felismerés", "Felkészülési időszak", "Versenyidőszak"],
+        index=0,
+        key="app_season_phase_v205",
+        help="A kézi választás felülírja az automatikus felismerést."
+    )
+    st.session_state["fpi_season_phase_v205"] = season_phase_v205
     playmodel_profile_v97 = st.selectbox("Játékmodell profil", FPI_PLAYMODEL_OPTIONS_V112, index=4, key="app_playmodel_profile_v112")
     ref_profile_v97 = f"{reference_age_v97} / {reference_level_v97} / játékosonkénti poszt / {playmodel_profile_v97}"
     st.caption(f"Aktív referencia: {ref_profile_v97}. Nincs globális referencia poszt; a poszt játékosonként kerül értelmezésre.")
@@ -20442,9 +20626,20 @@ with tab_exec:
 
     st.markdown("### Letölthető Football Performance Intelligence riportok")
     st.caption("Elérhető riportok: GPS-only, Executive Summary és Saját csapat profil.")
-    safe_week_main = _safe_filename_week(selected_week)
+    date_span_main_v205 = (
+        pd.to_datetime(analysis_base_df.get("start_time"), errors="coerce").max()
+        - pd.to_datetime(analysis_base_df.get("start_time"), errors="coerce").min()
+    ).days if "start_time" in analysis_base_df.columns else 0
+    full_period_pdf_main_v205 = st.checkbox(
+        "GPS-only PDF: teljes feltöltött időszak",
+        value=bool(date_span_main_v205 >= 14),
+        key="main_full_period_pdf_v205",
+        help="Kikapcsolva a GPS-only PDF csak a kiválasztott hetet elemzi."
+    )
+    gps_pdf_period_main_v205 = "__ALL__" if full_period_pdf_main_v205 else selected_week
+    safe_week_main = "teljes_idoszak" if full_period_pdf_main_v205 else _safe_filename_week(selected_week)
 
-    gps_only_live_pdf_main = build_fpi_gps_only_pdf_bytes(analysis_base_df.copy(), selected_week, selected_playstyle)
+    gps_only_live_pdf_main = build_fpi_gps_only_pdf_bytes(analysis_base_df.copy(), gps_pdf_period_main_v205, selected_playstyle)
     if gps_only_live_pdf_main is not None:
         st.download_button(
             "⬇️ GPS-only PDF riport",
