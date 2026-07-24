@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V401_GPS_REPORT_2_0_2026_07_24"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V402_TACTICAL_ENGINE_REPORT_2_0_2026_07_24"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -11231,9 +11231,11 @@ def _fpi_v401_top_bottom_items(players: pd.DataFrame, metric: str):
         return [], 0, 0
     bottom_n = min(5, n // 2 if n < 10 else 5)
     top_n = min(5, n - bottom_n)
-    bottom = tmp.head(bottom_n).copy()
+    bottom = tmp.head(bottom_n).copy().sort_values(metric, ascending=True, kind='mergesort')
     used = set(bottom['player_name'].astype(str))
-    top = tmp[~tmp['player_name'].astype(str).isin(used)].tail(top_n).sort_values(metric, ascending=False).copy()
+    # A top csoportot is növekvő sorrendben rajzoljuk, így a teljes diagram
+    # vizuálisan végig a legkisebb értéktől a legnagyobbig halad.
+    top = tmp[~tmp['player_name'].astype(str).isin(used)].tail(top_n).sort_values(metric, ascending=True, kind='mergesort').copy()
     items = [(f"Alsó | {r.player_name}", r[metric]) for _, r in bottom.iterrows()]
     items += [(f"Top | {r.player_name}", r[metric]) for _, r in top.iterrows()]
     return items, len(bottom), len(top)
@@ -11316,7 +11318,7 @@ def build_fpi_gps_only_pdf_bytes(
     small=ParagraphStyle('V204Small',parent=body,fontSize=8.5,leading=10.8)
     head=ParagraphStyle('V204Head',parent=body,fontName=font_bold,textColor=colors.white,alignment=1)
     story=[]
-    def P(x,s=body): return Paragraph(pdf_safe_text(x),s)
+    def P(x,s=body): return Paragraph(pdf_safe_text(_fpi_tactical_pdf_text_v157(x)),s)
     def section(x,color='#DBEAFE'):
         return Table([[P(x,ParagraphStyle('Sec'+str(len(story)),parent=body,fontName=font_bold,fontSize=11))]],colWidths=[27.7*cm],style=TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor(color)),('BOX',(0,0),(-1,-1),.4,colors.HexColor('#CBD5E1')),('LEFTPADDING',(0,0),(-1,-1),6),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5)]))
     def tbl(rows,widths,bg='#1E3A8A'):
@@ -17291,19 +17293,11 @@ def _fpi_contextual_md_plan_rows_v151(
 # V157 - Tactical-only szövegtisztítás és PDF-biztos magyar karakterek
 # =========================================================
 def _fpi_tactical_pdf_text_v157(value: object) -> str:
-    """
-    A Tactical-only riportban a PDF-környezet miatt a hosszú ő/ű helyett
-    rövid ö/ü jelenik meg. Ez megakadályozza az ő -> n hibás karaktercserét.
-    """
+    """V402: egységes PDF-biztos magyar karakter-normalizálás."""
     text = _fpi_complete_text_v151(value)
-    text = (
-        text.replace("Ő", "Ö")
-            .replace("ő", "ö")
-            .replace("Ű", "Ü")
-            .replace("ű", "ü")
-    )
-
-    # Nyers exporttöredékek és félkész címkék eltávolítása.
+    replacements = {"ő": "ö", "Ő": "Ö", "ű": "ü", "Ű": "Ü", "\u00a0": " "}
+    for a, b in replacements.items():
+        text = text.replace(a, b)
     text = re.sub(r"(?i)\bedzöi megállapítás\b[:\s—-]*", "", text)
     text = re.sub(r"(?i)\bedzői megállapítás\b[:\s—-]*", "", text)
     text = re.sub(r"\s*[—–-]\s*$", "", text)
@@ -17459,10 +17453,82 @@ def _fpi_own_pdf_findings_v156(tactical_context: Optional[Dict[str, object]], li
     return values[:limit]
 
 
+def _fpi_v402_priority_rank(value: object) -> int:
+    txt = _norm_mapping_text(str(value or ""))
+    if any(k in txt for k in ["magas", "kritikus", "azonnali"]): return 3
+    if any(k in txt for k in ["kozepes", "figyelendo"]): return 2
+    return 1
+
+def _fpi_v402_tactical_dimensions(ctx: Optional[Dict[str, object]], findings) -> List[dict]:
+    """Coach-friendly, forrásarányos taktikai állapotkép közös riportfilozófiával."""
+    ctx = ctx or {}
+    framework = ctx.get("strategy_framework", {}) or {}
+    dims_raw = framework.get("dimensions", {}) if isinstance(framework, dict) else {}
+    definitions = {
+        "Játékfelépítés": "A labdakihozatal stabilitása, az első és második vonal átjátszhatósága.",
+        "Területnyerés": "A támadások előrehaladása és a veszélyes zónák elérésének minősége.",
+        "Pressing": "A labda nélküli nyomás időzítése, intenzitása és kollektív támogatása.",
+        "Átmenetek": "A labdaszerzés és labdavesztés utáni első másodpercek hatékonysága.",
+        "Védekezési kontroll": "A blokk kompakt­sága, mélységvédelme és az ellenfél kulcsterületeinek lezárása.",
+    }
+    aliases = {
+        "build": "Játékfelépítés", "possession": "Játékfelépítés", "progress": "Területnyerés",
+        "press": "Pressing", "transition": "Átmenetek", "defen": "Védekezési kontroll",
+    }
+    rows=[]
+    if isinstance(dims_raw, dict):
+        for key,val in dims_raw.items():
+            label=str(key)
+            norm=_norm_mapping_text(label)
+            for a,b in aliases.items():
+                if a in norm: label=b; break
+            try:
+                score=float(val.get("score", val) if isinstance(val,dict) else val)
+                if score<=1.5: score*=100
+            except Exception:
+                continue
+            score=max(0,min(100,score))
+            status="Jó" if score>=75 else ("Figyelendő" if score>=55 else "Fejlesztendő")
+            rows.append({"Terület":label,"Pont":round(score),"Státusz":status,"Definíció":definitions.get(label,"A taktikai inputokból képzett területi állapotmutató.")})
+    if not rows:
+        buckets={k:[] for k in definitions}
+        for item in findings or []:
+            txt=_norm_mapping_text(f"{getattr(item,'title','')} {getattr(item,'finding','')} {getattr(item,'recommendation','')}")
+            pr=100-15*(_fpi_v402_priority_rank(getattr(item,'priority',''))-1)
+            matched=False
+            for a,b in aliases.items():
+                if a in txt: buckets[b].append(pr); matched=True
+            if not matched: buckets["Védekezési kontroll"].append(70)
+        for label,vals in buckets.items():
+            if vals:
+                score=sum(vals)/len(vals)
+                status="Jó" if score>=75 else ("Figyelendő" if score>=55 else "Fejlesztendő")
+                rows.append({"Terület":label,"Pont":round(score),"Státusz":status,"Definíció":definitions[label]})
+    return rows[:5]
+
+def _fpi_v402_tactical_reliability(ctx: Optional[Dict[str, object]]) -> tuple:
+    ctx=ctx or {}
+    signals=[]
+    if ctx.get('has_own_pdf'): signals.append('saját PDF')
+    if ctx.get('has_opp_pdf'): signals.append('ellenfél PDF')
+    if ctx.get('has_own_team_excel'): signals.append('saját csapat Excel')
+    if ctx.get('has_opp_team_excel'): signals.append('ellenfél csapat Excel')
+    if ctx.get('has_own_player_excel'): signals.append('saját játékos Excel')
+    if ctx.get('has_opp_player_excel'): signals.append('ellenfél játékos Excel')
+    n=len(signals)
+    score=min(100, 35+n*11 + (8 if (ctx.get('own_pdf_chars',0) or 0)>1500 else 0) + (8 if (ctx.get('opp_pdf_chars',0) or 0)>1500 else 0))
+    status='Magas' if score>=75 else ('Közepes' if score>=50 else 'Korlátozott')
+    return score,status,', '.join(signals) if signals else 'nincs azonosított forrás'
+
 def build_fpi_tactical_only_pdf_bytes_v156(
     tactical_context: Optional[Dict[str, object]],
     demo_label: str = "",
 ) -> Optional[bytes]:
+    """V402 Tactical Engine + Tactical-only Report 2.0.
+
+    A GPS-only riporttal azonos vezetői logika: kulcsüzenet, állapotkép,
+    forrásmegbízhatóság, konkrét prioritások, játékosfeladatok és mikrociklus.
+    """
     if SimpleDocTemplate is None:
         return None
     ctx = tactical_context or {}
@@ -17470,104 +17536,86 @@ def build_fpi_tactical_only_pdf_bytes_v156(
         return None
 
     bundle = _fpi_canonical_report_bundle_v156(None, "", "Kiegyensúlyozott", ctx)
-    findings = bundle["tactical_insights"]
-    plan = bundle["match_plan"]
+    findings = [x for x in (bundle.get("tactical_insights") or []) if _fpi_valid_tactical_insight_v157(x)]
+    plan = [x for x in (bundle.get("match_plan") or []) if _fpi_valid_tactical_insight_v157(x)]
     opp_eval = ctx.get("opponent_player_evaluation", []) or []
     own_eval = ctx.get("own_player_evaluation", []) or []
+    dimensions = _fpi_v402_tactical_dimensions(ctx, findings)
+    reliability, reliability_status, sources = _fpi_v402_tactical_reliability(ctx)
 
     font_name, font_bold = _register_pdf_font()
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1.1*cm, leftMargin=1.1*cm, topMargin=1.0*cm, bottomMargin=1.0*cm)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1.0*cm, leftMargin=1.0*cm, topMargin=.9*cm, bottomMargin=.9*cm)
     styles = getSampleStyleSheet()
-    title = ParagraphStyle("FPITacOnlyTitleV156", parent=styles["Title"], fontName=font_bold, fontSize=22, leading=26, textColor=colors.HexColor("#0F172A"))
-    body = ParagraphStyle("FPITacOnlyBodyV156", parent=styles["BodyText"], fontName=font_name, fontSize=10.5, leading=14.0, alignment=4, textColor=colors.HexColor("#111827"))
-    small = ParagraphStyle("FPITacOnlySmallV156", parent=styles["BodyText"], fontName=font_name, fontSize=9.3, leading=12.2, alignment=4, textColor=colors.HexColor("#111827"))
-    head = ParagraphStyle("FPITacOnlyHeadV156", parent=styles["BodyText"], fontName=font_bold, fontSize=10.2, leading=12.6, alignment=1, textColor=colors.white)
+    title = ParagraphStyle("FPITacOnlyTitleV402", parent=styles["Title"], fontName=font_bold, fontSize=21, leading=24, textColor=colors.HexColor("#0F172A"))
+    body = ParagraphStyle("FPITacOnlyBodyV402", parent=styles["BodyText"], fontName=font_name, fontSize=9.8, leading=12.8, alignment=4, textColor=colors.HexColor("#111827"))
+    small = ParagraphStyle("FPITacOnlySmallV402", parent=body, fontSize=8.8, leading=11.4)
+    head = ParagraphStyle("FPITacOnlyHeadV402", parent=body, fontName=font_bold, fontSize=9.2, leading=11.2, alignment=1, textColor=colors.white)
+    strong = ParagraphStyle("FPITacOnlyStrongV402", parent=body, fontName=font_bold, fontSize=10.6, leading=13.5)
 
     def P(v, style=body):
-        clean_v157 = _fpi_tactical_pdf_text_v157(v)
-        return Paragraph(html.escape(clean_v157).replace("\n", "<br/>") or "Nincs értékelhető adat.", style)
+        clean = _fpi_tactical_pdf_text_v157(v)
+        return Paragraph(html.escape(clean).replace("\n", "<br/>") or "Nincs értékelhető adat.", style)
 
-    def section(text, bg="#DBEAFE"):
-        section_style = ParagraphStyle("FPITacOnlySectionV156", parent=body, fontName=font_bold, fontSize=14, leading=17)
-        t = Table([[P(text, section_style)]], colWidths=[27.5*cm])
-        t.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,-1),colors.HexColor(bg)),
-            ("BOX",(0,0),(-1,-1),0.5,colors.HexColor("#93C5FD")),
-            ("LEFTPADDING",(0,0),(-1,-1),8),("RIGHTPADDING",(0,0),(-1,-1),8),
-            ("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6),
-        ]))
+    def section(text, bg="#DBEAFE", border="#93C5FD"):
+        t=Table([[P(text, strong)]], colWidths=[27.7*cm])
+        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor(bg)),("BOX",(0,0),(-1,-1),.5,colors.HexColor(border)),("LEFTPADDING",(0,0),(-1,-1),8),("RIGHTPADDING",(0,0),(-1,-1),8),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
         return t
 
-    def tbl(rows, widths, header="#1E3A8A"):
-        t = Table(rows, colWidths=widths, repeatRows=1, splitByRow=1)
-        t.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,0),colors.HexColor(header)),
-            ("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#CBD5E1")),
-            ("VALIGN",(0,0),(-1,-1),"TOP"),
-            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),
-            ("LEFTPADDING",(0,0),(-1,-1),7),("RIGHTPADDING",(0,0),(-1,-1),7),
-            ("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6),
-        ]))
+    def tbl(rows,widths,header="#1E3A8A"):
+        t=Table(rows,colWidths=widths,repeatRows=1,splitByRow=1)
+        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor(header)),("GRID",(0,0),(-1,-1),.32,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),("LEFTPADDING",(0,0),(-1,-1),6),("RIGHTPADDING",(0,0),(-1,-1),6),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
         return t
 
-    story = [
-        P("Football Performance Intelligence – Tactical-only", title),
-        P(f"{demo_label or 'ÉLES RIPORT'} | GPS-adat nélkül, kizárólag taktikai PDF/Excel inputokból.", small),
-        Spacer(1, 0.18*cm),
-        section("1. Taktikai megállapítások", "#E0F2FE"),
-    ]
-    rows = [[P("Fókusz", head), P("Megfigyelés", head), P("Meccstervi válasz", head)]]
-    for item in findings:
-        if not _fpi_valid_tactical_insight_v157(item):
-            continue
-        rows.append([
-            P(item.title, small),
-            P(item.finding, small),
-            P(item.recommendation or "A forrás alapján külön végrehajtási feladat nem azonosítható.", small),
-        ])
-    story.append(tbl(rows, [5.0*cm, 10.8*cm, 11.7*cm]))
+    top_findings=sorted(findings,key=lambda x:_fpi_v402_priority_rank(getattr(x,'priority','')),reverse=True)[:3]
+    if top_findings:
+        executive=" ".join([f"{x.title}: {x.finding}" for x in top_findings])
+    else:
+        executive="A feltöltött taktikai forrásokból nem azonosítható kellően erős, önálló vezetői megállapítás."
 
-    story.append(PageBreak())
-    story.append(section("2. Konkrét meccsterv", "#FEF3C7"))
-    plan_rows = [[P("Döntési pont", head), P("Adatból következő irány", head), P("Végrehajtási fókusz", head)]]
-    for item in plan:
-        if not _fpi_valid_tactical_insight_v157(item):
-            continue
-        plan_rows.append([
-            P(item.title, small),
-            P(item.finding, small),
-            P(item.recommendation or "A végrehajtási fókusz további inputot igényel.", small),
-        ])
-    story.append(tbl(plan_rows, [5.2*cm, 10.8*cm, 11.5*cm], header="#92400E"))
+    story=[P("Football Performance Intelligence – Tactical-only",title),P(f"{demo_label or 'ÉLES RIPORT'} | Tactical Engine V402 | GPS-adat nélkül.",small),Spacer(1,.12*cm)]
+    call=Table([[P("A riport kulcsüzenete",strong),P(executive,body)]],colWidths=[5.2*cm,22.5*cm])
+    call.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#ECFDF5")),("BOX",(0,0),(-1,-1),.7,colors.HexColor("#10B981")),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),8),("RIGHTPADDING",(0,0),(-1,-1),8),("TOPPADDING",(0,0),(-1,-1),7),("BOTTOMPADDING",(0,0),(-1,-1),7)]))
+    story += [call,Spacer(1,.18*cm),section("1. Taktikai állapotkép és adatmegbízhatóság","#E0F2FE")]
+    state_rows=[[P("Terület",head),P("Pont",head),P("Státusz",head),P("Magyarázat",head)]]
+    for r in dimensions:
+        state_rows.append([P(r['Terület'],small),P(str(r['Pont']),small),P(r['Státusz'],small),P(f"Mit jelent? {r['Definíció']} Most: a taktikai források alapján {r['Státusz'].lower()} állapot.",small)])
+    state_rows.append([P("Adatmegbízhatóság",small),P(str(reliability),small),P(reliability_status,small),P(f"Mit jelent? A következtetések forrásfedezete. Most: {sources}.",small)])
+    story.append(tbl(state_rows,[5.1*cm,2.0*cm,3.2*cm,17.4*cm]))
 
-    story.append(PageBreak())
-    story.append(section("3. Játékosszintű fókusz", "#FEE2E2"))
-    player_rows = [[P("Oldal", head), P("Játékos", head), P("Szerep", head), P("Értékelés / feladat", head)]]
-    for side, entries in [("ELLENFÉL", opp_eval), ("SAJÁT", own_eval)]:
-        for row in entries[:6]:
-            player_rows.append([
-                P(side, small),
-                P(_fpi_tactical_pdf_text_v157(row.get("Játékos", "")), small),
-                P(_fpi_tactical_pdf_text_v157(row.get("Szerep", "")), small),
-                P(_fpi_tactical_pdf_text_v157(f"{row.get('Értelmezés','')} {row.get('Javaslat','')}"), small),
-            ])
-    if len(player_rows) == 1:
-        player_rows.append([P("—", small), P("Nincs játékos Excel", small), P("—", small), P("A riport csapatszintű taktikai inputból készült.", small)])
-    story.append(tbl(player_rows, [3.0*cm, 4.5*cm, 6.2*cm, 13.8*cm], header="#991B1B"))
+    story += [Spacer(1,.18*cm),section("2. Edzői prioritások – mit csináljunk?","#FEF3C7","#F59E0B")]
+    pr_rows=[[P("Prioritás",head),P("Fejlesztendő terület",head),P("Adatból látható hiány",head),P("Javasolt beavatkozás",head),P("Miért?",head)]]
+    for item in sorted(findings,key=lambda x:_fpi_v402_priority_rank(getattr(x,'priority','')),reverse=True)[:6]:
+        priority=getattr(item,'priority','') or ('Magas' if _fpi_v402_priority_rank(getattr(item,'priority',''))>=3 else 'Közepes')
+        pr_rows.append([P(priority,small),P(item.title,small),P(item.finding,small),P(item.recommendation or "Célzott pályagyakorlat és videós visszacsatolás.",small),P("A javaslat közvetlenül a feltöltött taktikai inputban azonosított mintára reagál.",small)])
+    if len(pr_rows)==1:
+        pr_rows.append([P("Alacsony",small),P("Forrásbővítés",small),P("Nincs elég konkrét taktikai jel",small),P("További saját vagy ellenfél input feltöltése",small),P("Adat nélkül nem indokolt konkrét edzői beavatkozást automatizálni.",small)])
+    story.append(tbl(pr_rows,[2.4*cm,4.3*cm,7.0*cm,7.1*cm,6.9*cm],header="#92400E"))
 
-    story.append(PageBreak())
-    story.append(section("4. Taktikai mikrociklus", "#EDE9FE"))
-    micro = [
-        ("MD-4", "Játékfelépítés", "Az ellenfél első védelmi vonalának és labdaszerzési csapdáinak modellezése."),
-        ("MD-3", "Fő meccshelyzet", "A legmagasabb prioritású átmeneti, szélső vagy belső veszély meccsintenzitású gyakorlása."),
-        ("MD-2", "Meccsterv", "Védekezési magasság, támadási célterület és ellenfél-kulcsemberek elleni feladatok rögzítése."),
-        ("MD-1", "Aktiváció", "Kezdőhelyzetek, első támadó gondolat és pontrúgásfókusz rövid ismétlése."),
-    ]
-    mr = [[P("Nap", head), P("Cím", head), P("Taktikai cél", head), P("Erőnléti értékelés", head)]]
-    for d, label, text in micro:
-        mr.append([P(d, small), P(label, small), P(text, small), P("GPS-adat nélkül nem értékelt.", small)])
-    story.append(tbl(mr, [2.8*cm, 5.0*cm, 13.7*cm, 6.0*cm], header="#312E81"))
+    story += [PageBreak(),section("3. Kompakt meccsterv","#EDE9FE","#8B5CF6")]
+    plan_rows=[[P("Döntési pont",head),P("Bizonyíték",head),P("Egységes végrehajtási fókusz",head)]]
+    for item in plan[:7]:
+        plan_rows.append([P(item.title,small),P(item.finding,small),P(item.recommendation or "A végrehajtási fókusz további inputot igényel.",small)])
+    if len(plan_rows)==1:
+        plan_rows.append([P("Meccsterv",small),P("Nincs elég direkt taktikai bizonyíték.",small),P("A tervet edzői döntéssel és további forrással kell kiegészíteni.",small)])
+    story.append(tbl(plan_rows,[5.0*cm,10.2*cm,12.5*cm],header="#312E81"))
+
+    story += [Spacer(1,.18*cm),section("4. Játékosszintű taktikai feladatok","#FEE2E2","#EF4444")]
+    player_rows=[[P("Oldal",head),P("Játékos",head),P("Szerep",head),P("Megfigyelés",head),P("Konkrét feladat",head)]]
+    for side,entries in [("ELLENFÉL",opp_eval),("SAJÁT",own_eval)]:
+        for row in entries[:5]:
+            player_rows.append([P(side,small),P(row.get('Játékos',''),small),P(row.get('Szerep',''),small),P(row.get('Értelmezés',''),small),P(row.get('Javaslat','') or 'Egyéni videós és pályafeladat.',small)])
+    if len(player_rows)==1:
+        player_rows.append([P("-",small),P("Nincs játékos Excel",small),P("-",small),P("Csapatszintű elemzés készült.",small),P("Játékosfeladathoz játékosszintű input szükséges.",small)])
+    story.append(tbl(player_rows,[2.3*cm,3.7*cm,4.3*cm,8.4*cm,9.0*cm],header="#991B1B"))
+
+    story += [PageBreak(),section("5. Taktikai mikrociklus","#DCFCE7","#22C55E")]
+    default_micro=[("MD-4","Játékfelépítés","Ellenfél első nyomásának modellezése; szabad ember és harmadik ember kapcsolatok."),("MD-3","Fő meccshelyzet","Legmagasabb prioritású pressing-, átmeneti vagy területnyerési helyzet meccsintenzitáson."),("MD-2","Meccsterv","Védekezési magasság, támadási célterület és kulcspárharcok rögzítése."),("MD-1","Aktiváció","Kezdőhelyzetek, első támadó gondolat és pontrúgásfókusz rövid ismétlése." )]
+    mr=[[P("Nap",head),P("Fókusz",head),P("Taktikai cél",head),P("Terhelési megjegyzés",head)]]
+    for d,label,text in default_micro:
+        mr.append([P(d,small),P(label,small),P(text,small),P("GPS-only adattal együtt az integrált riportban kap egzakt fizikai dózist.",small)])
+    story.append(tbl(mr,[2.5*cm,4.8*cm,13.0*cm,7.4*cm],header="#166534"))
+    story += [Spacer(1,.18*cm),P(f"Forrásfedezet: {sources}. A pontszámok döntéstámogató, nem abszolút taktikai normák; a videó és az edzői kontextus elsőbbséget élvez.",small)]
 
     doc.build(story)
     buffer.seek(0)
@@ -17809,6 +17857,21 @@ FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
             "A High Efforts a rendelkezésre álló importtól függően szolgáltatói mutató vagy gyorsulás-, lassulás- és egyéb robbanékony akciókból készített proxy; nem azonos a Sprint mutatóval.",
             "A coach recommendation a hiány vagy többlet számszerűsítése mellett konkrét beavatkozást és szakmai indoklást ad. A riport nem használ önmagában automatikus leállítási küszöböt orvosi vagy edzői döntés helyett.",
             "A PDF szövegei és diagramcímkéi egységes karakter-normalizálást használnak; a hosszú ő/ű karakterek egyszerű ö/ü alakban jelennek meg a maximális PDF-kompatibilitás érdekében."
+        ],
+    ),
+]
+
+
+FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
+    (
+        "16. V402 – Tactical Engine és Tactical-only Report 2.0",
+        [
+            "A Tactical-only riport a GPS-only riporttal azonos vezetői sorrendet használ: kulcsüzenet, állapotkép, adatmegbízhatóság, prioritások, meccsterv, játékosfeladatok és mikrociklus.",
+            "A taktikai területi pontszámok döntéstámogató indexek. Elsődlegesen a Tactical Framework dimenzióiból, ennek hiányában a forrásokban azonosított megállapítások prioritásából készülnek; nem abszolút szakági normák.",
+            "Az adatmegbízhatóság külön jelzi a saját és ellenfél PDF-, csapat- és játékos Excel-fedezetet. Korlátozott forrás esetén a riport nem állít elő mesterségesen egzakt következtetést.",
+            "A taktikai prioritástábla minden megállapítást konkrét beavatkozással és indoklással köt össze, ugyanúgy, ahogy a GPS-only riport a fizikai hiányt vagy többletet kezeli.",
+            "A Top/alsó 5 GPS-diagram a kiválasztott tíz külön játékost végig növekvő értéksorrendben jeleníti meg: az alsó csoport után a top csoport is a kisebb értéktől a nagyobb felé halad.",
+            "Minden PDF-szöveg egységes karakter-normalizálást használ; a hosszú ő/ű karakterek ö/ü alakban jelennek meg."
         ],
     ),
 ]
