@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V303_CONSISTENCY_BENCHMARK_PROFILES_2026_07_23"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V304_COACH_REPORT_UX_2026_07_24"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7683,7 +7683,33 @@ def _fpi_v302_week_context_factor(analysis_df: pd.DataFrame, selected_week: str)
 
 
 def _fpi_v302_readiness_breakdown(score:int, components:Dict[str,float], reasons:List[str]) -> pd.DataFrame:
-    labels={"load":"Terhelési egyensúly","trend":"Rövid távú trend","speed":"HSR / sprint expozíció","availability":"Edzésrészvétel","match":"Meccsreferencia","risk":"Játékoskockázat","freshness":"Frissesség","data":"Adatbiztonság","training availability":"Edzésrészvétel","load trend":"Terhelési trend","speed exposure":"HSR / sprint expozíció","tapering":"Terheléscsökkentés / frissítés","playstyle fit":"Játékmodell-illeszkedés","analysis completeness":"Elemzés teljessége"}
+    """V304: magyar komponensnevek, definíció és aktuális értékelés egy mezőben."""
+    labels={
+        "load":"Terhelési egyensúly","trend":"Rövid távú trend",
+        "speed":"Sebességi expozíció","availability":"Edzésrészvétel",
+        "match":"Meccsreferencia","risk":"Játékoskockázat","freshness":"Frissesség",
+        "data":"Elemzés megbízhatósága","training availability":"Edzésrészvétel",
+        "load trend":"Terhelési trend","speed exposure":"Sebességi expozíció",
+        "tapering":"Terheléscsökkentés / frissítés",
+        "playstyle fit":"Játékmodell-illeszkedés",
+        "analysis completeness":"Elemzés megbízhatósága"
+    }
+    definitions={
+        "load":"A heti volumen és intenzitás egyensúlya a saját előzményekhez és a célzónához viszonyítva.",
+        "trend":"A rövid távú terhelési változás: stabil, hirtelen emelkedő vagy csökkenő-e a terhelés.",
+        "speed":"A heti HSR- és sprintinger mennyisége, gyakorisága és megfelelő eloszlása.",
+        "availability":"A játékosok edzésrészvétele és az elemzéshez rendelkezésre álló tényleges expozíció.",
+        "match":"Az edzésterhelés összevethetősége a feltöltött teljes meccsek fizikai referenciaértékeivel.",
+        "risk":"A játékosszintű túlterhelési, alulexpozíciós és részvételi figyelmeztetések összképe.",
+        "freshness":"A meccs előtti napok terheléscsökkentése és a frissesség megtartása.",
+        "data":"Az elemzés teljessége és megbízhatósága: sessionök, dátumok, KPI-k és referenciaadatok rendelkezésre állása.",
+        "training availability":"A játékosok edzésrészvétele és az elemzéshez rendelkezésre álló tényleges expozíció.",
+        "load trend":"A rövid távú és heti terhelési trend stabilitása.",
+        "speed exposure":"A heti HSR- és sprintinger mennyisége, gyakorisága és megfelelő eloszlása.",
+        "tapering":"A meccs előtti terheléscsökkentés minősége; csökken-e a volumen úgy, hogy a mozgásminőség megmaradjon.",
+        "playstyle fit":"A fizikai terhelési profil mennyire támogatja a kiválasztott játékmodellt.",
+        "analysis completeness":"Az elemzés teljessége és megbízhatósága: sessionök, dátumok, KPI-k és referenciaadatok rendelkezésre állása."
+    }
     rows=[]
     nums={str(k):float(v) for k,v in (components or {}).items() if isinstance(v,(int,float)) and not pd.isna(v)}
     if nums:
@@ -7693,29 +7719,48 @@ def _fpi_v302_readiness_breakdown(score:int, components:Dict[str,float], reasons
             total=max(sum(max(0,v) for v in vals),1)
             nums={k:max(0,min(100,v/total*score*len(vals))) for k,v in nums.items()}
         for i,(k,v) in enumerate(nums.items()):
+            key=k.lower().strip()
             vv=max(0,min(100,v))
-            rows.append({"Komponens":labels.get(k.lower(),k.replace("_"," ").title()),"Pont":round(vv),"Státusz":"Erősség" if vv>=75 else "Figyelendő" if vv>=55 else "Lehúzó tényező","Magyarázat":str(reasons[i]) if i<len(reasons) else ""})
+            actual=str(reasons[i]).strip() if i<len(reasons) and str(reasons[i]).strip() else "Az aktuális pontszám alapján értékelve."
+            explanation=f"Mit jelent? {definitions.get(key, 'A readiness összpontszám egyik szakmai összetevője.')} Most: {actual}"
+            rows.append({"Komponens":labels.get(key,k.replace("_"," ").title()),"Pont":round(vv),"Státusz":"Erősség" if vv>=75 else "Figyelendő" if vv>=55 else "Lehúzó tényező","Magyarázat":explanation})
     if not rows:
-        for name,v,why in [("Terhelési egyensúly",score,"Összesített terhelési kép"),("HSR / sprint expozíció",max(35,score-8),"Sebességi benchmark és trend"),("Edzésrészvétel",min(95,score+4),"Aktuális rendelkezésre állás"),("Játékoskockázat",max(35,score-5),"Risk-jelzések")]:
-            rows.append({"Komponens":name,"Pont":v,"Státusz":"Erősség" if v>=75 else "Figyelendő" if v>=55 else "Lehúzó tényező","Magyarázat":why})
+        fallback=[
+            ("Terhelési egyensúly",score,"A heti volumen és intenzitás egyensúlya.","Az összesített terhelési kép alapján."),
+            ("Sebességi expozíció",max(35,score-8),"A heti HSR- és sprintinger megfelelősége.","A sebességi benchmark és trend alapján."),
+            ("Edzésrészvétel",min(95,score+4),"A tényleges edzésrészvétel és rendelkezésre állás.","Az aktuális részvételi adatok alapján."),
+            ("Játékoskockázat",max(35,score-5),"A játékosszintű risk-jelzések összképe.","Az aktuális kockázati jelzések alapján.")
+        ]
+        for name,v,definition,actual in fallback:
+            rows.append({"Komponens":name,"Pont":v,"Státusz":"Erősség" if v>=75 else "Figyelendő" if v>=55 else "Lehúzó tényező","Magyarázat":f"Mit jelent? {definition} Most: {actual}"})
     return pd.DataFrame(rows)
 
 
 def _fpi_v302_coach_actions(benchmark_df:pd.DataFrame)->pd.DataFrame:
+    """V304: egyértelmű magyar terület + javaslat + indoklás; leállítási feltétel nélkül."""
     if benchmark_df is None or benchmark_df.empty:return pd.DataFrame()
-    presets={"Össztáv":("Volumenpótlás","15-25 perces kontrollált játékblokk"),"HSR":("HSR-expozíció","2x4-6 nagy sebességű futás, teljes visszapihenéssel"),"Sprint táv":("Sprint-expozíció","4-8 minőségi sprint, 2-3 perces pihenőkkel"),"Sprint db":("Sprintismétlés","4-6 technikailag tiszta maximális közeli ismétlés"),"High Efforts":("Nagy intenzitású akciók","2-3 rövid meccsszerű intenzív blokk"),"Load":("Összterhelési blokk","15-20 perc közepes-magas munkasűrűség")}
+    presets={
+        "Össztáv":("Edzésvolumen", "15–25 perces kontrollált játékblokk", "A heti össztáv a célzóna alatt maradt."),
+        "HSR":("Nagysebességű futás (HSR)", "2×4–6 nagysebességű futás, teljes visszapihenéssel", "A heti HSR-inger nem érte el a kívánt tartományt."),
+        "Sprint táv":("Sprinttávolság", "4–8 minőségi sprint, 2–3 perces pihenőkkel", "A sprinttávolság elmaradt a célzónától."),
+        "Sprint db":("Sprintismétlések", "4–6 technikailag tiszta, maximális közeli ismétlés", "Kevés minőségi sprintismétlés történt."),
+        "High Efforts":("Robbanékony akciók", "2–3 rövid, meccsszerű intenzív blokk", "A gyorsításokból, lassításokból és intenzív akciókból álló terhelés alacsony."),
+        "Load":("Összterhelés", "15–20 perc közepes–magas munkasűrűség", "A teljes külső terhelés a célzóna alatt maradt.")
+    }
+    source=benchmark_df[benchmark_df["Szint"].astype(str).eq("Heti edzésösszeg")]
     out=[]
-    for _,r in benchmark_df[benchmark_df["Szint"].astype(str).eq("Egy edzés mediánja")].iterrows():
+    for _,r in source.iterrows():
         actual=pd.to_numeric(pd.Series([r.get("Tényleges érték")]),errors="coerce").iloc[0]
         nums=re.findall(r"\d+(?:[.,]\d+)?",str(r.get("Benchmark érték","")))
         if pd.isna(actual) or len(nums)<2:continue
         lo,hi=float(nums[0].replace(",",".")),float(nums[1].replace(",","."))
         metric=str(r.get("Mutató",""));unit=str(r.get("Egység",""))
         if actual<lo:
-            title,block=presets.get(metric,("Célzott pótlás","Rövid célzott blokk"))
-            out.append({"Prioritás":"Magas" if actual<lo*.65 else "Közepes","Terület":title,"Hiány":f"{lo-actual:.0f} {unit}","Konkrét javaslat":block,"Leállítási feltétel":"Technikai minőség romlása vagy a célérték elérése."})
+            area,block,why=presets.get(metric,("Célzott terhelési terület","Rövid célzott blokk","A mutató a heti célzóna alatt maradt."))
+            out.append({"Prioritás":"Magas" if actual<lo*.65 else "Közepes","Fejlesztendő terület":area,"Hiány / többlet":f"−{lo-actual:.0f} {unit}","Javasolt beavatkozás":block,"Miért?":why})
         elif actual>hi:
-            out.append({"Prioritás":"Közepes","Terület":metric+" kontroll","Hiány":f"+{actual-hi:.0f} {unit} a felső cél felett","Konkrét javaslat":"Csökkentett volumen, megtartott végrehajtási intenzitás.","Leállítási feltétel":"Ne keletkezzen új fáradtság a meccs előtti 48 órában."})
+            area=presets.get(metric,(metric,"",""))[0]
+            out.append({"Prioritás":"Közepes","Fejlesztendő terület":area,"Hiány / többlet":f"+{actual-hi:.0f} {unit}","Javasolt beavatkozás":"Csökkentett volumen, megtartott végrehajtási intenzitás.","Miért?":"A heti érték a célzóna felső határa fölé került; további volumen helyett frissítés indokolt."})
     return pd.DataFrame(out).head(5)
 
 def _fpi_v300_training_match_ratios(
@@ -11109,6 +11154,79 @@ def _fpi_v204_conclusions(mode, quality, sessions, player_period, readiness):
     return out[:6]
 
 
+
+def _fpi_v304_compact_bar_chart(items, title_text:str, width_cm:float=13.2, height_cm:float=4.2, value_suffix:str=""):
+    """Kompakt, dependency-light ReportLab vízszintes oszlopdiagram."""
+    try:
+        from reportlab.graphics.shapes import Drawing, Rect, String
+        from reportlab.lib import colors as rl_colors
+        clean=[]
+        for label,value in items:
+            try:
+                v=float(value)
+                if pd.notna(v): clean.append((str(label),v))
+            except Exception:
+                continue
+        if not clean:return Spacer(1,0)
+        clean=clean[:8]
+        W,H=width_cm*cm,height_cm*cm
+        d=Drawing(W,H)
+        d.add(String(0,H-11,title_text,fontName='Helvetica-Bold',fontSize=8.5,fillColor=rl_colors.HexColor('#0F172A')))
+        top=H-25; row_h=max(13,(H-31)/max(len(clean),1)); label_w=W*.28; bar_w=W*.55
+        vmax=max(abs(v) for _,v in clean) or 1
+        for i,(label,v) in enumerate(clean):
+            y=top-i*row_h
+            d.add(String(0,y,label[:22],fontName='Helvetica',fontSize=7.1,fillColor=rl_colors.HexColor('#334155')))
+            d.add(Rect(label_w,y-2,bar_w,6,fillColor=rl_colors.HexColor('#E2E8F0'),strokeColor=None))
+            d.add(Rect(label_w,y-2,max(1,bar_w*abs(v)/vmax),6,fillColor=rl_colors.HexColor('#0F766E'),strokeColor=None))
+            val=f"{v:.0f}{value_suffix}" if abs(v)>=10 else f"{v:.1f}{value_suffix}"
+            d.add(String(label_w+bar_w+4,y-1,val,fontName='Helvetica-Bold',fontSize=6.9,fillColor=rl_colors.HexColor('#0F172A')))
+        return d
+    except Exception:
+        return Spacer(1,0)
+
+
+def _fpi_v304_session_chart(sessions:pd.DataFrame):
+    if sessions is None or sessions.empty:return Spacer(1,0)
+    charts=[]
+    labels=[str(x)[:18] for x in sessions.get('Session',pd.Series(range(len(sessions)))).tolist()]
+    for col,title,suffix in [('Össztáv','Sessionprofil – medián össztáv',' m'),('HSR','Sessionprofil – medián HSR',' m')]:
+        if col in sessions.columns:
+            charts.append(_fpi_v304_compact_bar_chart(list(zip(labels,pd.to_numeric(sessions[col],errors='coerce'))),title,13.4,4.0,suffix))
+    return Table([charts[:2]],colWidths=[13.7*cm]*len(charts[:2])) if charts else Spacer(1,0)
+
+
+def _fpi_v304_trend_charts(aligned:pd.DataFrame):
+    if aligned is None or aligned.empty:return Spacer(1,0)
+    charts=[]; labels=aligned['Hét'].astype(str).tolist() if 'Hét' in aligned else [str(i+1) for i in range(len(aligned))]
+    for col,title,suffix in [('Medián load','Időarányos Load-trend',''),('Medián HSR','Időarányos HSR-trend',' m')]:
+        if col in aligned.columns:
+            charts.append(_fpi_v304_compact_bar_chart(list(zip(labels,pd.to_numeric(aligned[col],errors='coerce'))),title,13.4,4.1,suffix))
+    return Table([charts[:2]],colWidths=[13.7*cm]*len(charts[:2])) if charts else Spacer(1,0)
+
+
+def _fpi_v304_player_charts(players:pd.DataFrame):
+    if players is None or players.empty:return Spacer(1,0)
+    charts=[]
+    for col,title,suffix in [('training_load','Top / alsó 5 – Load',''),('hsr_distance','Top / alsó 5 – HSR',' m')]:
+        if col not in players.columns:continue
+        tmp=players[['player_name',col]].copy();tmp[col]=pd.to_numeric(tmp[col],errors='coerce');tmp=tmp.dropna().sort_values(col)
+        if tmp.empty:continue
+        pick=pd.concat([tmp.head(5),tmp.tail(5)]).drop_duplicates('player_name')
+        charts.append(_fpi_v304_compact_bar_chart(list(zip(pick['player_name'],pick[col])),title,13.4,5.1,suffix))
+    return Table([charts[:2]],colWidths=[13.7*cm]*len(charts[:2])) if charts else Spacer(1,0)
+
+
+def _fpi_v304_player_risk_suggestion(level:str, reason:str)->str:
+    txt=_norm_mapping_text(f"{level} {reason}")
+    if 'reszvetel' in txt or 'hianyz' in txt:return 'Részvétel ellenőrzése; szükség esetén egyéni pótlóprogram.'
+    if 'sprint' in txt:return 'Rövid, teljes pihenős sprintblokk a heti célzónáig.'
+    if 'hsr' in txt or 'nagy sebesseg' in txt:return 'Egyéni HSR-pótlás kontrollált ismétlésekkel.'
+    if 'load' in txt or 'terheles' in txt:
+        return 'Magas értéknél volumen visszavétele; alacsonynál kontrollált pótlás.'
+    if 'high effort' in txt or 'gyorsul' in txt or 'lassul' in txt:return 'Rövid robbanékony blokk, technikai minőség mellett.'
+    return 'A játékos előzményeinek és részvételének egyéni ellenőrzése.'
+
 def build_fpi_gps_only_pdf_bytes(
     data: pd.DataFrame,
     selected_week: Optional[str] = None,
@@ -11210,15 +11328,13 @@ def build_fpi_gps_only_pdf_bytes(
             def f(v,d=0): return '—' if pd.isna(v) else f'{float(v):.{d}f}'
             rows.append([P(str(r['Dátum']),small),P(str(r['Típus']),small),P(str(r['Session']),small),P(str(r['Létszám']),small),P(f(r['Perc'],1),small),P(f(r['Össztáv']),small),P(f(r['m/perc'],1),small),P(f(r['HSR']),small),P(f(r['Sprint']),small),P(f(r['Load']),small)])
         story.append(tbl(rows,[3.4*cm,2.0*cm,6.0*cm,1.8*cm,2.0*cm,2.6*cm,2.2*cm,2.2*cm,2.2*cm,2.3*cm],'#92400E'))
-        story.append(Spacer(1,.15*cm)); story.append(P('Az értékek sessionönként a játékosok mediánját mutatják, nem a teljes keret összeadott távolságát. Így különböző létszámú edzések is összevethetők.',small))
-    story += [PageBreak(),section('3. Kontextushoz illesztett következő lépések','#EDE9FE')]
-    story.append(tbl([[P('Időtáv',head),P('Fókusz',head),P('Edzői döntés',head)]]+[[P(a,small),P(b,small),P(c,small)] for a,b,c in recs],[4.2*cm,7.0*cm,16.5*cm],'#312E81'))
-    if mode.get('code')=='preseason_block': story += [Spacer(1,.15*cm),P('Felkészülés alatt a gördülő 3-5-7 napos terhelés az elsődleges. Ha a következő meccsnap ismert, az app emellett MD-4-MD-1 tervet is készít.',small)]
-    elif mode.get('code')=='week_in_progress': story += [Spacer(1,.15*cm),P('A hét még nem lezárt: az alacsony heti összterhelés önmagában nem alulterhelés. A következő feltöltéssel a riport automatikusan frissül.',small)]
+        story += [Spacer(1,.12*cm), _fpi_v304_session_chart(sessions), Spacer(1,.08*cm)]
+        story.append(P('Az értékek sessionönként a játékosok mediánját mutatják, nem a teljes keret összeadott távolságát. Így különböző létszámú edzések is összevethetők.',small))
     if ratios_v300 is not None and not ratios_v300.empty:
-        story += [PageBreak(),section('4. Edzés–meccs referencia','#FEF3C7')]
-        ratio_rows=[[P(x,head) for x in ['Mutató','Szint','Tényleges','Meccsref.','Tényleges %','Benchmark %','Benchmark érték','Értékelés']]]
-        for _,r in ratios_v300.iterrows():
+        story += [PageBreak(),section('3. Edzés–meccs referencia','#FEF3C7')]
+        ratio_rows=[[P(x,head) for x in ['Mutató','Időszak','Tényleges','Meccsref.','Tényleges %','Cél %','Heti célérték','Értékelés']]]
+        weekly_ratios_v304 = ratios_v300[ratios_v300['Szint'].astype(str).eq('Heti edzésösszeg')].copy()
+        for _,r in weekly_ratios_v304.iterrows():
             actual=r.get('Tényleges érték'); matchref=r.get('Meccsreferencia'); pctv=r.get('Tényleges %'); unit=str(r.get('Egység',''))
             ratio_rows.append([
                 P(str(r.get('Mutató','')),small),P(str(r.get('Szint','')),small),
@@ -11233,14 +11349,15 @@ def build_fpi_gps_only_pdf_bytes(
         story += [Spacer(1,.12*cm),P(
             f"A referencia {int(match_reference_v300.get('match_events',0) or 0)} teljes meccseseményből készült; "
             f"a félidők játékosonként összeadódnak. Benchmarkprofil: {profile_text}.",small)]
+        story += [Spacer(1,.10*cm),P('<b>Mutatók:</b> HSR = nagysebességű futás a beállított HSR-küszöb felett; Sprint = sprintküszöb feletti futás; High Efforts = nagy intenzitású, robbanékony akciók összesített mutatója (külön mező hiányában gyorsulás/lassítás alapú becslés); Load = a szolgáltató vagy az import által adott összterhelési pont.',small)]
         if coach_actions_v302 is not None and not coach_actions_v302.empty:
             story += [Spacer(1,.18*cm),section('Konkrét edzői beavatkozás','#DCFCE7')]
-            ca=[[P(x,head) for x in ['Prioritás','Terület','Hiány / többlet','Javasolt blokk','Leállítási feltétel']]]
-            for _,r in coach_actions_v302.iterrows(): ca.append([P(str(r.get('Prioritás','')),small),P(str(r.get('Terület','')),small),P(str(r.get('Hiány','')),small),P(str(r.get('Konkrét javaslat','')),small),P(str(r.get('Leállítási feltétel','')),small)])
-            story.append(tbl(ca,[2.7*cm,4.2*cm,3.8*cm,7.2*cm,9.8*cm],'#166534'))
+            ca=[[P(x,head) for x in ['Prioritás','Fejlesztendő terület','Hiány / többlet','Javasolt beavatkozás','Miért?']]]
+            for _,r in coach_actions_v302.iterrows(): ca.append([P(str(r.get('Prioritás','')),small),P(str(r.get('Fejlesztendő terület','')),small),P(str(r.get('Hiány / többlet','')),small),P(str(r.get('Javasolt beavatkozás','')),small),P(str(r.get('Miért?','')),small)])
+            story.append(tbl(ca,[2.7*cm,4.5*cm,3.8*cm,7.6*cm,9.1*cm],'#166534'))
 
     if microcycle_v300 is not None and not microcycle_v300.empty:
-        story += [PageBreak(),section('5. Heti ciklusterv – erőnléti + taktikai cél','#EDE9FE')]
+        story += [PageBreak(),section('4. Heti ciklusterv – erőnléti + taktikai cél','#EDE9FE')]
         md_rows=[[P(x,head) for x in ['Dátum','Nap','Erőnléti fókusz','Taktikai fókusz','Edzői megjegyzés']]]
         for _,r in microcycle_v300.iterrows():
             md_rows.append([
@@ -11252,30 +11369,35 @@ def build_fpi_gps_only_pdf_bytes(
             ])
         story.append(tbl(md_rows,[2.5*cm,1.8*cm,5.0*cm,7.2*cm,11.2*cm],'#312E81'))
 
-    story += [PageBreak(),section('6. Időarányos trend – azonos hétközi pontig','#ECFDF5')]
+    story += [PageBreak(),section('5. Időarányos trend – azonos hétközi pontig','#ECFDF5')]
     if aligned.empty: story.append(P('Nincs elegendő korábbi dátumozott adat az időarányos összevetéshez.'))
     else:
+        story += [_fpi_v304_trend_charts(aligned.tail(6)), Spacer(1,.10*cm)]
         rows=[[P(c,head) for c in aligned.columns]]
         for _,r in aligned.tail(6).iterrows(): rows.append([P('—' if pd.isna(r[c]) else (f'{float(r[c]):.0f}' if isinstance(r[c],(int,float,np.integer,np.floating)) else str(r[c])),small) for c in aligned.columns])
         story.append(tbl(rows,[3.2*cm,4.3*cm,5.0*cm,4.5*cm,4.5*cm,4.5*cm],'#047857'))
         story.append(Spacer(1,.15*cm)); story.append(P('Folyamatban lévő hétnél csak azonos hétközi pontig (például szerda estig) gyűlt korábbi terheléshez hasonlítunk, nem teljes hetekhez.',small))
-    story += [PageBreak(),section('7. Játékosonkénti kumulált terhelés és eltérések','#E0F2FE')]
+    story += [PageBreak(),section('6. Játékosonkénti kumulált terhelés és eltérések','#E0F2FE')]
     if players.empty: story.append(P('Nincs játékosonként aggregálható mutató.'))
     else:
+        story += [_fpi_v304_player_charts(players), Spacer(1,.10*cm)]
         display=players.copy(); metric_cols=[c for c in ['sessions','duration_min','total_distance','hsr_distance','sprint_distance','sprints','high_efforts','training_load'] if c in display.columns]
         labels={'player_name':'Játékos','sessions':'Session','duration_min':'Perc','total_distance':'Össztáv','hsr_distance':'HSR','sprint_distance':'Sprint','sprints':'Sprint db','high_efforts':'High Eff.','training_load':'Load'}
         sortcol='total_distance' if 'total_distance' in display else metric_cols[0]; display=display.sort_values(sortcol,ascending=False).head(20)
         cols=['player_name']+metric_cols; rows=[[P(labels.get(c,c),head) for c in cols]]
         for _,r in display.iterrows(): rows.append([P(str(r[c]) if c=='player_name' else ('—' if pd.isna(r[c]) else f'{float(r[c]):.0f}'),small) for c in cols])
         widths=[5.8*cm]+[(21.9/len(metric_cols))*cm for _ in metric_cols]; story.append(tbl(rows,widths,'#0369A1'))
-    story += [PageBreak(),section('8. Beavatkozást igénylő játékosok','#FEE2E2')]
+    story += [PageBreak(),section('7. Beavatkozást igénylő játékosok','#FEE2E2')]
     flags=[]
     if not risk_df.empty:
         pc='Játékos' if 'Játékos' in risk_df else ('player_name' if 'player_name' in risk_df else risk_df.columns[0]); lc='Kockázati szint' if 'Kockázati szint' in risk_df else None; rc='Fő okok' if 'Fő okok' in risk_df else ('Fő ok' if 'Fő ok' in risk_df else None)
         for _,r in risk_df.iterrows():
             level=str(r.get(lc,'Figyelendő')) if lc else 'Figyelendő'; reason=str(r.get(rc,'')) if rc else ''
-            if level.strip().lower()!='alacsony' or 'részvétel' in reason.lower() or 'reszvetel' in _norm_mapping_text(reason): flags.append((str(r.get(pc,'')),level,reason))
-    if flags: story.append(tbl([[P('Játékos',head),P('Szint',head),P('Miért fontos?',head)]]+[[P(a,small),P(b,small),P(c,small)] for a,b,c in flags[:12]],[6.5*cm,4.0*cm,17.2*cm],'#7F1D1D'))
+            if level.strip().lower()!='alacsony' or 'részvétel' in reason.lower() or 'reszvetel' in _norm_mapping_text(reason): flags.append((str(r.get(pc,'')),level,reason,_fpi_v304_player_risk_suggestion(level,reason)))
+    if flags:
+        risk_counts=pd.Series([b for _,b,_,_ in flags]).value_counts()
+        story += [_fpi_v304_compact_bar_chart(list(risk_counts.items()),'Játékoskockázati megoszlás',12.5,3.5,' fő'),Spacer(1,.10*cm)]
+        story.append(tbl([[P('Játékos',head),P('Szint',head),P('Miért fontos?',head),P('Javaslat',head)]]+[[P(a,small),P(b,small),P(c,small),P(d,small)] for a,b,c,d in flags[:12]],[5.0*cm,3.2*cm,9.5*cm,10.0*cm],'#7F1D1D'))
     else: story.append(P('Nincs olyan játékosjelzés, amely az aktuális adatok alapján azonnali beavatkozást igényel. Az alacsony kockázatú, érdemi eltérés nélküli sorokat a riport szándékosan nem listázza.'))
     doc.build(story); buffer.seek(0); return buffer.getvalue()
 
