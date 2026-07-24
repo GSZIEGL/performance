@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V403_FOOTBALL_INTELLIGENCE_FUSION_2026_07_24"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V404_PLATFORM_CONSISTENCY_DESIGN_2026_07_24"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -1019,7 +1019,16 @@ def _fpi_apply_v115_light_ui_patch() -> None:
             fill: #0f172a !important;
             border-color: #cbd5e1 !important;
         }
-        </style>
+    
+    /* V404 unified platform design */
+    :root { --fpi-navy:#0F172A; --fpi-blue:#1D4ED8; --fpi-green:#15803D; --fpi-amber:#B45309; --fpi-red:#B91C1C; --fpi-soft:#F8FAFC; }
+    .block-container {max-width: 1480px; padding-top: 1.15rem; padding-bottom: 2.5rem;}
+    h1,h2,h3 {letter-spacing:-.025em;}
+    [data-testid="stMetric"] {border:1px solid rgba(148,163,184,.24); border-radius:16px; padding:14px 16px; background:rgba(248,250,252,.045);}
+    [data-testid="stMetricValue"] {font-weight:900; letter-spacing:-.035em;}
+    .stDownloadButton>button, .stButton>button {border-radius:12px; min-height:2.8rem; font-weight:800;}
+    .fpi-v404-panel {border:1px solid rgba(148,163,184,.24);border-radius:18px;padding:18px 20px;margin:12px 0;background:rgba(248,250,252,.045);}
+    </style>
         """,
         unsafe_allow_html=True,
     )
@@ -21199,6 +21208,198 @@ def _build_tactical_executive_context(gps_context: Dict[str, object], tactical_c
         "pdf_direct_findings_count": len(((tactical_ctx.get("pdf_insights") or {}).get("sportsbase_findings", []) or [])),
         "pdf_direct_lines_count": len(((tactical_ctx.get("pdf_insights") or {}).get("sportsbase_lines", []) or [])),
     }
+
+# -----------------------------------------------------------------------------
+# V404 - Platform Consistency + Own Team Intelligence
+# -----------------------------------------------------------------------------
+
+def _fpi_v404_pdf_text(value: object) -> str:
+    return pdf_safe_text(value).replace("ő", "ö").replace("Ő", "Ö").replace("ű", "ü").replace("Ű", "Ü")
+
+
+def _fpi_v404_scale5(score: object) -> tuple[int, str]:
+    try:
+        s = float(score)
+    except Exception:
+        s = 50.0
+    n = max(1, min(5, int(round(s if s <= 5 else s / 20.0))))
+    return n, {1: "Fejlesztendö", 2: "Figyelendö", 3: "Stabil", 4: "Jó", 5: "Kiemelkedö"}[n]
+
+
+def _fpi_v404_source_reliability(tactical_context: Optional[Dict[str, object]], has_gps: bool) -> tuple[int, str, str]:
+    ctx = tactical_context or {}
+    flags = []
+    if has_gps:
+        flags.append("GPS")
+    if ctx.get("own_team_metrics"):
+        flags.append("csapat Excel")
+    if ctx.get("own_player_tables") or ctx.get("own_player_evaluation"):
+        flags.append("játékos Excel")
+    if _fpi_own_pdf_findings_v156(ctx, 3):
+        flags.append("taktikai PDF")
+    n = max(1, min(5, len(flags) + 1 if flags else 1))
+    return n, _fpi_v404_scale5(n)[1], ", ".join(flags) if flags else "nincs értékelhetö forrás"
+
+
+def _fpi_v404_own_dimensions(readiness: Optional[float], metrics: Dict[str, object]) -> List[Dict[str, object]]:
+    dims = []
+    if readiness is not None:
+        n, status = _fpi_v404_scale5(readiness)
+        dims.append({"Terület": "Fizikai készenlét", "Pont": n, "Státusz": status,
+                     "Def": "A heti terhelés, sebességi expozíció és játékoskockázat közös állapota.",
+                     "Most": f"A GPS readiness {int(round(float(readiness)))}/100."})
+    def val(key, default):
+        try:
+            return float(metrics.get(key, default) or default)
+        except Exception:
+            return float(default)
+    possession = val("possession_pct", 50)
+    passacc = val("passes_accurate_pct", 78)
+    press = val("pressing_success_pct", 25)
+    ppda = val("ppda", 12)
+    entries = val("final_third_entries", 30)
+    counters = val("counterattacks", 4)
+    recoveries = val("recoveries", 45)
+    lost = val("lost_balls", 105)
+    raw = [
+        ("Játékfelépítés", max(0, min(100, (passacc - 65) * 3.1)), "A labdakihozatal és passzbiztonság minösége.", f"Passzpontosság {passacc:.1f}%, labdabirtoklás {possession:.1f}%"),
+        ("Területnyerés", max(0, min(100, entries * 2.0)), "A támadóharmad elérésének és progressziónak hatékonysága.", f"Támadóharmad-belépések {entries:.0f}"),
+        ("Pressing", max(0, min(100, press * 2.4 + max(0, 14 - ppda) * 3)), "A letámadás aktivitása és eredményessége.", f"Presszingsiker {press:.1f}%, PPDA {ppda:.1f}"),
+        ("Átmenetek", max(0, min(100, counters * 10 + 40)), "A labdaszerzés utáni gyors támadás és visszarendezödés minösége.", f"Kontratámadások {counters:.0f}"),
+        ("Védekezési kontroll", max(0, min(100, recoveries * 1.25 - max(0, lost - 100) * .4)), "A labdaszerzési aktivitás és labdavesztési kockázat egyensúlya.", f"Labdaszerzések {recoveries:.0f}, labdavesztések {lost:.0f}"),
+    ]
+    for name, score, definition, now in raw:
+        n, status = _fpi_v404_scale5(score)
+        dims.append({"Terület": name, "Pont": n, "Státusz": status, "Def": definition, "Most": now})
+    return dims
+
+
+def _fpi_v404_priority_rows(dimensions: List[Dict[str, object]]) -> List[Dict[str, object]]:
+    actions = {
+        "Fizikai készenlét": "A heti dózist a readiness és a kockázati lista alapján módosítsd; az alulterheltek kapjanak célzott pótlást.",
+        "Játékfelépítés": "Pozíciós labdakihozatal 7v5/8v6, harmadik ember kapcsolatokkal és irányított presszinggel.",
+        "Területnyerés": "Félterületi progresszió és vonaláttörö passzok 6v6+3 joker játékban.",
+        "Pressing": "Triggeralapú 6v6 pressingjáték, rövid ismétlésekkel és teljes minöségü pihenövel.",
+        "Átmenetek": "Labdaszerzés után 8–10 másodperces kaputámadás, majd azonnali visszatámadás.",
+        "Védekezési kontroll": "Kompakt blokk, rest defense és labdavesztés utáni elsö öt másodperc gyakorlása.",
+    }
+    rows = []
+    for d in sorted(dimensions, key=lambda x: int(x["Pont"])):
+        p = int(d["Pont"])
+        if p <= 2:
+            kind, priority = "Fejlesztendö", 5 if p == 1 else 4
+        elif p == 3:
+            kind, priority = "Figyelendö", 3
+        else:
+            kind, priority = "Erösség", 2 if p == 4 else 1
+        rows.append({"Prioritás": priority, "Típus": kind, "Terület": d["Terület"], "Állapot": f"{p}/5 – {d['Státusz']}", "Javaslat": actions[d["Terület"]], "Miért": d["Most"]})
+    return rows[:6]
+
+
+def _fpi_v404_pdf_styles(font_name: str, font_bold: str) -> Dict[str, ParagraphStyle]:
+    styles = getSampleStyleSheet()
+    return {
+        "title": ParagraphStyle("V404Title", parent=styles["Title"], fontName=font_bold, fontSize=21, leading=24, textColor=colors.HexColor("#0F172A")),
+        "subtitle": ParagraphStyle("V404Subtitle", parent=styles["Normal"], fontName=font_name, fontSize=9.2, leading=12, textColor=colors.HexColor("#475569")),
+        "body": ParagraphStyle("V404Body", parent=styles["BodyText"], fontName=font_name, fontSize=9.4, leading=12.5, textColor=colors.HexColor("#111827"), alignment=4),
+        "small": ParagraphStyle("V404Small", parent=styles["BodyText"], fontName=font_name, fontSize=8.4, leading=10.8, textColor=colors.HexColor("#111827"), alignment=4),
+        "head": ParagraphStyle("V404Head", parent=styles["BodyText"], fontName=font_bold, fontSize=8.8, leading=10.5, textColor=colors.white, alignment=1),
+        "strong": ParagraphStyle("V404Strong", parent=styles["BodyText"], fontName=font_bold, fontSize=10.5, leading=13.2, textColor=colors.HexColor("#0F172A")),
+    }
+
+
+def _fpi_v404_render_own_team(tactical_context: Dict[str, object], readiness: Optional[float], risk_counts: Tuple[int, int], week_label: str, demo_label: str, mode: str) -> Optional[bytes]:
+    metrics = tactical_context.get("own_team_metrics", {}) or {}
+    own_eval = tactical_context.get("own_player_evaluation", []) or _fpi_build_player_evaluation_v132(tactical_context.get("own_player_tables", {}) or {}, side="own", max_rows=10)
+    findings = _fpi_own_pdf_findings_v156(tactical_context, 6)
+    if readiness is None and not metrics and not own_eval and not findings:
+        return None
+    dims = _fpi_v404_own_dimensions(readiness, metrics)
+    priorities = _fpi_v404_priority_rows(dims)
+    rel_n, rel_status, rel_sources = _fpi_v404_source_reliability(tactical_context, readiness is not None)
+    best, weakest = max(dims, key=lambda x: int(x["Pont"])), min(dims, key=lambda x: int(x["Pont"]))
+    font_name, font_bold = _register_pdf_font()
+    sty = _fpi_v404_pdf_styles(font_name, font_bold)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), rightMargin=.9*cm, leftMargin=.9*cm, topMargin=.75*cm, bottomMargin=.75*cm)
+    def P(v, s="body"):
+        return Paragraph(html.escape(_fpi_v404_pdf_text(v)).replace("\n", "<br/>") or "—", sty[s])
+    def tbl(rows, widths, header="#0F172A"):
+        t = Table(rows, colWidths=widths, repeatRows=1, splitByRow=1)
+        t.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor(header)), ("GRID", (0,0), (-1,-1), .3, colors.HexColor("#CBD5E1")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F8FAFC")]), ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6), ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
+        return t
+    def sec(text, bg="#E0F2FE", border="#60A5FA"):
+        t = Table([[P(text, "strong")]], colWidths=[27.7*cm])
+        t.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,-1), colors.HexColor(bg)), ("BOX", (0,0), (-1,-1), .6, colors.HexColor(border)), ("LEFTPADDING", (0,0), (-1,-1), 8), ("RIGHTPADDING", (0,0), (-1,-1), 8), ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
+        return t
+    high_risk, med_risk = risk_counts
+    story = [P("FOOTBALL INTELLIGENCE", "title"), P(f"Own Team Intelligence | {demo_label or 'ÉLES RIPORT'} | {mode} | {week_label}", "subtitle"), Spacer(1, .14*cm)]
+    executive = f"Legerösebb terület: {best['Terület']} ({best['Pont']}/5). Fö fejlesztési pont: {weakest['Terület']} ({weakest['Pont']}/5)."
+    if readiness is not None:
+        executive += f" A readiness {int(round(readiness))}/100; {high_risk} magas és {med_risk} közepes kockázatú játékos látható."
+    call = Table([[P("VEZETÖI KULCSÜZENET", "strong"), P(executive)]], colWidths=[5.4*cm, 22.3*cm])
+    call.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#ECFDF5")), ("BOX", (0,0), (-1,-1), .8, colors.HexColor("#22C55E")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 8), ("RIGHTPADDING", (0,0), (-1,-1), 8), ("TOPPADDING", (0,0), (-1,-1), 7), ("BOTTOMPADDING", (0,0), (-1,-1), 7)]))
+    story += [call, Spacer(1, .18*cm), sec("1. Saját csapat állapotképe")]
+    rows = [[P("Terület", "head"), P("Értékelés", "head"), P("Állapot", "head"), P("Mit jelent? / Most", "head")]]
+    for d in dims:
+        rows.append([P(d["Terület"], "small"), P(f"{d['Pont']}/5", "small"), P(d["Státusz"], "small"), P(f"Mit jelent? {d['Def']} Most: {d['Most']}", "small")])
+    rows.append([P("Adatmegbízhatóság", "small"), P(f"{rel_n}/5", "small"), P(rel_status, "small"), P(f"Felhasznált források: {rel_sources}.", "small")])
+    story.append(tbl(rows, [4.5*cm, 2.0*cm, 3.4*cm, 17.8*cm], "#1D4ED8"))
+    story += [PageBreak(), sec("2. Erösségek, figyelendö és fejlesztendö területek", "#FEF3C7", "#F59E0B")]
+    pr = [[P("Prioritás", "head"), P("Típus", "head"), P("Terület", "head"), P("Állapot", "head"), P("Edzöi javaslat", "head"), P("Miért?", "head")]]
+    for r in priorities:
+        pr.append([P(f"{r['Prioritás']}/5", "small"), P(r["Típus"], "small"), P(r["Terület"], "small"), P(r["Állapot"], "small"), P(r["Javaslat"], "small"), P(r["Miért"], "small")])
+    story.append(tbl(pr, [2.0*cm, 2.8*cm, 3.8*cm, 3.0*cm, 8.3*cm, 7.8*cm], "#92400E"))
+    if findings:
+        story += [Spacer(1, .16*cm), sec("3. Saját taktikai PDF – visszatérö minták", "#EDE9FE", "#8B5CF6")]
+        story.append(tbl([[P("Forrás", "head"), P("Megállapítás", "head")]] + [[P("Saját taktikai PDF", "small"), P(x, "small")] for x in findings], [5.0*cm, 22.7*cm], "#5B21B6"))
+    story += [PageBreak(), sec("4. Játékosszintü Own Team Intelligence", "#DCFCE7", "#22C55E")]
+    rr = [[P("Játékos", "head"), P("Szerep", "head"), P("Bizonyíték", "head"), P("Értelmezés", "head"), P("Konkrét feladat", "head")]]
+    for r in own_eval[:10]:
+        rr.append([P(r.get("Játékos", ""), "small"), P(r.get("Szerep", ""), "small"), P(r.get("Bizonyíték", ""), "small"), P(r.get("Értelmezés", ""), "small"), P(r.get("Javaslat", "") or "Egyéni videós és pályafeladat.", "small")])
+    if len(rr) == 1:
+        rr.append([P("Nincs játékos Excel", "small"), P("—", "small"), P("Csapatszintü források", "small"), P("Játékosszintü állítás nem készíthetö.", "small"), P("Tölts fel saját játékos Excelt.", "small")])
+    story.append(tbl(rr, [3.8*cm, 4.3*cm, 5.6*cm, 6.5*cm, 7.5*cm], "#166534"))
+    story += [PageBreak(), sec("5. Egységes heti végrehajtás", "#DBEAFE", "#3B82F6")]
+    micro = [("MD-4", "Játékfelépítés + volumen", "Pozíciós játék közepes-magas volumennel; a technikai minöség maradjon elsödleges."), ("MD-3", "Fö intenzitási nap", "A leggyengébb taktikai dimenzió meccsintenzitáson, szükség esetén HSR/sprint dózissal."), ("MD-2", "Meccsterv és kontroll", "Rövid, specifikus blokkok; a terhelés csökken, a döntési pontok élesednek."), ("MD-1", "Aktiváció", "Kezdöhelyzetek, elsö támadó gondolat, pontrúgás és rövid aktiváció.")]
+    story.append(tbl([[P("Nap", "head"), P("Közös fókusz", "head"), P("Végrehajtás", "head")]] + [[P(a, "small"), P(b, "small"), P(c, "small")] for a,b,c in micro], [2.5*cm, 6.0*cm, 19.2*cm], "#1E3A8A"))
+    story.append(Spacer(1, .12*cm))
+    story.append(P("Skála: 1 fejlesztendö, 2 figyelendö, 3 stabil, 4 jó, 5 kiemelkedö. A négy riportmód közös státusz- és prioritáslogikát használ.", "small"))
+    doc.build(story)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def build_fpi_own_team_profile_pdf_bytes(data: pd.DataFrame, selected_week: Optional[str] = None, playstyle: str = "Kiegyensúlyozott", tactical_context: Optional[Dict[str, object]] = None, demo_label: str = "") -> Optional[bytes]:
+    try:
+        ctx = _fpi_report_context(data, selected_week, playstyle)
+    except Exception:
+        return None
+    if ctx.get("error"):
+        return None
+    tctx = tactical_context if tactical_context is not None else st.session_state.get("tactical_pro_context", {})
+    tctx = tctx or {}
+    readiness = float(ctx.get("readiness_score", 70) or 70)
+    risk_df = ctx.get("risk_df") if isinstance(ctx.get("risk_df"), pd.DataFrame) else pd.DataFrame()
+    risk_counts = _fpi_count_risk_levels_v126(risk_df) if "_fpi_count_risk_levels_v126" in globals() else (0, 0)
+    mode = "GPS + taktikai" if (tctx.get("own_team_metrics") or tctx.get("own_player_tables") or _fpi_own_pdf_findings_v156(tctx, 1)) else "GPS-only"
+    return _fpi_v404_render_own_team(tctx, readiness, risk_counts, f"Hét: {format_week_label(str(ctx.get('selected_week', '')))}", demo_label, mode)
+
+
+def build_fpi_own_team_tactical_only_pdf_bytes_v156(tactical_context: Optional[Dict[str, object]], demo_label: str = "") -> Optional[bytes]:
+    return _fpi_v404_render_own_team(tactical_context or {}, None, (0, 0), "GPS-adat nélkül", demo_label, "Tactical-only")
+
+
+FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
+    ("14. V404 – Platformkonzisztencia és Own Team Intelligence", [
+        "A saját csapat riport ugyanazt az 1–5 állapot- és prioritásskálát használja, mint a Tactical-only és a GPS+taktikai riport.",
+        "A saját csapat elemzés automatikusan GPS-only, Tactical-only vagy GPS+taktikai módba kerül az elérhetö források alapján.",
+        "A riport külön jelöli az erösséget, a stabil állapotot, a figyelendö és a fejlesztendö területeket.",
+        "Az adatmegbízhatóság a tényleges forrásfedezetet értékeli: GPS, saját csapat Excel, saját játékos Excel és taktikai PDF.",
+        "A négy termék közös fejlécet, táblázati ritmust, státusznyelvet, oldallogikát és vezetöi kulcsüzenetet használ."
+    ])
+]
+
 
 def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
     st.markdown("## 🧠 Tactical Pro+ / Adaptive Intelligence")
