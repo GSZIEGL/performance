@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V304_COACH_REPORT_UX_2026_07_24"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V401_GPS_REPORT_2_0_2026_07_24"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -4073,7 +4073,7 @@ def pdf_safe_text(text: object) -> str:
     if text is None or (isinstance(text, float) and pd.isna(text)):
         return ""
     text = str(text)
-    replacements = {"ő": "ö", "Ő": "Ö", "ű": "ü", "Ű": "Ü"}
+    replacements = {"ő": "ö", "Ő": "ö", "ű": "ü", "Ű": "ü"}
     for old, new in replacements.items():
         text = text.replace(old, new)
     return text
@@ -11155,67 +11155,104 @@ def _fpi_v204_conclusions(mode, quality, sessions, player_period, readiness):
 
 
 
-def _fpi_v304_compact_bar_chart(items, title_text:str, width_cm:float=13.2, height_cm:float=4.2, value_suffix:str=""):
-    """Kompakt, dependency-light ReportLab vízszintes oszlopdiagram."""
+def _fpi_v401_compact_bar_chart(items, title_text: str, width_cm: float = 13.2, height_cm: float = 4.2, value_suffix: str = "", max_items: int = 8):
+    """V401: kompakt ReportLab-diagram, Unicode-biztos címkékkel és szabályozható elemszámmal."""
     try:
         from reportlab.graphics.shapes import Drawing, Rect, String
         from reportlab.lib import colors as rl_colors
-        clean=[]
-        for label,value in items:
+        chart_font, chart_bold = _register_pdf_font()
+        clean = []
+        for label, value in items:
             try:
-                v=float(value)
-                if pd.notna(v): clean.append((str(label),v))
+                v = float(value)
+                if pd.notna(v):
+                    clean.append((pdf_safe_text(str(label)), v))
             except Exception:
                 continue
-        if not clean:return Spacer(1,0)
-        clean=clean[:8]
-        W,H=width_cm*cm,height_cm*cm
-        d=Drawing(W,H)
-        d.add(String(0,H-11,title_text,fontName='Helvetica-Bold',fontSize=8.5,fillColor=rl_colors.HexColor('#0F172A')))
-        top=H-25; row_h=max(13,(H-31)/max(len(clean),1)); label_w=W*.28; bar_w=W*.55
-        vmax=max(abs(v) for _,v in clean) or 1
-        for i,(label,v) in enumerate(clean):
-            y=top-i*row_h
-            d.add(String(0,y,label[:22],fontName='Helvetica',fontSize=7.1,fillColor=rl_colors.HexColor('#334155')))
-            d.add(Rect(label_w,y-2,bar_w,6,fillColor=rl_colors.HexColor('#E2E8F0'),strokeColor=None))
-            d.add(Rect(label_w,y-2,max(1,bar_w*abs(v)/vmax),6,fillColor=rl_colors.HexColor('#0F766E'),strokeColor=None))
-            val=f"{v:.0f}{value_suffix}" if abs(v)>=10 else f"{v:.1f}{value_suffix}"
-            d.add(String(label_w+bar_w+4,y-1,val,fontName='Helvetica-Bold',fontSize=6.9,fillColor=rl_colors.HexColor('#0F172A')))
+        if not clean:
+            return Spacer(1, 0)
+        clean = clean[:max(1, int(max_items))]
+        W, H = width_cm * cm, height_cm * cm
+        d = Drawing(W, H)
+        d.add(String(0, H - 11, pdf_safe_text(title_text), fontName=chart_bold, fontSize=8.5, fillColor=rl_colors.HexColor('#0F172A')))
+        top = H - 25
+        row_h = max(11, (H - 31) / max(len(clean), 1))
+        label_w = W * .31
+        bar_w = W * .51
+        vmax = max(abs(v) for _, v in clean) or 1
+        for i, (label, v) in enumerate(clean):
+            y = top - i * row_h
+            d.add(String(0, y, label[:25], fontName=chart_font, fontSize=6.8, fillColor=rl_colors.HexColor('#334155')))
+            d.add(Rect(label_w, y - 2, bar_w, 6, fillColor=rl_colors.HexColor('#E2E8F0'), strokeColor=None))
+            d.add(Rect(label_w, y - 2, max(1, bar_w * abs(v) / vmax), 6, fillColor=rl_colors.HexColor('#0F766E'), strokeColor=None))
+            val = f"{v:.0f}{value_suffix}" if abs(v) >= 10 else f"{v:.1f}{value_suffix}"
+            d.add(String(label_w + bar_w + 4, y - 1, val, fontName=chart_bold, fontSize=6.7, fillColor=rl_colors.HexColor('#0F172A')))
         return d
     except Exception:
-        return Spacer(1,0)
+        return Spacer(1, 0)
 
 
-def _fpi_v304_session_chart(sessions:pd.DataFrame):
-    if sessions is None or sessions.empty:return Spacer(1,0)
-    charts=[]
-    labels=[str(x)[:18] for x in sessions.get('Session',pd.Series(range(len(sessions)))).tolist()]
-    for col,title,suffix in [('Össztáv','Sessionprofil – medián össztáv',' m'),('HSR','Sessionprofil – medián HSR',' m')]:
+# V304-kompatibilis alias: a régebbi hívások is az új rajzolót használják.
+def _fpi_v304_compact_bar_chart(items, title_text: str, width_cm: float = 13.2, height_cm: float = 4.2, value_suffix: str = "", max_items: int = 8):
+    return _fpi_v401_compact_bar_chart(items, title_text, width_cm, height_cm, value_suffix, max_items)
+
+
+def _fpi_v304_session_chart(sessions: pd.DataFrame):
+    if sessions is None or sessions.empty:
+        return Spacer(1, 0)
+    charts = []
+    labels = [str(x)[:18] for x in sessions.get('Session', pd.Series(range(len(sessions)))).tolist()]
+    for col, title, suffix in [('Össztáv', 'Sessionprofil – medián össztáv', ' m'), ('HSR', 'Sessionprofil – medián HSR', ' m')]:
         if col in sessions.columns:
-            charts.append(_fpi_v304_compact_bar_chart(list(zip(labels,pd.to_numeric(sessions[col],errors='coerce'))),title,13.4,4.0,suffix))
-    return Table([charts[:2]],colWidths=[13.7*cm]*len(charts[:2])) if charts else Spacer(1,0)
+            charts.append(_fpi_v401_compact_bar_chart(list(zip(labels, pd.to_numeric(sessions[col], errors='coerce'))), title, 13.4, 4.0, suffix, max_items=8))
+    return Table([charts[:2]], colWidths=[13.7 * cm] * len(charts[:2])) if charts else Spacer(1, 0)
 
 
-def _fpi_v304_trend_charts(aligned:pd.DataFrame):
-    if aligned is None or aligned.empty:return Spacer(1,0)
-    charts=[]; labels=aligned['Hét'].astype(str).tolist() if 'Hét' in aligned else [str(i+1) for i in range(len(aligned))]
-    for col,title,suffix in [('Medián load','Időarányos Load-trend',''),('Medián HSR','Időarányos HSR-trend',' m')]:
+def _fpi_v304_trend_charts(aligned: pd.DataFrame):
+    if aligned is None or aligned.empty:
+        return Spacer(1, 0)
+    charts = []
+    labels = aligned['Hét'].astype(str).tolist() if 'Hét' in aligned else [str(i + 1) for i in range(len(aligned))]
+    for col, title, suffix in [('Medián load', 'Időarányos Load-trend', ''), ('Medián HSR', 'Időarányos HSR-trend', ' m')]:
         if col in aligned.columns:
-            charts.append(_fpi_v304_compact_bar_chart(list(zip(labels,pd.to_numeric(aligned[col],errors='coerce'))),title,13.4,4.1,suffix))
-    return Table([charts[:2]],colWidths=[13.7*cm]*len(charts[:2])) if charts else Spacer(1,0)
+            charts.append(_fpi_v401_compact_bar_chart(list(zip(labels, pd.to_numeric(aligned[col], errors='coerce'))), title, 13.4, 4.1, suffix, max_items=6))
+    return Table([charts[:2]], colWidths=[13.7 * cm] * len(charts[:2])) if charts else Spacer(1, 0)
 
 
-def _fpi_v304_player_charts(players:pd.DataFrame):
-    if players is None or players.empty:return Spacer(1,0)
-    charts=[]
-    for col,title,suffix in [('training_load','Top / alsó 5 – Load',''),('hsr_distance','Top / alsó 5 – HSR',' m')]:
-        if col not in players.columns:continue
-        tmp=players[['player_name',col]].copy();tmp[col]=pd.to_numeric(tmp[col],errors='coerce');tmp=tmp.dropna().sort_values(col)
-        if tmp.empty:continue
-        pick=pd.concat([tmp.head(5),tmp.tail(5)]).drop_duplicates('player_name')
-        charts.append(_fpi_v304_compact_bar_chart(list(zip(pick['player_name'],pick[col])),title,13.4,5.1,suffix))
-    return Table([charts[:2]],colWidths=[13.7*cm]*len(charts[:2])) if charts else Spacer(1,0)
+def _fpi_v401_top_bottom_items(players: pd.DataFrame, metric: str):
+    """Pontosan 5 alsó + 5 top játékos, ha legalább 10 külön játékos rendelkezésre áll.
+    Kisebb keretnél ismétlés nélkül, kiegyensúlyozott alsó/top bontást ad.
+    """
+    tmp = players[['player_name', metric]].copy()
+    tmp[metric] = pd.to_numeric(tmp[metric], errors='coerce')
+    tmp = tmp.dropna(subset=['player_name', metric]).drop_duplicates('player_name').sort_values(metric, kind='mergesort')
+    n = len(tmp)
+    if n == 0:
+        return [], 0, 0
+    bottom_n = min(5, n // 2 if n < 10 else 5)
+    top_n = min(5, n - bottom_n)
+    bottom = tmp.head(bottom_n).copy()
+    used = set(bottom['player_name'].astype(str))
+    top = tmp[~tmp['player_name'].astype(str).isin(used)].tail(top_n).sort_values(metric, ascending=False).copy()
+    items = [(f"Alsó | {r.player_name}", r[metric]) for _, r in bottom.iterrows()]
+    items += [(f"Top | {r.player_name}", r[metric]) for _, r in top.iterrows()]
+    return items, len(bottom), len(top)
 
+
+def _fpi_v304_player_charts(players: pd.DataFrame):
+    if players is None or players.empty:
+        return Spacer(1, 0)
+    charts = []
+    for col, label, suffix in [('training_load', 'Load', ''), ('hsr_distance', 'HSR', ' m')]:
+        if col not in players.columns:
+            continue
+        items, bottom_n, top_n = _fpi_v401_top_bottom_items(players, col)
+        if not items:
+            continue
+        title = f"{label} – alsó {bottom_n} és top {top_n} ({len(items)} külön játékos)"
+        chart_height = 5.8 if len(items) >= 9 else 5.1
+        charts.append(_fpi_v401_compact_bar_chart(items, title, 13.4, chart_height, suffix, max_items=10))
+    return Table([charts[:2]], colWidths=[13.7 * cm] * len(charts[:2])) if charts else Spacer(1, 0)
 
 def _fpi_v304_player_risk_suggestion(level:str, reason:str)->str:
     txt=_norm_mapping_text(f"{level} {reason}")
@@ -17742,7 +17779,7 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
 FPI_METHODOLOGY_SECTIONS_V143=list(FPI_METHODOLOGY_SECTIONS_V143)+[
 ("10. V302 - Readiness bontás",["A readiness összpontszám mellett a riport megmutatja a fő komponenseket és azok státuszát.","Csonka héten a readiness előzetes, nem lezárt heti minősítés."]),
 ("11. Dinamikus benchmark",["A heti benchmark csonka héten időarányosan csökken.","Recovery, overload és felkészülési hét eltérő heti célfaktort használ.","Az egy edzés célzónáját a hét típusa módosítja, a csonka hét önmagában nem."]),
-("12. Coach Intelligence",["A rendszer kiszámolja a célzónához képesti hiányt vagy többletet.","Konkrét blokkot és leállítási feltételt javasol."]),
+("12. Coach Intelligence",["A rendszer kiszámolja a célzónához képesti hiányt vagy többletet.","Konkrét beavatkozást ad, és külön megmagyarázza, miért indokolt az adott lépés."]),
 ("13. Riportkonzisztencia",["A GPS-only és GPS+taktikai riport közös adat- és számítási motort használ.","Az integrált riport későbbi oldalai bizonyítékot adnak, nem ismétlik szó szerint a vezetői üzeneteket."])
 ]
 
@@ -17755,6 +17792,23 @@ FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
             "A PDF minden benchmarktábláján feltünteti az aktív korosztályt, szintet, posztösszetételt, játékmodellt, heti típust és a csonka hét időarányos faktorát.",
             "Csonka héten a negatív heti eltérés előzetes alulexpozíció, nem automatikus közepes vagy magas kockázat.",
             "MD-terv kizárólag jövőbeli vagy kézzel megadott következő meccsnapból készül; múltbeli meccsből nem."
+        ],
+    ),
+]
+
+
+FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
+    (
+        "15. V401 – GPS-only Report 2.0",
+        [
+            "A GPS-only PDF és a GPS-rész azonos master datasetből, meccsreferenciából, benchmarkprofilból, readiness-bontásból és játékoskockázati logikából dolgozik.",
+            "A readiness-komponensek Magyarázat mezője két részből áll: Mit jelent? – a mutató állandó definíciója; Most: – az aktuális hét adatalapú értelmezése.",
+            "A heti benchmark az elsődleges vezetői referencia. Az egy edzésre számolt érték nem jelenik meg második, párhuzamos benchmarktáblaként a GPS-only PDF-ben.",
+            "A sessionprofil medián játékosértékeket mutat. Ez megakadályozza, hogy a különböző létszámú edzések pusztán a keretméret miatt torzuljanak.",
+            "A Top/alsó játékosdiagram legalább tíz értékelhető játékosnál pontosan öt alsó és öt top, egymást nem ismétlő játékost jelenít meg. Kisebb keretnél minden játékos legfeljebb egyszer szerepel.",
+            "A High Efforts a rendelkezésre álló importtól függően szolgáltatói mutató vagy gyorsulás-, lassulás- és egyéb robbanékony akciókból készített proxy; nem azonos a Sprint mutatóval.",
+            "A coach recommendation a hiány vagy többlet számszerűsítése mellett konkrét beavatkozást és szakmai indoklást ad. A riport nem használ önmagában automatikus leállítási küszöböt orvosi vagy edzői döntés helyett.",
+            "A PDF szövegei és diagramcímkéi egységes karakter-normalizálást használnak; a hosszú ő/ű karakterek egyszerű ö/ü alakban jelennek meg a maximális PDF-kompatibilitás érdekében."
         ],
     ),
 ]
