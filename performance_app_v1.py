@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V404_PLATFORM_CONSISTENCY_DESIGN_2026_07_24"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V405_METHODOLOGY_TIMING_2026_07_25"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -4958,13 +4958,31 @@ def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: s
         max_train_sprint = train["sprint_distance"].max()
         if pd.notna(match_sprint) and match_sprint > 0 and pd.notna(max_train_sprint):
             ratio = max_train_sprint / match_sprint
-            speed_component = min(100, ratio / 0.35 * 100)
+            # V405: a sebességi expozíció nemcsak a mennyiséget, hanem az időzítést is értékeli.
+            # Ugyanaz a sprintdózis MD-3/MD-4 környékén optimálisabb, mint MD-2/MD-1 napon.
+            sprint_peak_idx = train["sprint_distance"].idxmax()
+            sprint_peak_md = str(train.loc[sprint_peak_idx, "md_label"]) if "md_label" in train.columns else ""
+            timing_factor = {
+                "MD-5": 0.90,
+                "MD-4": 1.00,
+                "MD-3": 1.00,
+                "MD-2": 0.70,
+                "MD-1": 0.35,
+            }.get(sprint_peak_md, 0.85)
+            dose_component = min(100, ratio / 0.35 * 100)
+            speed_component = dose_component * timing_factor
             if ratio < 0.15:
                 score -= 15
                 reasons.append("A héten alig látszik maximális sebességű inger a meccsigényhez képest.")
             elif ratio < 0.30:
                 score -= 7
                 reasons.append("A maximális sebességű inger visszafogott volt.")
+            elif sprint_peak_md == "MD-1":
+                score -= 10
+                reasons.append("A hét legnagyobb sprintterhelése MD-1 napra esett; a mennyiség megfelelő lehet, de az időzítés frissességi kockázatot ad.")
+            elif sprint_peak_md == "MD-2":
+                score -= 5
+                reasons.append("A hét legnagyobb sprintterhelése MD-2 napra esett; a sebességi inger megvan, de a meccshez közeli időzítés miatt nem kap maximális értékelést.")
             else:
                 score += 5
     components["speed_exposure"] = max(0, min(100, speed_component))
@@ -4991,7 +5009,23 @@ def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: s
             md2_load = md2["load_index"].sum()
             if pd.notna(peak_early) and peak_early > 0 and pd.notna(md2_load) and md2_load / peak_early > 0.80:
                 score -= 8
+                taper_component = min(taper_component, 45)
                 reasons.append("Az MD-2 terhelés közel volt a hét fő terhelési napjához.")
+            # V405: külön neuromuszkuláris kontroll. A magas MD-2 sprintdózis akkor is aggályos lehet,
+            # ha az összesített load nem mutat nagy kiugrást.
+            if "sprint_distance" in daily.columns:
+                early_sprint = md34["sprint_distance"].max()
+                md2_sprint = md2["sprint_distance"].sum()
+                if pd.notna(early_sprint) and early_sprint > 0 and pd.notna(md2_sprint):
+                    md2_sprint_ratio = md2_sprint / early_sprint
+                    if md2_sprint_ratio > 0.90:
+                        score -= 7
+                        taper_component = min(taper_component, 40)
+                        reasons.append("Az MD-2 sprintterhelés a fő sebességi nap szintjén volt; ez meccs előtt 48 órával frissességi kockázatot jelenthet.")
+                    elif md2_sprint_ratio > 0.70:
+                        score -= 3
+                        taper_component = min(taper_component, 55)
+                        reasons.append("Az MD-2 sprintterhelés magasabb a kívánatosnál; a következő ciklusban érdemes korábbra helyezni a fő sebességi ingert.")
     components["tapering"] = max(0, min(100, taper_component))
 
     # 4. Játékmodell illeszkedés
@@ -17876,170 +17910,58 @@ def build_fpi_own_team_tactical_only_pdf_bytes_v156(
 # V143 - Methodology content + PDF export
 # =========================================================
 FPI_METHODOLOGY_SECTIONS_V143 = [
-    (
-        "0. V403 – Football Intelligence Fusion",
-        "A GPS-only és Tactical-only motor közös skálát és közös döntési logikát használ. A taktikai állapot és prioritás 1–5 skálán jelenik meg: 1 fejlesztendö, 2 figyelendö, 3 stabil, 4 jó, 5 kiemelkedö. Az integrált FI Score 55% GPS-readiness és 45% taktikai állapot súlyozott kombinációja. A riport erösséget, fenntartandó területet és fejlesztési pontot egyaránt megjelenít. A játékos Excel felismerése a Player / Position / Minutes played / Passes / Progressive passes / Key passes / Interceptions és párharcmezökre is kiterjed."
-    ),
-
-    (
-        "1. Mire épül az FPI metodikája?",
-        [
-            "A Football Performance Intelligence nemzetközi sporttudományi szakirodalomra, saját és partneri GPS-adatokra, valamint gyakorlati teljesítményelemzési logikára épül.",
-            "A rendszer döntéstámogató eszköz: nem diagnózis, nem orvosi döntés és nem garantált sérülés-előrejelzés.",
-            "Az eredmények edzői megfigyeléssel, wellness/RPE, orvosi információval és a heti szakmai kontextussal együtt értelmezendők.",
-        ],
-    ),
-    (
-        "2. Mit jelent a Readiness?",
-        [
-            "A Readiness a csapat vagy játékos aktuális terhelési állapotának 0–100 közötti becslése.",
-            "Figyelembe vett fő területek: rövid távú terhelés, 3–7 napos állapot, 4 hetes trend, össztáv, Load, HSR, sprinttáv, sprintek, High Efforts és – ha elérhető – pulzus/HRV.",
-            "80–100: magas készenlét; 60–79: elfogadható, figyelendő; 40–59: csökkent; 0–39: alacsony.",
-            "Az alacsonyabb érték túlterhelést, alulterhelést vagy kedvezőtlen terhelési mintázatot is jelezhet.",
-        ],
-    ),
-    (
-        "3. Mit jelent a játékoskockázat?",
-        [
-            "A Player Risk Score nem sérülésjóslat, hanem korai figyelmeztető besorolás.",
-            "A rendszer a hirtelen terhelésváltozást, a négyhetes trendet, a túl- és alulterhelést, a sprint- és nagy sebességű futások mennyiségét, a gyorsításokból és lassításokból adódó terhelést, valamint a nagy intenzitású akciókat vizsgálja.",
-            "Alacsony: stabil profil. Közepes: egy vagy több figyelmeztető jel. Magas: több kedvezőtlen tényező egyidejű jelenléte.",
-        ],
-    ),
-    (
-        "4. Hogyan működnek a benchmarkok?",
-        [
-            "A referencia nem egyetlen fix érték: korosztály, bajnoki szint, játékosposzt és játékmodell alapján változik.",
-            "A fő referencia-területek: össztáv, terhelési pont, nagy sebességű futás, sprinttáv, sprintek száma és nagy intenzitású akciók.",
-            "Csapatszinten a rendszer a játékosállomány posztösszetételéből súlyozott referencia-profilt képez. A kapusok a sebességi benchmarkban kisebb, de nem nulla súlyt kapnak.",
-            "A referenciák nemzetközi szakirodalmi tartományokból és saját/partneri adatokból finomított döntéstámogató zónák.",
-        ],
-    ),
-    (
-        "5. Mit jelent a 4 hetes trend?",
-        [
-            "A legutóbbi hét értékeit nem önmagukban, hanem a játékos vagy csapat előző heteinek mintázatához viszonyítjuk.",
-            "A trend segít felismerni a hirtelen terhelésnövekedést, a tartós alulexpozíciót, az ingadozó terhelést és a sebességi inger hiányát.",
-            "A rendszer a trendet jelzésként használja, nem mechanikus döntési szabályként.",
-        ],
-    ),
-    (
-        "6. Hogyan készül a mikrociklus-javaslat?",
-        [
-            "A motor a heti edzésszámot, a meccsnapot, a készenléti és kockázati állapotot, a nagy sebességű futások és sprintek trendjét, a nagy intenzitású akciókat, a játékmodellt és a rendelkezésre álló taktikai anyagokat kapcsolja össze.",
-            "A terv 3–6 edzéses ciklushoz is igazítható, nem fix négynapos sablon.",
-            "GPS-only módban a fizikai expozíció és regeneráció vezeti a tervet. Taktikai input esetén az ellenfél-specifikus fókuszok is beépülnek.",
-        ],
-    ),
-    (
-        "7. Tactical Framework: 7 dimenzió és 9 stratégia",
-        [
-            "A 7 taktikai dimenzió: letámadás, labdakihozatal, átmenetek, támadó játék, pontrúgások, labdabirtoklás és lövésprofil.",
-            "A két fő értelmezési tengely: játékstílus (direkt–vegyes–kontroll–agresszív) és blokkmagasság (mély–közép–magas).",
-            "A 9 stratégiai profil: KON – kontra mély blokkból; GAT – gyors átmenet; BAT – középső blokk + átmenet; KIE – kiegyensúlyozott; PRS – presszing + átmenet; MLT – magas letámadás; DOM – dominancia; POZ – pozíciós támadás; LAB – labdatartás mélyebb szerkezetből.",
-            "A stratégia nem önmagában kész meccsterv: a rendszer csapatszintű taktikai megállapításokkal, ellenfél-játékos fókuszokkal és konkrét meccstervi teendőkkel differenciál.",
-        ],
-    ),
-    (
-        "8. Hogyan készülnek az edzői üzenetek?",
-        [
-            "Az erőnléti üzenetek témák szerint készülnek: készenlét, sebességi terhelés, heti volumen, terhelési pont, négyhetes trend, regeneráció, gyorsítások és lassítások, valamint játékoskockázat.",
-            "Egy riporton belül ugyanaz a motívum csak egyszer jelenhet meg. Így például az alacsony sprintterhelés nem ismétlődhet három külön sorban eltérő megfogalmazással.",
-            "A taktikai üzenetek a saját játékmodellből, az ellenfél erősségeiből és gyengeségeiből, a javasolt stratégiai profilból, az ellenfél játékosértékeléséből és a csapat aktuális fizikai állapotából állnak össze.",
-            "A rendszer az adott hét, ellenfél, saját játékmodell, stratégiai profil, játékosértékelés és terhelési állapot alapján állítja össze az üzeneteket. A taktikai célok naponta is változnak: más feladat készül a fő terhelési napra, az átmeneti napra, a meccstervi napra és az aktivációra.",
-            "Az üzenetek tudásbázisból és szakmai szabályokból épülnek fel. A rendszer témánként választ, majd hasonlóságvizsgálattal kiszűri, hogy ugyanaz a motívum több blokkban vagy három egymást követő sorban megismétlődjön.",
-            "Az Executive Summary 3–5 különböző témájú kulcsüzenetet jelenít meg rövid scouting-lánc formájában: megfigyelés → következmény → konkrét meccstervi válasz.",
-            "A taktikai nyelvezet NB I/NB II-es szakmai közeghez igazodik. Nem általános futballalapelveket tanít, hanem az ellenfél adataiból és a saját csapat aktuális állapotából levezetett, helyhez, játékoshoz és szituációhoz kötött döntési pontokat ad.",
-            "A riport nem használ félbehagyott, három ponttal levágott mondatokat. Ha a tartalom hosszabb, a PDF új sorba vagy új oldalra tör, de a szakmai gondolat teljes marad.",
-            "Az Executive Summary és a GPS-only riport ugyanazt a GPS-alapú erőnléti insight- és mikrocikluslogikát használja. A taktikai riport ezt csak taktikai fókuszokkal egészíti ki, ezért ugyanazon hét erőnléti megállapításai nem mondhatnak ellent egymásnak.",
-            "A GPS-only riportban nincs külön fogalomtár és nincs automatikus heti típus címke. A fogalmi magyarázatok kizárólag a Metodika Centerben találhatók.",
-            "A minta- és éles riportok ugyanazokat a renderelőfüggvényeket használják. A minták beépített demo adatokból, az éles riportok a feltöltött adatokból készülnek; egyetlen sikertelen mintaexport nem blokkolhatja a többi letöltési gombot.",
-            "Az exportkészlet négy dokumentumra szűkül: Executive Summary, GPS-only riport, Saját csapat profil és Metodika. A Full Report nem jelenik meg sem a minta-, sem az éles exportok között.",
-            "A Saját csapat mintaexport garantált csapat- és játékosszintű demo adatokat használ. Az exportkártya hiba esetén sem tűnik el: a felület egyértelmű státuszt mutat, így a PDF-generálási probléma azonnal látható.",
-            "Öt riportmód érhető el éles és minta formában: GPS-only, Taktikai-only, GPS + taktikai, Saját csapat és Metodika.",
-            "A riportok közös tartalmi motorból dolgoznak. A GPS + taktikai riport erőnléti állításai megegyeznek a GPS-only riport megfelelő állításaival, taktikai állításai pedig a Taktikai-only riport megfelelő állításaival.",
-            "A rendszer 90 percnél hosszabb mérkőzéseket és edzőmeccseket is kezel. A tényleges 105/120 perces összterhelés megmarad, emellett per90 mutató készül a referencia-összevetéshez.",
-            "A Saját csapat elemzés külön forrásként használja a saját taktikai PDF-ekből kinyert visszatérő csapatmintákat, a saját csapat- és játékos Excel mellett.",
-            "A Tactical-only és a GPS + taktikai riport ugyanazt a megtisztított taktikai insight-listát használja. Így a taktikai tartalom, a prioritási sorrend és a meccstervi állítások megegyeznek.",
-            "A Tactical-only PDF a hosszú ő és ű helyett rövid ö és ü karaktert használ a PDF-megjelenítési hibák elkerülésére. A generikus „Edzői megállapítás” címkék, önálló gondolatjelek és félkész exporttöredékek nem kerülnek a riportba.",
-            "A fő logikai blokkok új oldalon indulnak. A rendszer inkább több oldalt használ, mintsem hogy egy cím vagy egy összetartozó szakmai blokk az előző oldal alján kezdődjön.",
-            "A korábbi automatikus kulcsszó-vastagítás helyett a szerkezet emeli ki a lényeget: rövid cím, megfigyelés, nyíl és meccstervi válasz. Ez gyorsabban értelmezhető, és kevésbé teszi zsúfolttá a dokumentumot.",
-            "Az Executive Summary nagyobb betűméretű, sorkizárt törzsszöveget, hangsúlyos kulcsüzenet-dobozt, félkövér alcímeket és tágabb cellaközöket használ. A vezetői lényeg így a teljes mondatok végigolvasása nélkül is gyorsan felismerhető.",
-            "A játékosszintű oldal egyértelműen két részre válik: ellenfél-játékosok meccstervi értékelése, illetve saját játékosok terhelési állapota és kockázata.",
-            "A rendszer egyetlen edzés- vagy meccsfájlt, több külön Excel/CSV fájlt és ZIP-ben nagyobb fájlcsomagot is kezel. Egyhetes adatokból teljes heti állapotképet készít, de nem állít nem létező többhetes trendet. Két-három hétből rövid összevetést, négy vagy több hétből gördülő trendeket számol.",
-            "Az első döntési pont saját oldalon vagy – szükség esetén – két oldalon jelenik meg. A heti ciklusterv és a fő edzői üzenetek közös oldalon kezdődnek; ha a tartalom nem fér el kulturáltan, a dokumentum automatikusan új oldalra tör.",
-            "A GPS-only riport minden esetben külön letölthető, akkor is, ha taktikai anyagok is rendelkezésre állnak. Így ugyanabból a feltöltésből integrált Executive Summary és önálló GPS teljesítményriport is készül.",
-            "A heti ciklusterv minden naphoz erőnléti fókuszt, taktikai fókuszt és rövid edzői megjegyzést rendel. Így a terv nemcsak azt mondja meg, mi legyen a cél, hanem azt is, hogyan és milyen terhelési logikával valósítsuk meg.",
-            "A felső vezetői blokk, a meccsterv, a csapatszintű taktikai üzenet, a napi taktikai cél és az ellenfél játékosfókusz eltérő információs mélységet kap. Ugyanaz a téma megjelenhet több helyen, ha más döntési szintet szolgál, de az egy az egyben ismétlődő mondatokat a rendszer kiszűri.",
-            "A meccsterv konkrét kérdésekre válaszol: hol védekezzünk, hol támadjunk, kit keressünk, kire vigyázzunk, mi legyen az első támadó gondolat, és mely játékhelyzeteket kell edzésen gyakorolni.",
-            "GPS-only módban ugyanaz a tudás- és kombinációs motor dolgozik, csak taktikai input nélkül. A rendszer a készenlét, kockázat, össztáv, terhelési pont, nagy sebességű futások, sprintek, nagy intenzitású akciók, gyorsítások, lassítások, négyhetes trend, edzés–meccs arány és heti periodizáció alapján állít össze többféle erőnléti üzenetet.",
-            "Az erőnléti és taktikai üzenetek témánként, prioritás szerint és kontextusfüggően készülnek. Fél év riportjait visszanézve nem ugyanazok a mondatok ismétlődnek, hanem az adott hét és mérkőzés saját problémái, döntési pontjai és pályán használható feladatai kerülnek előtérbe.",
-            "A szövegmotor nem szabadon kitalált állításokat készít: kizárólag az elérhető GPS- és taktikai inputokból, valamint előre meghatározott szakmai szabályokból dolgozik.",
-        ],
-    ),
-    (
-        "9. Hogyan kell szakmailag használni?",
-        [
-            "Vezetőedző: gyors heti fő üzenetek, taktikai és terhelési fókusz.",
-            "Erőnléti edző: readiness, risk, Load, HSR, sprint és High Efforts trendek.",
-            "Sportigazgató: 30 másodperces állapotkép, kockázatok és prioritások.",
-            "Utánpótlás: korosztályos és poszt-specifikus összevetés, alul- és túlterhelés korai jelzése.",
-        ],
-    ),
+    ("1. GPS-only metodika", [
+        "Cél: a heti fizikai terhelés, a sebességi expozíció, a frissesség és a játékosszintű terhelési eltérések egységes értelmezése.",
+        "A Readiness 0-100 közötti döntéstámogató index. Fő összetevői: terhelési trend, sebességi expozíció, tapering, játékmodell-illeszkedés, edzésrészvétel és adatmegbízhatóság.",
+        "A heti benchmark korosztály, versenyszint, posztösszetétel, játékmodell és heti típus szerint változik. Nem merev norma, hanem összehasonlítási célzóna.",
+        "A Player Risk Score nem sérülésjóslat. A saját korábbi terheléshez viszonyított kiugrásokat, alulexpozíciót, sprint- és HSR-profilt, gyorsításokat, lassításokat és High Efforts értéket jelzi.",
+        "A sebességi expozíció értékelése a V405-től a dózis mellett az időzítést is figyelembe veszi. A fő sprintinger általában MD-4/MD-3 környékén kap teljes értéket; MD-2-n csökkentett, MD-1-en erősen csökkentett értékelést kap.",
+        "A tapering külön vizsgálja az MD-1 és MD-2 összterhelését, valamint az MD-2 sprintterhelését. Így a megfelelő heti sprintmennyiség nem fedheti el a kedvezőtlen meccs előtti időzítést.",
+    ]),
+    ("2. Taktikai-only metodika", [
+        "Cél: a saját csapat és az ellenfél taktikai mintáinak kompakt, edzői döntésekké alakított értelmezése GPS-adatok nélkül.",
+        "A taktikai állapotkép 1-5 skálát használ: 1 fejlesztendő, 2 figyelendő, 3 stabil, 4 jó, 5 kiemelkedő.",
+        "A fő területek: játékfelépítés, területnyerés, pressing, átmenetek és védekezési kontroll. A pontok a rendelkezésre álló PDF- és Excel-forrásokból képzett döntéstámogató indexek, nem abszolút futballminősítések.",
+        "Az adatmegbízhatóság külön jelzi a saját és ellenfél csapat-, játékos- és PDF-források lefedettségét. Hiányos forrás esetén a rendszer visszafogja az állítások bizonyosságát.",
+        "A riport erősségeket, stabil területeket, figyelendő pontokat és fejlesztendő elemeket is megjelenít; nem abból indul ki, hogy minden terület rossz.",
+        "A játékos Excel felismerése többek között a Player, Position, Minutes played, Passes, Progressive passes, Key passes, Interceptions és párharcmutatók mezőire épül.",
+    ]),
+    ("3. GPS + taktika metodika", [
+        "Cél: a fizikai és taktikai információk egyetlen Football Intelligence döntési logikában történő összehangolása, nem két külön riport egymás mögé helyezése.",
+        "Az FI Score alapbeállításban 55% GPS-readiness és 45% taktikai állapot súlyozott kombinációja. A részpontszámok mindig külön is láthatók.",
+        "Az integrált riport fizikai és taktikai állításai ugyanabból a motorból származnak, mint a GPS-only és Tactical-only riport megfelelő részei. Azonos input esetén nem mondhatnak ellent egymásnak.",
+        "A közös prioritás egy taktikai célt a szükséges fizikai dózissal kapcsol össze. Például pressingfejlesztésnél a taktikai gyakorlat mellett a HSR-, sprint- és High Efforts-igény is megjelenik.",
+        "A közös mikrociklus naponta egymás mellé rendezi a taktikai célt, a GPS-dózist és a frissességi korlátot.",
+        "Ha valamelyik adatforrás hiányzik vagy gyenge minőségű, az integrált következtetés súlya és bizonyossága ennek megfelelően csökken.",
+    ]),
+    ("4. Saját csapat elemzés", [
+        "A saját csapat riport az elérhető forrásokhoz igazodik: készülhet GPS-only, taktikai-only vagy GPS+taktikai módban.",
+        "Az állapotkép ugyanazt a skálát, státuszlogikát, fogalomhasználatot és ajánlási szerkezetet alkalmazza, mint a három fő riportmód.",
+        "A saját csapat taktikai Excelből csapat- és játékosszintű profil készül; a saját taktikai PDF-ekből visszatérő csapatminták és edzői fókuszok emelhetők ki.",
+        "GPS-adat esetén a saját csapat fizikai készenléte, terhelési trendje és játékoskockázata ugyanazzal a motorral készül, mint a GPS-only riportban.",
+        "GPS+taktika esetén a saját csapat erősségei, fejlesztési pontjai és heti végrehajtási terve közös, összehangolt ajánlássá állnak össze.",
+    ]),
+    ("5. Angol fogalmak magyar magyarázata", [
+        "Load (terhelési pont): szolgáltatótól függő összesített külső terhelési mutató. Jellemzően a mozgás mennyiségét és intenzitását egyetlen pontszámban foglalja össze. Nem azonos a megtett távolsággal, és különböző szolgáltatók Load értékei nem feltétlenül hasonlíthatók össze közvetlenül.",
+        "High Efforts (nagy intenzitású akciók): a robbanékony, nagy intenzitású mozgások összesített száma vagy pontértéke. Ha a szolgáltató külön mezőt ad, azt használjuk; ennek hiányában a rendszer a sprintek, magas intenzitású gyorsítások és lassítások kombinációjából készít közelítő mutatót. Nem azonos a Sprint értékkel.",
+        "HSR - High-Speed Running (nagy sebességű futás): az előre meghatározott nagysebességű zónában megtett távolság, jellemzően a sprintküszöb alatti, de magas sebességű futás.",
+        "Sprint / Sprint distance: a sprintküszöb feletti akciók száma, illetve az ezek során megtett távolság. A darabszám és a méterben mért sprinttáv két külön mutató.",
+        "Playstyle Fit (játékmodell-illeszkedés): annak becslése, hogy a heti fizikai terhelési profil támogatja-e a kiválasztott játékmodellt, például a pressing, átmeneti vagy pozíciós játék várható intenzitási igényét.",
+        "Speed Exposure (sebességi expozíció): a heti HSR- és sprintinger mennyiségének, gyakoriságának és időzítésének megfelelősége.",
+        "Tapering (terheléscsökkentés/frissítés): a meccs előtti napok terhelésének kontrollált csökkentése úgy, hogy a játékos friss legyen, de a szükséges intenzitási inger megmaradjon.",
+        "Analysis Completeness / Data Reliability (elemzési teljesség / adatmegbízhatóság): azt jelzi, mennyi szükséges adat áll rendelkezésre, mennyire teljes a hét, és milyen bizonyossággal értelmezhetők a következtetések. Nem teljesítménypontszám.",
+        "Readiness (készenlét): a terhelési mintázatból becsült aktuális fizikai állapot; nem orvosi diagnózis és nem önálló kiválasztási döntés.",
+        "Player Risk Score (játékoskockázati jelzés): korai figyelmeztető index a szokatlan terhelési mintákra; nem sérülés valószínűsége.",
+        "Football Intelligence Score - FI Score: a GPS- és taktikai állapot összevont vezetői indexe. A részpontszámok és az adatmegbízhatóság nélkül önmagában nem értelmezendő.",
+    ]),
+    ("6. Skálák és értelmezési korlátok", [
+        "GPS Readiness: 80-100 magas készenlét; 60-79 elfogadható, figyelendő; 40-59 csökkent; 0-39 alacsony.",
+        "Taktikai állapot: 1/5 fejlesztendő; 2/5 figyelendő; 3/5 stabil; 4/5 jó; 5/5 kiemelkedő.",
+        "Az alacsony GPS-érték túlterhelést és alulterhelést egyaránt jelezhet; ezért a magyarázó szöveg és az edzői kontextus mindig szükséges.",
+        "A rendszer döntéstámogató eszköz. Nem diagnózis, nem garantált sérülés-előrejelzés, és nem helyettesíti az edzői, orvosi, wellness- vagy RPE-információkat.",
+    ]),
 ]
 
-
-FPI_METHODOLOGY_SECTIONS_V143=list(FPI_METHODOLOGY_SECTIONS_V143)+[
-("10. V302 - Readiness bontás",["A readiness összpontszám mellett a riport megmutatja a fő komponenseket és azok státuszát.","Csonka héten a readiness előzetes, nem lezárt heti minősítés."]),
-("11. Dinamikus benchmark",["A heti benchmark csonka héten időarányosan csökken.","Recovery, overload és felkészülési hét eltérő heti célfaktort használ.","Az egy edzés célzónáját a hét típusa módosítja, a csonka hét önmagában nem."]),
-("12. Coach Intelligence",["A rendszer kiszámolja a célzónához képesti hiányt vagy többletet.","Konkrét beavatkozást ad, és külön megmagyarázza, miért indokolt az adott lépés."]),
-("13. Riportkonzisztencia",["A GPS-only és GPS+taktikai riport közös adat- és számítási motort használ.","Az integrált riport későbbi oldalai bizonyítékot adnak, nem ismétlik szó szerint a vezetői üzeneteket."])
-]
-
-FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
-    (
-        "14. V303 – benchmarkprofil-mátrix és konzisztencia",
-        [
-            "A benchmark nem kizárólag NB II felnőtt profil. Választható többek között felnőtt NB I, NB II, NB III, regionális és megyei, valamint U19, U17, U16, U15, U14 és U13 akadémiai vagy regionális környezet.",
-            "A gyors profil csak kényelmi beállítás. Az Egyéni beállítás módban bármely korosztály és bajnoki szint szabadon kombinálható; a posztsúlyozás és a játékmodell továbbra is külön érvényesül.",
-            "A PDF minden benchmarktábláján feltünteti az aktív korosztályt, szintet, posztösszetételt, játékmodellt, heti típust és a csonka hét időarányos faktorát.",
-            "Csonka héten a negatív heti eltérés előzetes alulexpozíció, nem automatikus közepes vagy magas kockázat.",
-            "MD-terv kizárólag jövőbeli vagy kézzel megadott következő meccsnapból készül; múltbeli meccsből nem."
-        ],
-    ),
-]
-
-
-FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
-    (
-        "15. V401 – GPS-only Report 2.0",
-        [
-            "A GPS-only PDF és a GPS-rész azonos master datasetből, meccsreferenciából, benchmarkprofilból, readiness-bontásból és játékoskockázati logikából dolgozik.",
-            "A readiness-komponensek Magyarázat mezője két részből áll: Mit jelent? – a mutató állandó definíciója; Most: – az aktuális hét adatalapú értelmezése.",
-            "A heti benchmark az elsődleges vezetői referencia. Az egy edzésre számolt érték nem jelenik meg második, párhuzamos benchmarktáblaként a GPS-only PDF-ben.",
-            "A sessionprofil medián játékosértékeket mutat. Ez megakadályozza, hogy a különböző létszámú edzések pusztán a keretméret miatt torzuljanak.",
-            "A Top/alsó játékosdiagram legalább tíz értékelhető játékosnál pontosan öt alsó és öt top, egymást nem ismétlő játékost jelenít meg. Kisebb keretnél minden játékos legfeljebb egyszer szerepel.",
-            "A High Efforts a rendelkezésre álló importtól függően szolgáltatói mutató vagy gyorsulás-, lassulás- és egyéb robbanékony akciókból készített proxy; nem azonos a Sprint mutatóval.",
-            "A coach recommendation a hiány vagy többlet számszerűsítése mellett konkrét beavatkozást és szakmai indoklást ad. A riport nem használ önmagában automatikus leállítási küszöböt orvosi vagy edzői döntés helyett.",
-            "A PDF szövegei és diagramcímkéi egységes karakter-normalizálást használnak; a hosszú ő/ű karakterek egyszerű ö/ü alakban jelennek meg a maximális PDF-kompatibilitás érdekében."
-        ],
-    ),
-]
-
-
-FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
-    (
-        "16. V402 – Tactical Engine és Tactical-only Report 2.0",
-        [
-            "A Tactical-only riport a GPS-only riporttal azonos vezetői sorrendet használ: kulcsüzenet, állapotkép, adatmegbízhatóság, prioritások, meccsterv, játékosfeladatok és mikrociklus.",
-            "A taktikai területi pontszámok döntéstámogató indexek. Elsődlegesen a Tactical Framework dimenzióiból, ennek hiányában a forrásokban azonosított megállapítások prioritásából készülnek; nem abszolút szakági normák.",
-            "Az adatmegbízhatóság külön jelzi a saját és ellenfél PDF-, csapat- és játékos Excel-fedezetet. Korlátozott forrás esetén a riport nem állít elő mesterségesen egzakt következtetést.",
-            "A taktikai prioritástábla minden megállapítást konkrét beavatkozással és indoklással köt össze, ugyanúgy, ahogy a GPS-only riport a fizikai hiányt vagy többletet kezeli.",
-            "A Top/alsó 5 GPS-diagram a kiválasztott tíz külön játékost végig növekvő értéksorrendben jeleníti meg: az alsó csoport után a top csoport is a kisebb értéktől a nagyobb felé halad.",
-            "Minden PDF-szöveg egységes karakter-normalizálást használ; a hosszú ő/ű karakterek ö/ü alakban jelennek meg."
-        ],
-    ),
-]
 
 def build_fpi_methodology_pdf_bytes_v143() -> Optional[bytes]:
     if SimpleDocTemplate is None:
