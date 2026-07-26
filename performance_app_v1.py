@@ -4091,7 +4091,7 @@ def team_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
 # V2 - Football Intelligence Layer
 # -----------------------------------------------------------------------------
 def fpi_pdf_sanitize_v406(value: object) -> str:
-    """Közös V407 PDF-karakter-normalizálás.
+    """Közös V408 PDF-karakter-normalizálás.
 
     A magyar hosszú ő/ű karaktereket változatlanul hagyja. Csak a láthatatlan,
     tördelést vagy másolást zavaró Unicode-jeleket távolítja el, majd NFC alakra
@@ -4119,7 +4119,12 @@ def pdf_safe_text(text: object) -> str:
 
 
 def _fpi_v406_sanitize_pdf_flowable(value):
-    """Story-elemek rekurzív tisztítása közvetlenül a PDF felépítése előtt."""
+    """V408: PDF story rekurzív tisztítása és Unicode-font kényszerítése.
+
+    Nem csak a szöveget normalizálja: minden Paragraph és nyers táblázatcella
+    ugyanazt a magyar ő/ű karaktereket támogató fontcsaládot kapja. Így az
+    inline <b>/<strong> részek sem esnek vissza Helvetica betűtípusra.
+    """
     if isinstance(value, str):
         return fpi_pdf_sanitize_v406(value)
     if isinstance(value, list):
@@ -4131,11 +4136,23 @@ def _fpi_v406_sanitize_pdf_flowable(value):
     table_cls = globals().get("Table")
     keep_cls = globals().get("KeepTogether")
 
+    regular_font, bold_font = _register_pdf_font()
+
     if paragraph_cls is not None and isinstance(value, paragraph_cls):
         try:
+            from copy import copy
+            style = copy(value.style)
+            old_font = str(getattr(style, "fontName", ""))
+            style_name = str(getattr(style, "name", ""))
+            bold_hint = "bold" in old_font.lower() or any(
+                token in style_name.lower()
+                for token in ("title", "head", "strong", "bold", "callh", "label", "big")
+            )
+            style.fontName = bold_font if bold_hint else regular_font
+            clean_text = fpi_pdf_sanitize_v406(getattr(value, "text", ""))
             return paragraph_cls(
-                fpi_pdf_sanitize_v406(getattr(value, "text", "")),
-                value.style,
+                clean_text,
+                style,
                 bulletText=getattr(value, "bulletText", None),
             )
         except Exception:
@@ -4143,10 +4160,23 @@ def _fpi_v406_sanitize_pdf_flowable(value):
 
     if table_cls is not None and isinstance(value, table_cls):
         try:
-            value._cellvalues = [
-                [_fpi_v406_sanitize_pdf_flowable(cell) for cell in row]
-                for row in value._cellvalues
-            ]
+            table_style = ParagraphStyle(
+                "FPI_V408_RAW_TABLE_CELL",
+                parent=getSampleStyleSheet()["BodyText"],
+                fontName=regular_font,
+                fontSize=8.5,
+                leading=10.5,
+            )
+            cleaned_rows = []
+            for row in value._cellvalues:
+                cleaned_row = []
+                for cell in row:
+                    if isinstance(cell, str):
+                        cleaned_row.append(paragraph_cls(fpi_pdf_sanitize_v406(cell), table_style))
+                    else:
+                        cleaned_row.append(_fpi_v406_sanitize_pdf_flowable(cell))
+                cleaned_rows.append(cleaned_row)
+            value._cellvalues = cleaned_rows
         except Exception:
             pass
         return value
@@ -4161,7 +4191,6 @@ def _fpi_v406_sanitize_pdf_flowable(value):
             pass
         return value
     return value
-
 
 def _fpi_v406_sanitize_pdf_story(story: list) -> list:
     return [_fpi_v406_sanitize_pdf_flowable(item) for item in (story or [])]
@@ -5076,6 +5105,162 @@ def build_weekly_fingerprints(df: pd.DataFrame) -> pd.DataFrame:
     return weekly
 
 
+def _fpi_v408_speed_exposure_assessment(daily: pd.DataFrame) -> Dict[str, object]:
+    """Közös Speed Exposure logika a pontszámhoz és a magyarázathoz.
+
+    Csak a következő mérkőzés előtti MD-5..MD-1 edzések számítanak. MD+1
+    regeneráció/pótlás, ezért nem minősíthető a következő meccs előtti
+    sebességi expozíció erősségeként.
+    """
+    result = {
+        "score": 55.0, "ratio": np.nan, "md": "", "match_sprint": np.nan,
+        "peak_sprint": np.nan, "valid": False, "reason": "",
+        "target": "MD-4/MD-3 napon a meccs sprintreferenciájának 25–40%-a",
+    }
+    if daily is None or daily.empty or "sprint_distance" not in daily.columns:
+        result["reason"] = "Nincs értékelhető sprinttáv-adat."
+        return result
+
+    match = daily[daily.get("session_type", pd.Series("", index=daily.index)).astype(str).eq("Meccs")].copy()
+    train = daily[daily.get("session_type", pd.Series("", index=daily.index)).astype(str).eq("Edzés")].copy()
+    if match.empty or train.empty:
+        result["reason"] = "Nincs egyszerre teljes meccsreferencia és edzésadat; a komponens előzetes."
+        return result
+
+    match_sprint = pd.to_numeric(match["sprint_distance"], errors="coerce").mean()
+    result["match_sprint"] = match_sprint
+    if pd.isna(match_sprint) or match_sprint <= 0:
+        result["reason"] = "A meccs sprintreferenciája nem értelmezhető."
+        return result
+
+    md_series = train.get("md_label", pd.Series("", index=train.index)).astype(str).str.upper().str.replace(" ", "", regex=False)
+    eligible_labels = {"MD-5", "MD-4", "MD-3", "MD-2", "MD-1"}
+    eligible = train[md_series.isin(eligible_labels)].copy()
+    post_match = train[md_series.str.startswith("MD+")].copy()
+    if eligible.empty:
+        result["score"] = 25.0 if not post_match.empty else 45.0
+        result["reason"] = (
+            "Csak meccs utáni MD+ edzésen látható sprintinger; ez regenerációs vagy pótló terhelés, "
+            "nem a következő mérkőzés előtti Speed Exposure."
+            if not post_match.empty else
+            "Nincs MD-5–MD-1 közé sorolt, értékelhető sebességi edzés."
+        )
+        return result
+
+    sprint = pd.to_numeric(eligible["sprint_distance"], errors="coerce")
+    if not sprint.notna().any():
+        result["score"] = 35.0
+        result["reason"] = "Az MD-5–MD-1 edzéseken nincs értékelhető sprinttáv."
+        return result
+
+    peak_idx = sprint.idxmax()
+    peak = float(sprint.loc[peak_idx])
+    ratio = peak / float(match_sprint)
+    md = str(eligible.loc[peak_idx].get("md_label", "")).upper().replace(" ", "")
+
+    # Dózispont: a 25–40%-os fő sebességi dózis kapja a legjobb értéket.
+    if ratio < .10:
+        dose_score = 20.0
+    elif ratio < .20:
+        dose_score = 40.0 + (ratio - .10) / .10 * 20.0
+    elif ratio < .25:
+        dose_score = 60.0 + (ratio - .20) / .05 * 20.0
+    elif ratio <= .40:
+        dose_score = 90.0
+    elif ratio <= .50:
+        dose_score = 80.0
+    else:
+        dose_score = max(55.0, 80.0 - (ratio - .50) * 80.0)
+
+    timing_factor = {"MD-5": .90, "MD-4": 1.00, "MD-3": 1.00, "MD-2": .70, "MD-1": .40}.get(md, .50)
+    score = max(0.0, min(100.0, dose_score * timing_factor))
+    result.update({"score": score, "ratio": ratio, "md": md, "peak_sprint": peak, "valid": True})
+
+    if md in {"MD-4", "MD-3"} and .25 <= ratio <= .40:
+        reason = "megfelelő fő sprintdózis, optimális időzítéssel"
+    elif md in {"MD-4", "MD-3"} and ratio < .25:
+        reason = "jó időzítés, de a meccsigényhez képest alacsony dózis"
+    elif md == "MD-2":
+        reason = "a dózis részben megfelelő lehet, de a fő sebességi inger túl közel került a meccshez"
+    elif md == "MD-1":
+        reason = "a fő sprintinger túl későre került; MD-1-en csak rövid aktiváció kívánatos"
+    else:
+        reason = "a dózis vagy az időzítés nem esik az optimális zónába"
+    result["reason"] = reason
+    return result
+
+
+def _fpi_v408_taper_assessment(daily: pd.DataFrame) -> Dict[str, object]:
+    """Közös tapering-logika, külön MD-1 és MD-2 értelmezéssel."""
+    result = {
+        "score": 65.0, "md1_ratio": np.nan, "md2_ratio": np.nan,
+        "md2_sprint_ratio": np.nan, "valid": False,
+        "md1_target": "30–45%", "md2_target": "55–70%", "parts": [],
+    }
+    if daily is None or daily.empty or "md_label" not in daily.columns or "load_index" not in daily.columns:
+        return result
+    md = daily["md_label"].astype(str).str.upper().str.replace(" ", "", regex=False)
+    md1 = daily[md.eq("MD-1")]
+    md2 = daily[md.eq("MD-2")]
+    early = daily[md.isin(["MD-4", "MD-3"])]
+    if early.empty:
+        return result
+    peak_early = pd.to_numeric(early["load_index"], errors="coerce").max()
+    if pd.isna(peak_early) or peak_early <= 0:
+        return result
+
+    score = 85.0
+    parts = []
+    if not md1.empty:
+        r1 = pd.to_numeric(md1["load_index"], errors="coerce").sum() / peak_early
+        result["md1_ratio"] = r1
+        if r1 < .20:
+            md1_score, md1_state = 65.0, "az aktivációs inger nagyon alacsony"
+        elif r1 < .30:
+            md1_score, md1_state = 75.0, "kissé a célzóna alatt van"
+        elif r1 <= .45:
+            md1_score, md1_state = 90.0, "a 30–45%-os célzónában van"
+        elif r1 <= .55:
+            md1_score, md1_state = 65.0, "a célzóna felett, még kontrollálható határeset"
+        elif r1 <= .65:
+            md1_score, md1_state = 50.0, "magas, frissességi kockázatot ad"
+        else:
+            md1_score, md1_state = max(20.0, 40.0 - max(0.0, r1 - .75) * 100.0), "egyértelműen túl magas MD-1 terhelés"
+        score = md1_score
+        parts.append(f"MD-1 {r1:.0%} (cél 30–45%): {md1_state}")
+    else:
+        parts.append("MD-1: nincs értékelhető load")
+
+    if not md2.empty:
+        r2 = pd.to_numeric(md2["load_index"], errors="coerce").sum() / peak_early
+        result["md2_ratio"] = r2
+        if .55 <= r2 <= .70:
+            md2_adjust, md2_state = 0.0, "a 55–70%-os célzónában van"
+        elif .45 <= r2 < .55 or .70 < r2 <= .80:
+            md2_adjust, md2_state = -5.0, "a célzóna közelében, kontrollálandó"
+        elif r2 > .80:
+            md2_adjust, md2_state = -15.0, "túl közel került a fő terhelési naphoz"
+        else:
+            md2_adjust, md2_state = -8.0, "a célzóna alatt, a specifikus inger visszafogott"
+        score = max(0.0, score + md2_adjust)
+        parts.append(f"MD-2 {r2:.0%} (cél 55–70%): {md2_state}")
+
+        if "sprint_distance" in daily.columns:
+            early_sprint = pd.to_numeric(early["sprint_distance"], errors="coerce").max()
+            md2_sprint = pd.to_numeric(md2["sprint_distance"], errors="coerce").sum()
+            if pd.notna(early_sprint) and early_sprint > 0 and pd.notna(md2_sprint):
+                sr = md2_sprint / early_sprint
+                result["md2_sprint_ratio"] = sr
+                if sr > .90:
+                    score = min(score, 40.0)
+                    parts.append(f"MD-2 sprint {sr:.0%} a fő sebességi naphoz képest: túl magas")
+                elif sr > .70:
+                    score = min(score, 55.0)
+                    parts.append(f"MD-2 sprint {sr:.0%}: a kívánatosnál magasabb")
+    result.update({"score": max(0.0, min(100.0, score)), "valid": True, "parts": parts})
+    return result
+
+
 def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: str) -> Tuple[int, Dict[str, float], List[str]]:
     daily = build_microcycle_table(df, selected_week)
     weekly = build_weekly_fingerprints(df)
@@ -5154,85 +5339,44 @@ def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: s
     else:
         components["load_trend"] = 55
 
-    # 2. Maximális sebességű inger
-    match = daily[daily["session_type"] == "Meccs"] if not daily.empty else pd.DataFrame()
-    train = daily[daily["session_type"] == "Edzés"] if not daily.empty else pd.DataFrame()
-    speed_component = 60
-    if not match.empty and not train.empty and "sprint_distance" in daily.columns:
-        match_sprint = match["sprint_distance"].mean()
-        max_train_sprint = train["sprint_distance"].max()
-        if pd.notna(match_sprint) and match_sprint > 0 and pd.notna(max_train_sprint):
-            ratio = max_train_sprint / match_sprint
-            # V405: a sebességi expozíció nemcsak a mennyiséget, hanem az időzítést is értékeli.
-            # Ugyanaz a sprintdózis MD-3/MD-4 környékén optimálisabb, mint MD-2/MD-1 napon.
-            sprint_peak_idx = train["sprint_distance"].idxmax()
-            sprint_peak_md = str(train.loc[sprint_peak_idx, "md_label"]) if "md_label" in train.columns else ""
-            timing_factor = {
-                "MD-5": 0.90,
-                "MD-4": 1.00,
-                "MD-3": 1.00,
-                "MD-2": 0.70,
-                "MD-1": 0.35,
-            }.get(sprint_peak_md, 0.85)
-            dose_component = min(100, ratio / 0.35 * 100)
-            speed_component = dose_component * timing_factor
-            if ratio < 0.15:
-                score -= 15
-                reasons.append("A héten alig látszik maximális sebességű inger a meccsigényhez képest.")
-            elif ratio < 0.30:
-                score -= 7
-                reasons.append("A maximális sebességű inger visszafogott volt.")
-            elif sprint_peak_md == "MD-1":
-                score -= 10
-                reasons.append("A hét legnagyobb sprintterhelése MD-1 napra esett; a mennyiség megfelelő lehet, de az időzítés frissességi kockázatot ad.")
-            elif sprint_peak_md == "MD-2":
-                score -= 5
-                reasons.append("A hét legnagyobb sprintterhelése MD-2 napra esett; a sebességi inger megvan, de a meccshez közeli időzítés miatt nem kap maximális értékelést.")
-            else:
-                score += 5
+    # 2. Sebességi expozíció – közös V408 motor
+    speed_assessment = _fpi_v408_speed_exposure_assessment(daily)
+    speed_component = float(speed_assessment.get("score", 55) or 55)
     components["speed_exposure"] = max(0, min(100, speed_component))
+    speed_ratio = speed_assessment.get("ratio", np.nan)
+    speed_md = str(speed_assessment.get("md", ""))
+    if not speed_assessment.get("valid"):
+        if speed_component < 50:
+            score -= 10
+        reasons.append(str(speed_assessment.get("reason", "A sebességi expozíció nem értékelhető teljesen.")))
+    elif speed_component < 50:
+        score -= 12
+        reasons.append(f"Sebességi expozíció: {speed_assessment.get('reason')} ({speed_ratio:.0%}, {speed_md}).")
+    elif speed_component < 65:
+        score -= 6
+        reasons.append(f"Sebességi expozíció: {speed_assessment.get('reason')} ({speed_ratio:.0%}, {speed_md}).")
+    elif speed_component >= 80:
+        score += 5
 
-    # 3. Taper / MD-1 / MD-2 kontroll
-    taper_component = 65
-    if not incomplete_week and not daily.empty and "MD" in daily["md_label"].values:
-        md1 = daily[daily["md_label"] == "MD-1"]
-        md2 = daily[daily["md_label"] == "MD-2"]
-        md34 = daily[daily["md_label"].isin(["MD-3", "MD-4"])]
-        if not md1.empty and not md34.empty:
-            peak_early = md34["load_index"].max()
-            md1_load = md1["load_index"].sum()
-            if pd.notna(peak_early) and peak_early > 0 and pd.notna(md1_load):
-                ratio = md1_load / peak_early
-                taper_component = max(0, min(100, (1.0 - ratio) * 130))
-                if ratio > 0.65:
-                    score -= 10
-                    reasons.append("Az MD-1 terhelés magas lehetett a frissességhez képest.")
-                elif ratio < 0.45:
-                    score += 6
-        if not md2.empty and not md34.empty:
-            peak_early = md34["load_index"].max()
-            md2_load = md2["load_index"].sum()
-            if pd.notna(peak_early) and peak_early > 0 and pd.notna(md2_load) and md2_load / peak_early > 0.80:
-                score -= 8
-                taper_component = min(taper_component, 45)
-                reasons.append("Az MD-2 terhelés közel volt a hét fő terhelési napjához.")
-            # V405: külön neuromuszkuláris kontroll. A magas MD-2 sprintdózis akkor is aggályos lehet,
-            # ha az összesített load nem mutat nagy kiugrást.
-            if "sprint_distance" in daily.columns:
-                early_sprint = md34["sprint_distance"].max()
-                md2_sprint = md2["sprint_distance"].sum()
-                if pd.notna(early_sprint) and early_sprint > 0 and pd.notna(md2_sprint):
-                    md2_sprint_ratio = md2_sprint / early_sprint
-                    if md2_sprint_ratio > 0.90:
-                        score -= 7
-                        taper_component = min(taper_component, 40)
-                        reasons.append("Az MD-2 sprintterhelés a fő sebességi nap szintjén volt; ez meccs előtt 48 órával frissességi kockázatot jelenthet.")
-                    elif md2_sprint_ratio > 0.70:
-                        score -= 3
-                        taper_component = min(taper_component, 55)
-                        reasons.append("Az MD-2 sprintterhelés magasabb a kívánatosnál; a következő ciklusban érdemes korábbra helyezni a fő sebességi ingert.")
+    # 3. Taper / MD-1 / MD-2 kontroll – külön célzónákkal
+    taper_assessment = _fpi_v408_taper_assessment(daily)
+    taper_component = float(taper_assessment.get("score", 65) or 65)
     components["tapering"] = max(0, min(100, taper_component))
-
+    if taper_assessment.get("valid"):
+        r1 = taper_assessment.get("md1_ratio", np.nan)
+        r2 = taper_assessment.get("md2_ratio", np.nan)
+        if pd.notna(r1) and r1 > .55:
+            score -= 10 if r1 <= .65 else 14
+            reasons.append(f"Az MD-1 load a fő nap {r1:.0%}-a; az alkalmazás 30–45%-os célzónájához képest magas.")
+        elif pd.notna(r1) and .30 <= r1 <= .45:
+            score += 5
+        if pd.notna(r2) and r2 > .80:
+            score -= 7
+            reasons.append(f"Az MD-2 load a fő nap {r2:.0%}-a; a 55–70%-os célzóna fölött van.")
+        md2_sprint_ratio = taper_assessment.get("md2_sprint_ratio", np.nan)
+        if pd.notna(md2_sprint_ratio) and md2_sprint_ratio > .90:
+            score -= 7
+            reasons.append("Az MD-2 sprintterhelés a fő sebességi nap szintjén volt; ez frissességi kockázat.")
     # 4. Játékmodell illeszkedés
     playstyle_component = 70
     current = df[df["week"] == selected_week]
@@ -5638,43 +5782,114 @@ def insights_to_word_bytes(insights_df: pd.DataFrame, selected_week: str) -> Opt
     return output.getvalue()
 
 
-def _register_pdf_font() -> Tuple[str, str]:
-    """Unicode-képes PDF-font, teljes magyar ő/ű támogatással."""
-    if pdfmetrics is None or TTFont is None:
-        return "Helvetica", "Helvetica-Bold"
+def _fpi_v408_font_supports_hungarian(path: object) -> bool:
+    """Csak olyan TTF/OTF fontot fogad el, amely biztosan tartalmaz ő/Ő/ű/Ű glyph-et."""
+    try:
+        from fontTools.ttLib import TTFont as FontToolsTTFont
+        font = FontToolsTTFont(str(path), lazy=True)
+        cmap = set()
+        for table in font["cmap"].tables:
+            cmap.update(table.cmap.keys())
+        font.close()
+        return all(ord(ch) in cmap for ch in "őŐűŰ")
+    except Exception:
+        # fontTools hiányában a legismertebb, ellenőrzött családokat engedjük.
+        low = Path(str(path)).name.lower()
+        return any(name in low for name in ("dejavu", "notosans", "liberationsans", "arial"))
 
-    font_pairs = [
+
+def _fpi_v408_find_unicode_font_pair() -> Tuple[Optional[str], Optional[str]]:
+    """Platformfüggetlen fontkeresés, környezeti változóval felülírható."""
+    env_regular = os.environ.get("FPI_PDF_FONT_REGULAR", "").strip()
+    env_bold = os.environ.get("FPI_PDF_FONT_BOLD", "").strip()
+    pairs = []
+    if env_regular:
+        pairs.append((env_regular, env_bold or env_regular))
+    pairs.extend([
+        ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
         ("/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf"),
         ("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"),
         ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
-        ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
-        ("/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSans-Bold.ttf"),
         ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
-        ("/Library/Fonts/Arial Unicode.ttf", "/Library/Fonts/Arial Bold.ttf"),
+        ("C:/Windows/Fonts/calibri.ttf", "C:/Windows/Fonts/calibrib.ttf"),
+        ("/Library/Fonts/Arial.ttf", "/Library/Fonts/Arial Bold.ttf"),
+        ("/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+    ])
+    for regular, bold in pairs:
+        if regular and Path(regular).exists() and _fpi_v408_font_supports_hungarian(regular):
+            valid_bold = bold if bold and Path(bold).exists() and _fpi_v408_font_supports_hungarian(bold) else regular
+            return str(regular), str(valid_bold)
+
+    # Utolsó kör: ismert fontnevek keresése a tipikus rendszerkönyvtárakban.
+    roots = [
+        Path("/usr/share/fonts"), Path("/usr/local/share/fonts"),
+        Path.home() / ".fonts", Path("C:/Windows/Fonts"),
+        Path("/Library/Fonts"), Path("/System/Library/Fonts"),
     ]
-    normal_path = bold_path = None
-    for normal, bold in font_pairs:
-        if Path(normal).exists():
-            normal_path = normal
-            bold_path = bold if Path(bold).exists() else None
-            break
+    wanted_regular = ("NotoSans-Regular.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf", "Arial.ttf")
+    wanted_bold = ("NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "Arial Bold.ttf", "arialbd.ttf")
+    found_regular = None
+    found_bold = None
+    for root in roots:
+        if not root.exists():
+            continue
+        try:
+            for candidate in root.rglob("*"):
+                if not candidate.is_file() or candidate.suffix.lower() not in {".ttf", ".otf"}:
+                    continue
+                if found_regular is None and candidate.name in wanted_regular and _fpi_v408_font_supports_hungarian(candidate):
+                    found_regular = str(candidate)
+                if found_bold is None and candidate.name in wanted_bold and _fpi_v408_font_supports_hungarian(candidate):
+                    found_bold = str(candidate)
+                if found_regular and found_bold:
+                    return found_regular, found_bold
+        except Exception:
+            continue
+    if found_regular:
+        return found_regular, found_bold or found_regular
+    return None, None
+
+
+def _register_pdf_font() -> Tuple[str, str]:
+    """V408: ellenőrzött Unicode-fontcsalád minden PDF-hez.
+
+    Fontcsalád-regisztrációt is végez, ezért a Paragraph inline <b>/<strong>
+    részei sem váltanak vissza olyan alapfontra, amely szétszedi az ő/ű betűket.
+    """
+    if pdfmetrics is None or TTFont is None:
+        raise RuntimeError("A PDF exporthoz a ReportLab TTFont támogatása szükséges.")
+
+    cached = globals().get("_FPI_V408_PDF_FONT_CACHE")
+    if cached:
+        return cached
+
+    normal_path, bold_path = _fpi_v408_find_unicode_font_pair()
     if not normal_path:
-        return "Helvetica", "Helvetica-Bold"
+        raise RuntimeError(
+            "Nem található ő/ű karaktereket támogató Unicode-font. "
+            "Állítsd be az FPI_PDF_FONT_REGULAR és FPI_PDF_FONT_BOLD környezeti változókat "
+            "Noto Sans, DejaVu Sans, Liberation Sans vagy Arial TTF fájlra."
+        )
 
-    try:
-        registered = set(pdfmetrics.getRegisteredFontNames())
-        if "FPIUnicode" not in registered:
-            pdfmetrics.registerFont(TTFont("FPIUnicode", normal_path))
-        if bold_path:
-            if "FPIUnicode-Bold" not in registered:
-                pdfmetrics.registerFont(TTFont("FPIUnicode-Bold", bold_path))
-            return "FPIUnicode", "FPIUnicode-Bold"
-        return "FPIUnicode", "FPIUnicode"
-    except Exception:
-        return "Helvetica", "Helvetica-Bold"
-
-
+    regular_name = "FPIUnicodeV408"
+    bold_name = "FPIUnicodeV408-Bold"
+    registered = set(pdfmetrics.getRegisteredFontNames())
+    if regular_name not in registered:
+        pdfmetrics.registerFont(TTFont(regular_name, normal_path))
+    if bold_name not in registered:
+        pdfmetrics.registerFont(TTFont(bold_name, bold_path or normal_path))
+    # Kritikus javítás: az inline félkövér/kurzív tagek ugyanabban a Unicode családban maradnak.
+    pdfmetrics.registerFontFamily(
+        regular_name,
+        normal=regular_name,
+        bold=bold_name,
+        italic=regular_name,
+        boldItalic=bold_name,
+    )
+    globals()["_FPI_V408_PDF_FONT_CACHE"] = (regular_name, bold_name)
+    globals()["_FPI_V408_PDF_FONT_PATHS"] = (normal_path, bold_path)
+    return regular_name, bold_name
 
 def insights_to_pdf_bytes(insights_df: pd.DataFrame, selected_week: str) -> Optional[bytes]:
     if SimpleDocTemplate is None:
@@ -6285,7 +6500,7 @@ def build_next_microcycle_plan(
         md2_rec = "Taktikai specifikusság maradjon, de csökkentsd a pályaméret-váltásokat, az ismétlésszámot és a nagy lassításokat; a nap ne közelítse meg a fő terhelési napot."
     else:
         md2_rec = "Rövid ellenfél- és meccsterv-specifikus blokkok, kontrollált intenzitással; új kondicionális inger nélkül."
-    rows.append({"Nap":"MD-2","Szerep":"Meccsterv és terheléskontroll","Fő cél":"Döntési pontok, rest defense, pontrúgás-előkészítés","Ajánlott terhelés":"a fő nap legfeljebb 60–75%-a","Javaslat":md2_rec,"Tervezési alap":f"Aktuális MD-2 / fő nap: {pct(md2_r)}; lassítás / saját medián: {pct(dec_r)}."})
+    rows.append({"Nap":"MD-2","Szerep":"Meccsterv és terheléskontroll","Fő cél":"Döntési pontok, rest defense, pontrúgás-előkészítés","Ajánlott terhelés":"a fő nap 55–70%-a","Javaslat":md2_rec,"Tervezési alap":f"Aktuális MD-2 / fő nap: {pct(md2_r)}; lassítás / saját medián: {pct(dec_r)}."})
 
     if pd.notna(md1_r) and md1_r > .50:
         md1_rec = "Az aktuális MD-1 túl nagy volt: rövidítsd az időt és a blokkot, a fő sprintdózist vedd ki; csak reakció, indulás, labdás élesség és pontrúgás maradjon."
@@ -8138,50 +8353,33 @@ def _fpi_v407_readiness_component_details(
     else:
         details["load_trend"] = "Nincs közvetlenül megelőző, összevethető hét; a terhelési trend pontszáma semleges előzetes érték."
 
-    train = daily[daily["session_type"].astype(str).eq("Edzés")].copy() if not daily.empty else pd.DataFrame()
-    match = daily[daily["session_type"].astype(str).eq("Meccs")].copy() if not daily.empty else pd.DataFrame()
-    if not train.empty and not match.empty and "sprint_distance" in daily.columns:
-        match_sprint = pd.to_numeric(match["sprint_distance"], errors="coerce").mean()
-        train_sprint = pd.to_numeric(train["sprint_distance"], errors="coerce")
-        if pd.notna(match_sprint) and match_sprint > 0 and train_sprint.notna().any():
-            peak_idx = train_sprint.idxmax()
-            ratio = float(train_sprint.loc[peak_idx]) / float(match_sprint)
-            md = str(train.loc[peak_idx].get("md_label", "ismeretlen napon"))
-            if md in {"MD-4", "MD-3"} and ratio >= .30:
-                meaning = "megfelelő dózis és jó meccs előtti időzítés"
-            elif md in {"MD-2", "MD-1"}:
-                meaning = "a dózis megvan, de túl közel került a mérkőzéshez"
-            else:
-                meaning = "a meccsigényhez képest alacsony sebességi expozíció"
-            details["speed_exposure"] = f"A legnagyobb edzésnapi sprintdózis a meccs sprintreferenciájának {ratio:.0%}-a volt, {md} napon; ez {meaning}."
-        else:
-            details["speed_exposure"] = "A sprintdózis vagy a teljes meccsreferencia nem értelmezhető; a komponens csak előzetes jelzés."
-    elif not train.empty:
-        peak = pd.to_numeric(train.get("sprint_distance"), errors="coerce").max() if "sprint_distance" in train.columns else np.nan
-        md = ""
-        if "sprint_distance" in train.columns and pd.to_numeric(train["sprint_distance"], errors="coerce").notna().any():
-            idx = pd.to_numeric(train["sprint_distance"], errors="coerce").idxmax()
-            md = str(train.loc[idx].get("md_label", ""))
-        details["speed_exposure"] = f"A legnagyobb edzésnapi sprintdózis {peak:.0f} m{f', {md} napon' if md else ''}, de teljes meccsreferencia nélkül a kapott pont előzetes." if pd.notna(peak) else "Nincs értékelhető sprintadat; a sebességi expozíció nem minősíthető biztosan."
+    speed_assessment = _fpi_v408_speed_exposure_assessment(daily)
+    speed_score = float(components.get("speed_exposure", speed_assessment.get("score", 55)) or 55)
+    if speed_assessment.get("valid"):
+        details["speed_exposure"] = (
+            f"A legnagyobb, meccs előtti edzésnapi sprintdózis a meccs sprintreferenciájának "
+            f"{float(speed_assessment.get('ratio')):.0%}-a volt, {speed_assessment.get('md')} napon. "
+            f"{str(speed_assessment.get('reason')).capitalize()}. Operatív cél: {speed_assessment.get('target')}. "
+            "Az MD+1 terhelés nem számít bele a következő mérkőzés előtti Speed Exposure értékelésébe."
+        )
     else:
-        details["speed_exposure"] = "Nincs értékelhető edzésnapi sprintadat."
+        details["speed_exposure"] = (
+            f"{speed_assessment.get('reason')} Operatív cél: {speed_assessment.get('target')}. "
+            "A meccs utáni MD+1 sprint nem minősíthető a következő meccs előtti erősségként."
+        )
 
-    md1 = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).eq("MD-1")] if not daily.empty else pd.DataFrame()
-    md2 = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).eq("MD-2")] if not daily.empty else pd.DataFrame()
-    early = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).isin(["MD-4", "MD-3"])] if not daily.empty else pd.DataFrame()
-    taper_parts = []
-    if not early.empty:
-        peak_early = pd.to_numeric(early.get("load_index"), errors="coerce").max()
-        if pd.notna(peak_early) and peak_early > 0:
-            if not md1.empty:
-                r1 = pd.to_numeric(md1.get("load_index"), errors="coerce").sum() / peak_early
-                taper_parts.append(f"MD-1 load a fő MD-4/MD-3 nap {r1:.0%}-a")
-            if not md2.empty:
-                r2 = pd.to_numeric(md2.get("load_index"), errors="coerce").sum() / peak_early
-                taper_parts.append(f"MD-2 load {r2:.0%}")
-    taper_score = float(components.get("tapering", 65) or 65)
-    taper_meaning = "megfelelő frissítés" if taper_score >= 75 else "határeset, kontrollálandó frissítés" if taper_score >= 55 else "túl magas meccs előtti terhelés és frissességi kockázat"
-    details["tapering"] = ("; ".join(taper_parts) + f"; ez {taper_meaning}.") if taper_parts else "Nincs teljes MD-4–MD-1 terhelési lánc; a tapering pontszáma előzetes."
+    taper_assessment = _fpi_v408_taper_assessment(daily)
+    if taper_assessment.get("valid"):
+        parts = "; ".join(taper_assessment.get("parts", []))
+        details["tapering"] = (
+            f"{parts}. A pontszámot az MD-1 és MD-2 külön célzónája alapján számoljuk; "
+            "az egyik nap megfelelő értéke nem teszi automatikusan megfelelővé a másikat."
+        )
+    else:
+        details["tapering"] = (
+            "Nincs teljes MD-4/MD-3–MD-1 terhelési lánc; a tapering előzetes. "
+            "Operatív cél: MD-1 a fő nap 30–45%-a, MD-2 55–70%-a."
+        )
 
     current = df[df["week"].astype(str).eq(str(selected_week))].copy() if "week" in df.columns else pd.DataFrame()
     tr = current[current.get("session_type", pd.Series("", index=current.index)).astype(str).eq("Edzés")]
@@ -8215,7 +8413,7 @@ def _fpi_v302_readiness_breakdown(
     definitions = {
         "training_availability": "Azt mutatja, hogy a keret mekkora része és milyen rendszerességgel végezte el a csapat edzéseit; az alacsony részvétel torzíthatja a csapatszintű terhelési képet.",
         "load_trend": "A kiválasztott hét összterhelésének változása a saját közelmúlthoz képest; a túl gyors emelkedés frissességi, a nagy visszaesés alulexpozíciós kockázat.",
-        "speed_exposure": "A maximális sebességű sprintinger dózisa és időzítése a saját meccs-sprintreferenciához képest; azonos mennyiség MD-3-on kedvezőbb, mint MD-1-en.",
+        "speed_exposure": "A HSR/sprint jellegű, nagy futósebességű inger dózisa és időzítése a saját meccs-sprintreferenciához képest. Nem azonos a robbanékony akciókkal: a High Efforts rövid gyorsításokat és lassításokat is tartalmazhat anélkül, hogy a játékos maximális sebességet érne el.",
         "tapering": "A meccs előtti MD-2 és MD-1 terheléscsökkentés minősége; azt vizsgálja, marad-e élesség új fáradtság létrehozása nélkül.",
         "playstyle_fit": "A heti fizikai profil mennyire szolgálja a kiválasztott játékmodell intenzitási, sprint- és nagy intenzitású akcióigényét.",
     }
@@ -11858,6 +12056,7 @@ def build_fpi_gps_only_pdf_bytes(
         rb=[[P(x,head) for x in ['Komponens','Pont','Státusz','Magyarázat']]]
         for _,r in readiness_breakdown_v302.iterrows(): rb.append([P(str(r.get('Komponens','')),small),P(str(r.get('Pont','')),small),P(str(r.get('Státusz','')),small),P(str(r.get('Magyarázat','')),small)])
         story.append(tbl(rb,[6.0*cm,2.0*cm,4.0*cm,15.7*cm],'#166534'))
+        story += [Spacer(1,.08*cm), P('<b>Fontos különbség:</b> a Robbanékony akciók / High Efforts rövid gyorsításokat, lassításokat és irányváltásokat mér; a Speed Exposure nagy futósebességű HSR/sprint ingert mér. Ezért lehet egyszerre magas a robbanékonyság és alacsony a sebességi expozíció.', small)]
     story += [PageBreak(),section('2. Sessionönkénti terhelési profil','#FEF3C7')]
     if sessions.empty: story.append(P('Nincs sessionönként értelmezhető adat.'))
     else:
@@ -12007,7 +12206,7 @@ def build_fpi_integrated_pdf_bytes_v403(data, selected_week=None, playstyle='Kie
     def card(label, value, note, color):
         t = Table([[P(label, head)], [P(value, big)], [P(note, head)]], colWidths=[6.6*cm], rowHeights=[.45*cm,.78*cm,.45*cm]); t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor(color)),('BOX',(0,0),(-1,-1),.4,colors.white),('VALIGN',(0,0),(-1,-1),'MIDDLE')])); return t
 
-    story = [P('Football Intelligence Report – GPS + taktika', title), P(f"{demo_label or 'ÉLES RIPORT'} | V407 | Hét: {format_week_label(str(ctx.get('selected_week','')))} | Játékmodell: {playstyle}", small), Spacer(1,.15*cm)]
+    story = [P('Football Intelligence Report – GPS + taktika', title), P(f"{demo_label or 'ÉLES RIPORT'} | V408 | Hét: {format_week_label(str(ctx.get('selected_week','')))} | Játékmodell: {playstyle}", small), Spacer(1,.15*cm)]
     story.append(Table([[card('FI SCORE',f'{fi100}/100',f'{fi5}/5 – közös állapot','#0F172A'),card('GPS READINESS',f'{gps}/100',gpsstatus,'#1E3A8A'),card('TAKTIKA',f'{tac5}/5','taktikai állapot','#6D28D9'),card('HIGH RISK',f'{hi} fő','egyéni kontroll','#991B1B' if hi else '#166534')]], colWidths=[6.9*cm]*4))
     best = max(dims, key=lambda x:x['Pont5']) if dims else None; weak = min(dims, key=lambda x:x['Pont5']) if dims else None
     executive = f"A közös Football Intelligence Score {fi5}/5. A GPS-readiness {gps}/100 ({gpsstatus.lower()}), a taktikai kép {tac5}/5. "
@@ -12021,6 +12220,7 @@ def build_fpi_integrated_pdf_bytes_v403(data, selected_week=None, playstyle='Kie
         for _, r in readiness_breakdown.iterrows():
             rows.append([P(r.get('Komponens',''),small),P(f"{r.get('Pont','')}/100",small),P(r.get('Státusz',''),small),P(r.get('Magyarázat',''),small)])
         story.append(tbl(rows,[5.1*cm,2.1*cm,3.4*cm,17.1*cm],'#166534'))
+        story += [Spacer(1,.08*cm), P('<b>Fontos különbség:</b> a Robbanékony akciók / High Efforts rövid gyorsításokat, lassításokat és irányváltásokat mér; a Speed Exposure nagy futósebességű HSR/sprint ingert mér. A két mutató eltérő lehet anélkül, hogy ellentmondana egymásnak.', small)]
 
     story += [Spacer(1,.18*cm), section('2. Taktikai állapotkép', '#EDE9FE', '#8B5CF6')]
     rows = [[P('Terület',head),P('Skála',head),P('Állapot',head),P('Edzői olvasat',head)]]
@@ -18412,8 +18612,8 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
         "A Readiness 0-100 közötti döntéstámogató index. Fő összetevői: terhelési trend, sebességi expozíció, tapering, játékmodell-illeszkedés és edzésrészvétel.",
         "A heti benchmark korosztály, versenyszint, posztösszetétel, játékmodell és heti típus szerint változik. Nem merev norma, hanem összehasonlítási célzóna.",
         "A Player Risk Score nem sérülésjóslat. A saját korábbi terheléshez viszonyított kiugrásokat, alulexpozíciót, sprint- és HSR-profilt, gyorsításokat, lassításokat és High Efforts értéket jelzi.",
-        "A sebességi expozíció értékelése a V405-től a dózis mellett az időzítést is figyelembe veszi. A fő sprintinger általában MD-4/MD-3 környékén kap teljes értéket; MD-2-n csökkentett, MD-1-en erősen csökkentett értékelést kap.",
-        "A tapering külön vizsgálja az MD-1 és MD-2 összterhelését, valamint az MD-2 sprintterhelését. Így a megfelelő heti sprintmennyiség nem fedheti el a kedvezőtlen meccs előtti időzítést.",
+        "A sebességi expozíció a dózis mellett az időzítést is figyelembe veszi. A fő sprintinger MD-4/MD-3 környékén, a meccs sprintreferenciájának 25–40%-os operatív célzónájában kap teljes értéket; MD-2-n csökkentett, MD-1-en erősen csökkentett értékelést kap. Az MD+1 regenerációs vagy pótló terhelés nem számít a következő mérkőzés előtti Speed Exposure erősségének.",
+        "A tapering külön vizsgálja az MD-1 és MD-2 összterhelését, valamint az MD-2 sprintterhelését. Operatív célzóna: MD-1 a fő MD-4/MD-3 nap 30–45%-a, MD-2 55–70%-a. Így egy megfelelő MD-2 nem fedheti el a túl magas MD-1-et, és a megfelelő heti sprintmennyiség sem fedheti el a kedvezőtlen időzítést.",
     ]),
     ("2. Taktikai-only metodika", [
         "Cél: a saját csapat és az ellenfél taktikai mintáinak kompakt, edzői döntésekké alakított értelmezése GPS-adatok nélkül.",
