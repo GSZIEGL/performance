@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V406_STABILITY_QUALITY_2026_07_26"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V407_COACH_CONTEXT_2026_07_26"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -4091,27 +4091,26 @@ def team_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
 # V2 - Football Intelligence Layer
 # -----------------------------------------------------------------------------
 def fpi_pdf_sanitize_v406(value: object) -> str:
-    """A teljes FPI PDF-rendszer egyetlen karakter-normalizáló függvénye.
+    """Közös V407 PDF-karakter-normalizálás.
 
-    A UI-, Word- és Excel-kimeneteket nem módosítja. PDF-ben a felhős
-    ReportLab-környezetben bizonytalan hosszú magyar karaktereket rövid párra
-    cseréli, eltávolítja a láthatatlan tördelési karaktereket, és NFC alakra
-    normalizál. Minden PDF-builder közvetlenül vagy a globális build-kapun
-    keresztül ezt használja.
+    A magyar hosszú ő/ű karaktereket változatlanul hagyja. Csak a láthatatlan,
+    tördelést vagy másolást zavaró Unicode-jeleket távolítja el, majd NFC alakra
+    normalizál. A PDF-ekhez a _register_pdf_font Unicode-képes fontot választ.
     """
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return ""
     text = unicodedata.normalize("NFC", str(value))
     replacements = {
-        "ő": "ö", "Ő": "Ö", "ű": "ü", "Ű": "Ü",
-        "\u00ad": "",       # soft hyphen
-        "\u200b": "",       # zero-width space
-        "\ufeff": "",       # BOM / zero-width no-break space
-        "\u00a0": " ",      # non-breaking space
+        "\u00ad": "",   # soft hyphen
+        "\u200b": "",   # zero-width space
+        "\ufeff": "",   # BOM / zero-width no-break space
+        "\u00a0": " ",  # non-breaking space
+        "\u202f": " ",  # narrow no-break space
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
     return text
+
 
 
 def pdf_safe_text(text: object) -> str:
@@ -4181,48 +4180,168 @@ def day_label_from_delta(delta_days: int) -> str:
     return f"MD+{delta_days}"
 
 
-def detect_match_day(week_df: pd.DataFrame) -> Optional[pd.Timestamp]:
-    if week_df.empty:
+def _fpi_v407_parse_md_delta(value: object) -> Optional[int]:
+    """MD-3 -> -3, MD -> 0, MD+1 -> +1."""
+    raw = unicodedata.normalize("NFKC", str(value or "")).upper()
+    raw = raw.replace("_", " ")
+    exact = re.search(r"(?<![A-Z0-9])MD\s*([+-])?\s*(\d+)?(?![A-Z0-9])", raw)
+    if not exact:
         return None
-    tmp = week_df.copy()
-    tmp["session_date_dt"] = pd.to_datetime(tmp["session_date"], errors="coerce")
-    matches = tmp[tmp["session_type"] == "Meccs"]
+    sign, num = exact.group(1), exact.group(2)
+    if num is None:
+        return 0
+    n = int(num)
+    if sign == "+":
+        return n
+    return -n
+
+
+def _fpi_v407_date_from_text(value: object) -> pd.Timestamp:
+    text = str(value or "")
+    patterns = [
+        (r"(?<!\d)(20\d{2})[-_. ](\d{1,2})[-_. ](\d{1,2})(?!\d)", (1, 2, 3)),
+        (r"(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)", (1, 2, 3)),
+        (r"(?<!\d)(\d{1,2})[-_. ](\d{1,2})[-_. ](20\d{2})(?!\d)", (3, 2, 1)),
+    ]
+    for pattern, order in patterns:
+        m = re.search(pattern, text)
+        if not m:
+            continue
+        vals = [int(m.group(i)) for i in order]
+        try:
+            return pd.Timestamp(year=vals[0], month=vals[1], day=vals[2])
+        except Exception:
+            pass
+    return pd.NaT
+
+
+def _fpi_v407_apply_filename_md_inference(data: pd.DataFrame) -> pd.DataFrame:
+    """Fájlnévben lévő MD-horgonyból a dátumos fájlok MD-napját is kikövetkezteti."""
+    if data is None or data.empty:
+        return pd.DataFrame() if data is None else data.copy()
+    out = data.copy()
+    source_col = "_fpi_source_file" if "_fpi_source_file" in out.columns else (
+        "_fpi_source_key" if "_fpi_source_key" in out.columns else None
+    )
+    if source_col is None:
+        return out
+
+    starts = pd.to_datetime(out.get("start_time"), errors="coerce") if "start_time" in out.columns else pd.Series(pd.NaT, index=out.index)
+    source_rows = []
+    for source, idx in out.groupby(source_col, dropna=False).groups.items():
+        group_start = starts.loc[idx].dropna().min()
+        if pd.isna(group_start):
+            group_start = _fpi_v407_date_from_text(source)
+        names = [source]
+        if "session_name" in out.columns:
+            names.extend(out.loc[idx, "session_name"].dropna().astype(str).unique().tolist())
+        explicit = next((v for v in (_fpi_v407_parse_md_delta(x) for x in names) if v is not None), None)
+        source_rows.append({"source": source, "date": pd.to_datetime(group_start, errors="coerce"), "explicit": explicit})
+
+    meta = pd.DataFrame(source_rows)
+    if meta.empty:
+        return out
+    anchors = meta[meta["explicit"].notna() & meta["date"].notna()].copy()
+    if anchors.empty:
+        return out
+    anchors["implied_match"] = anchors["date"].dt.normalize() - pd.to_timedelta(anchors["explicit"].astype(int), unit="D")
+
+    inferred_by_source = {}
+    match_by_source = {}
+    for _, row in meta.iterrows():
+        source = row["source"]
+        date = pd.to_datetime(row["date"], errors="coerce")
+        explicit = row["explicit"]
+        if pd.isna(date):
+            continue
+        if explicit is not None and not pd.isna(explicit):
+            delta = int(explicit)
+            match_date = date.normalize() - pd.Timedelta(days=delta)
+        else:
+            candidates = anchors.copy()
+            candidates["distance"] = (candidates["date"].dt.normalize() - date.normalize()).abs().dt.days
+            candidates = candidates[candidates["distance"] <= 10].sort_values(["distance", "date"])
+            if candidates.empty:
+                continue
+            match_date = pd.to_datetime(candidates.iloc[0]["implied_match"]).normalize()
+            delta = int((date.normalize() - match_date).days)
+        if -7 <= delta <= 3:
+            inferred_by_source[str(source)] = day_label_from_delta(delta)
+            match_by_source[str(source)] = match_date
+
+    source_text = out[source_col].astype(str)
+    inferred = source_text.map(inferred_by_source)
+    implied_match = pd.to_datetime(source_text.map(match_by_source), errors="coerce")
+    if "_fpi_inferred_md_label" in out.columns:
+        out["_fpi_inferred_md_label"] = out["_fpi_inferred_md_label"].combine_first(inferred)
+    else:
+        out["_fpi_inferred_md_label"] = inferred
+    if "_fpi_inferred_match_date" in out.columns:
+        out["_fpi_inferred_match_date"] = pd.to_datetime(out["_fpi_inferred_match_date"], errors="coerce").combine_first(implied_match)
+    else:
+        out["_fpi_inferred_match_date"] = implied_match
+    return out
+
+
+def detect_match_day(week_df: pd.DataFrame) -> Optional[pd.Timestamp]:
+    if week_df is None or week_df.empty:
+        return None
+    tmp = _fpi_v407_apply_filename_md_inference(week_df)
+    tmp["session_date_dt"] = pd.to_datetime(tmp.get("session_date"), errors="coerce")
+    if tmp["session_date_dt"].isna().all() and "start_time" in tmp.columns:
+        tmp["session_date_dt"] = pd.to_datetime(tmp["start_time"], errors="coerce").dt.normalize()
+    matches = tmp[tmp.get("session_type", pd.Series("", index=tmp.index)).astype(str).eq("Meccs")]
     if not matches.empty:
-        # Ha több meccs van, a hét fő meccsének az utolsót vesszük.
         return pd.to_datetime(matches["session_date_dt"].max())
+    if "_fpi_inferred_match_date" in tmp.columns:
+        inferred = pd.to_datetime(tmp["_fpi_inferred_match_date"], errors="coerce").dropna()
+        if not inferred.empty:
+            return pd.to_datetime(inferred.mode().iloc[0] if not inferred.mode().empty else inferred.median()).normalize()
+    if "_fpi_inferred_md_label" in tmp.columns:
+        implied = []
+        for _, row in tmp[["session_date_dt", "_fpi_inferred_md_label"]].dropna().drop_duplicates().iterrows():
+            delta = _fpi_v407_parse_md_delta(row["_fpi_inferred_md_label"])
+            if delta is not None:
+                implied.append(pd.to_datetime(row["session_date_dt"]).normalize() - pd.Timedelta(days=delta))
+        if implied:
+            return pd.Series(implied).mode().iloc[0]
     return None
 
 
+
 def build_microcycle_table(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
-    week_df = df[df["week"] == selected_week].copy()
+    week_df = df[df["week"].astype(str) == str(selected_week)].copy()
     if week_df.empty:
         return pd.DataFrame()
+    week_df = _fpi_v407_apply_filename_md_inference(week_df)
     match_day = detect_match_day(week_df)
-    week_df["session_date_dt"] = pd.to_datetime(week_df["session_date"], errors="coerce")
+    week_df["session_date_dt"] = pd.to_datetime(week_df.get("session_date"), errors="coerce")
+    if week_df["session_date_dt"].isna().all() and "start_time" in week_df.columns:
+        week_df["session_date_dt"] = pd.to_datetime(week_df["start_time"], errors="coerce").dt.normalize()
 
     agg_spec = {
-        "training_load": "sum",
-        "total_distance": "sum",
-        "sprint_distance": "sum",
-        "hsr_distance": "sum",
-        "distance_per_min": "mean",
-        "max_speed": "max",
-        "acc_count": "sum",
-        "dec_count": "sum",
-        "high_efforts": "sum",
+        "training_load": "sum", "total_distance": "sum", "sprint_distance": "sum",
+        "hsr_distance": "sum", "distance_per_min": "mean", "max_speed": "max",
+        "acc_count": "sum", "dec_count": "sum", "high_efforts": "sum",
         "player_name": "nunique",
     }
     usable = {k: v for k, v in agg_spec.items() if k in week_df.columns}
     daily = week_df.groupby(["session_date_dt", "session_type"], as_index=False).agg(usable)
     daily = daily.rename(columns={"player_name": "játékosok"})
     if match_day is not None:
-        daily["md_delta"] = (daily["session_date_dt"] - match_day).dt.days
+        daily["md_delta"] = (daily["session_date_dt"].dt.normalize() - pd.to_datetime(match_day).normalize()).dt.days
         daily["md_label"] = daily["md_delta"].apply(day_label_from_delta)
+        actual_match_dates = set(
+            week_df.loc[week_df["session_type"].astype(str).eq("Meccs"), "session_date_dt"].dropna().dt.normalize()
+        )
+        daily["md_context_source"] = np.where(
+            daily["session_date_dt"].dt.normalize().isin(actual_match_dates), "feltöltött meccs", "fájlnév + dátum következtetés" if not actual_match_dates else "feltöltött meccsnap"
+        )
     else:
         daily["md_delta"] = np.nan
         daily["md_label"] = "Nincs meccs"
+        daily["md_context_source"] = "nincs MD-horgony"
 
-    # Napi load fallback: ahol nincs training_load, ott total_distance alapján értékelünk.
     if "training_load" in daily.columns and not daily["training_load"].isna().all():
         daily["load_index"] = daily["training_load"]
         daily["load_index_label"] = "Terhelési pont"
@@ -4235,17 +4354,18 @@ def build_microcycle_table(df: pd.DataFrame, selected_week: str) -> pd.DataFrame
     return daily.sort_values("session_date_dt")
 
 
+
 def microcycle_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
     insights: List[Insight] = []
     daily = build_microcycle_table(df, selected_week)
     if daily.empty:
         return insights
-    if "MD" not in daily["md_label"].values:
+    if daily["md_label"].astype(str).eq("Nincs meccs").all():
         insights.append(Insight(
             "Mikrociklus kontextus hiányzik", "INFORMÁCIÓ",
-            "Az aktuális héten nem található meccs típusú session, ezért az MD-napok nem értelmezhetők automatikusan.",
-            "Meccsnap nélkül a heti struktúrát csak általános terhelési trendként lehet értékelni.",
-            "Ha van mérkőzés, érdemes a session típusát 'Meccs'-ként jelölni, hogy a rendszer MD-1 / MD-2 / MD-3 logikával is tudjon gondolkodni.",
+            "Sem feltöltött meccs, sem fájlnévből felismerhető MD-horgony nem áll rendelkezésre.",
+            "Meccsnap vagy MD-horgony nélkül a heti struktúra csak általános terhelési trendként értékelhető.",
+            "Legalább egy fájlnévben add meg az MD-napot (például MD-3); a dátumos szomszédos fájlokat a rendszer automatikusan MD-2, MD-1 stb. napként következteti.",
             scope="Mikrociklus",
         ))
         return insights
@@ -5152,10 +5272,6 @@ def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: s
                 score += 3
 
     components["playstyle_fit"] = max(0, min(100, playstyle_component))
-    components["analysis_completeness"] = 100 if mode_code == "full_microcycle" else (
-        65 if mode_code in {"training_block", "week_in_progress"} else 45
-    )
-
     # 5. Meccskészültség végső skála
     score = int(max(0, min(100, round(score))))
     if not reasons:
@@ -5523,40 +5639,41 @@ def insights_to_word_bytes(insights_df: pd.DataFrame, selected_week: str) -> Opt
 
 
 def _register_pdf_font() -> Tuple[str, str]:
-    """ReportLab alapfontjai nem kezelik jól a magyar ékezeteket.
-    Ezért megpróbálunk DejaVuSans betűtípust regisztrálni, ami Streamlit Cloudon
-    és Linuxon általában elérhető. Ha nem található, visszaesünk Helvetica-ra.
-    """
+    """Unicode-képes PDF-font, teljes magyar ő/ű támogatással."""
     if pdfmetrics is None or TTFont is None:
         return "Helvetica", "Helvetica-Bold"
 
-    font_candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf",
-        "/usr/local/share/fonts/DejaVuSans.ttf",
-        "C:/Windows/Fonts/arial.ttf",
+    font_pairs = [
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf"),
+        ("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
+        ("/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSans-Bold.ttf"),
+        ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
+        ("/Library/Fonts/Arial Unicode.ttf", "/Library/Fonts/Arial Bold.ttf"),
     ]
-    bold_candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
-        "/usr/local/share/fonts/DejaVuSans-Bold.ttf",
-        "C:/Windows/Fonts/arialbd.ttf",
-    ]
-
-    normal_path = next((fp for fp in font_candidates if Path(fp).exists()), None)
-    bold_path = next((fp for fp in bold_candidates if Path(fp).exists()), None)
-
+    normal_path = bold_path = None
+    for normal, bold in font_pairs:
+        if Path(normal).exists():
+            normal_path = normal
+            bold_path = bold if Path(bold).exists() else None
+            break
     if not normal_path:
         return "Helvetica", "Helvetica-Bold"
 
     try:
-        pdfmetrics.registerFont(TTFont("DejaVuSans", normal_path))
+        registered = set(pdfmetrics.getRegisteredFontNames())
+        if "FPIUnicode" not in registered:
+            pdfmetrics.registerFont(TTFont("FPIUnicode", normal_path))
         if bold_path:
-            pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
-            return "DejaVuSans", "DejaVuSans-Bold"
-        return "DejaVuSans", "DejaVuSans"
+            if "FPIUnicode-Bold" not in registered:
+                pdfmetrics.registerFont(TTFont("FPIUnicode-Bold", bold_path))
+            return "FPIUnicode", "FPIUnicode-Bold"
+        return "FPIUnicode", "FPIUnicode"
     except Exception:
         return "Helvetica", "Helvetica-Bold"
+
 
 
 def insights_to_pdf_bytes(insights_df: pd.DataFrame, selected_week: str) -> Optional[bytes]:
@@ -6014,83 +6131,99 @@ def build_current_remaining_days_plan(
     periodization_type: str,
     player_risk_df: pd.DataFrame,
 ) -> Tuple[pd.DataFrame, str]:
-    """Aktuális hét: eddigi feltöltött napok alapján javaslat a hátralévő napokra."""
-    week_df = df[df["week"] == selected_week].copy() if df is not None and "week" in df.columns else pd.DataFrame()
+    """Aktuális hét hátralévő napjai ugyanabból az adaptív tervmotorból."""
+    week_df = df[df["week"].astype(str).eq(str(selected_week))].copy() if df is not None and not df.empty and "week" in df.columns else pd.DataFrame()
     if week_df.empty:
         return pd.DataFrame(), "Nincs aktuális heti adat."
-
-    week_df["session_date_dt"] = pd.to_datetime(week_df["session_date"], errors="coerce")
-    last_day = week_df["session_date_dt"].max()
+    full_plan = build_next_microcycle_plan(df, selected_week, playstyle, readiness_score, periodization_type, player_risk_df)
+    daily = build_microcycle_table(df, selected_week)
+    completed = set(daily.get("md_label", pd.Series(dtype=object)).dropna().astype(str).tolist()) if not daily.empty else set()
+    order = ["MD-4", "MD-3", "MD-2", "MD-1", "MD", "MD+1"]
     match_day = detect_match_day(week_df)
-    has_match = match_day is not None
-    ws = week_completeness_summary(df, selected_week)
-
-    if has_match and pd.notna(last_day) and match_day is not None and last_day.date() >= match_day.date():
-        md_slots = ["MD+1", "Következő edzés", "Jövő hét előkészítés"]
-    elif has_match:
-        md_slots = ["Hátralévő edzés", "MD-2", "MD-1", "MD"]
+    if match_day is not None:
+        last_date = pd.to_datetime(week_df.get("start_time"), errors="coerce").max()
+        current_delta = int((pd.to_datetime(last_date).normalize() - pd.to_datetime(match_day).normalize()).days) if pd.notna(last_date) else -4
+        remaining_labels = [day_label_from_delta(d) for d in range(current_delta + 1, 2) if -4 <= d <= 1]
+        remaining_labels = [x for x in order if x in remaining_labels]
     else:
-        if ws.get("train_days", 0) <= 1:
-            md_slots = ["Holnap", "Következő 2. edzés", "Következő 3. edzés", "Hétvégi meccs / referencia"]
-        elif ws.get("train_days", 0) <= 3:
-            md_slots = ["Holnap", "Hátralévő fő edzés", "Meccs előtti aktiváció", "Hétvégi meccs / referencia"]
-        else:
-            md_slots = ["Következő edzés", "Aktiváció", "Meccs / referencia"]
+        remaining_labels = [x for x in order if x not in completed][:3]
+    remaining = full_plan[full_plan["Nap"].isin(remaining_labels)].copy()
+    if remaining.empty:
+        remaining = full_plan.tail(2).copy()
+    remaining = remaining.rename(columns={"Nap":"Hátralévő pont", "Szerep":"Fókusz"})
+    ws = week_completeness_summary(df, selected_week)
+    txt = f"{ws.get('status')}. A hátralévő terv a saját előző hetekhez, az aktuális hét tényleges load/HSR/sprint mintájához és a játékoskockázathoz igazodik; nem általános mikrociklus-sablon."
+    return remaining, txt
 
-    high_risk = []
-    if player_risk_df is not None and not player_risk_df.empty and "Kockázati szint" in player_risk_df.columns:
-        high_risk = player_risk_df.loc[player_risk_df["Kockázati szint"] == "Magas", "Játékos"].head(5).tolist() if "Játékos" in player_risk_df.columns else []
 
-    low_sprint = False
-    intensity_gap = False
-    train = week_df[week_df["session_type"] == "Edzés"] if "session_type" in week_df.columns else pd.DataFrame()
-    match = week_df[week_df["session_type"] == "Meccs"] if "session_type" in week_df.columns else pd.DataFrame()
-    if not train.empty:
-        if "sprint_distance" in train.columns and train["sprint_distance"].mean() < 250:
-            low_sprint = True
-        if not match.empty and "distance_per_min" in week_df.columns and match["distance_per_min"].mean() > 0:
-            intensity_gap = (train["distance_per_min"].mean() / match["distance_per_min"].mean()) < 0.88
 
-    rows = []
-    for slot in md_slots:
-        if "MD+1" in slot:
-            focus = "Regeneráció / pótló terhelés"
-            rec = "Sokat játszóknak regeneráció, keveset játszóknak kontrollált kiegészítő blokk."
-            load = "egyéni"
-        elif "MD-1" in slot or "aktiváció" in slot.lower():
-            focus = "Frissesség"
-            rec = "Rövid aktiváció, alacsony volumen. Ne legyen új fárasztó inger."
-            load = "alacsony"
-        elif "MD-2" in slot:
-            focus = "Taktikai kontroll"
-            rec = "Taktikai fókusz, kevés lassítás/excentrikus terhelés. Magas risk játékosoknál limit."
-            load = "alacsony-közepes"
-        elif low_sprint or intensity_gap:
-            focus = "Hiányzó intenzitás pótlása"
-            rec = "Rövid, kontrollált sprint/max sebesség vagy magas tempójú játékblokk, kis volumennel."
-            load = "közepes"
-        else:
-            focus = "Struktúra megtartása"
-            rec = "A heti terv tartható, de egyéni risk és readiness kontroll javasolt."
-            load = "közepes"
+def _fpi_v407_field_only(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+    out = df.copy()
+    if "is_goalkeeper" in out.columns:
+        return out[~out["is_goalkeeper"].fillna(False)].copy()
+    if "position" in out.columns:
+        mask = out["position"].apply(is_keeper_position_value)
+        return out[~mask].copy()
+    if "position_group" in out.columns:
+        mask = out["position_group"].astype(str).str.lower().str.contains("kapus|goalkeeper|\\bgk\\b", regex=True, na=False)
+        return out[~mask].copy()
+    return out
 
-        if high_risk and load != "alacsony":
-            rec += " Magas risk játékosoknál egyéni csökkentés: " + ", ".join(high_risk[:3]) + "."
 
-        rows.append({
-            "Hátralévő pont": slot,
-            "Fókusz": focus,
-            "Ajánlott terhelés": load,
-            "Javaslat": rec,
-            "Miért?": f"Eddig feltöltve: {ws.get('train_days', 0)} edzésnap, {ws.get('match_days', 0)} meccsnap. Readiness: {readiness_score}/100.",
-        })
+def _fpi_v407_week_field_profile(df: pd.DataFrame, week: str) -> Dict[str, float]:
+    data = _fpi_v407_field_only(df)
+    data = data[data["week"].astype(str).eq(str(week))].copy() if not data.empty and "week" in data.columns else pd.DataFrame()
+    if data.empty:
+        return {}
+    train = data[data.get("session_type", pd.Series("", index=data.index)).astype(str).eq("Edzés")].copy()
+    if train.empty:
+        train = data.copy()
+    sum_cols = [c for c in ["training_load", "total_distance", "hsr_distance", "sprint_distance", "dec_count", "acc_count", "high_efforts"] if c in train.columns]
+    mean_cols = [c for c in ["distance_per_min"] if c in train.columns]
+    max_cols = [c for c in ["max_speed"] if c in train.columns]
+    if "player_name" in train.columns:
+        agg = {c: "sum" for c in sum_cols}; agg.update({c: "mean" for c in mean_cols}); agg.update({c: "max" for c in max_cols})
+        per_player = train.groupby("player_name", dropna=False).agg(agg).reset_index() if agg else pd.DataFrame()
+    else:
+        per_player = train
+    profile = {}
+    for c in sum_cols + mean_cols + max_cols:
+        vals = pd.to_numeric(per_player.get(c), errors="coerce").dropna()
+        profile[c] = float(vals.median()) if not vals.empty else np.nan
+    profile["players"] = int(per_player["player_name"].nunique()) if "player_name" in per_player.columns else len(per_player)
+    return profile
 
-    txt = (
-        f"Aktuális hét állapota: {ws.get('status')}\n"
-        f"{ws.get('message')}\n\n"
-        "A hátralévő napokra a javaslat nem teljes heti minősítés, hanem folyamat közbeni döntéstámogatás."
-    )
-    return pd.DataFrame(rows), txt
+
+def _fpi_v407_plan_context(df: pd.DataFrame, selected_week: str) -> Dict[str, object]:
+    weeks = sorted(df["week"].dropna().astype(str).unique().tolist(), key=_fpi_week_sort_key_v99) if df is not None and not df.empty and "week" in df.columns else []
+    current = _fpi_v407_week_field_profile(df, selected_week)
+    previous_weeks = [w for w in weeks if _fpi_week_sort_key_v99(w) < _fpi_week_sort_key_v99(str(selected_week))][-4:]
+    history = [_fpi_v407_week_field_profile(df, w) for w in previous_weeks]
+    history = [x for x in history if x]
+    previous = history[-1] if history else {}
+    baseline = {}
+    metrics = ["training_load", "total_distance", "hsr_distance", "sprint_distance", "distance_per_min", "max_speed", "dec_count", "high_efforts"]
+    for metric in metrics:
+        vals = [x.get(metric) for x in history if pd.notna(x.get(metric, np.nan))]
+        baseline[metric] = float(np.median(vals)) if vals else np.nan
+    ratios = {}
+    for metric in metrics:
+        cur = current.get(metric, np.nan); base = baseline.get(metric, np.nan)
+        ratios[metric] = float(cur/base) if pd.notna(cur) and pd.notna(base) and base > 0 else np.nan
+    daily = build_microcycle_table(df, selected_week)
+    early = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).isin(["MD-4", "MD-3"])] if not daily.empty else pd.DataFrame()
+    md2 = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).eq("MD-2")] if not daily.empty else pd.DataFrame()
+    md1 = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).eq("MD-1")] if not daily.empty else pd.DataFrame()
+    peak_early = pd.to_numeric(early.get("load_index"), errors="coerce").max() if not early.empty else np.nan
+    md2_ratio = pd.to_numeric(md2.get("load_index"), errors="coerce").sum()/peak_early if not md2.empty and pd.notna(peak_early) and peak_early > 0 else np.nan
+    md1_ratio = pd.to_numeric(md1.get("load_index"), errors="coerce").sum()/peak_early if not md1.empty and pd.notna(peak_early) and peak_early > 0 else np.nan
+    peak_sprint_md = ""
+    train_daily = daily[daily.get("session_type", pd.Series("", index=daily.index)).astype(str).eq("Edzés")] if not daily.empty else pd.DataFrame()
+    if not train_daily.empty and "sprint_distance" in train_daily.columns and pd.to_numeric(train_daily["sprint_distance"], errors="coerce").notna().any():
+        peak_sprint_md = str(train_daily.loc[pd.to_numeric(train_daily["sprint_distance"], errors="coerce").idxmax()].get("md_label", ""))
+    return {"current": current, "previous": previous, "baseline": baseline, "ratios": ratios, "previous_weeks": previous_weeks, "md2_ratio": md2_ratio, "md1_ratio": md1_ratio, "peak_sprint_md": peak_sprint_md}
 
 
 def build_next_microcycle_plan(
@@ -6101,80 +6234,73 @@ def build_next_microcycle_plan(
     periodization_type: str,
     player_risk_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Jövő hét / következő mikrociklus javaslat MD-bontásban az eddigiek alapján."""
-    week_df = df[df["week"] == selected_week].copy() if df is not None and "week" in df.columns else pd.DataFrame()
+    """Következő mikrociklus: saját 4 hetes előzmény + múlt hét + aktuális hét alapján."""
+    ctx = _fpi_v407_plan_context(df, selected_week)
+    ratios = ctx.get("ratios", {})
+    load_r = ratios.get("training_load", np.nan)
+    hsr_r = ratios.get("hsr_distance", np.nan)
+    sprint_r = ratios.get("sprint_distance", np.nan)
+    dec_r = ratios.get("dec_count", np.nan)
+    intensity_r = ratios.get("distance_per_min", np.nan)
+    md2_r = ctx.get("md2_ratio", np.nan)
+    md1_r = ctx.get("md1_ratio", np.nan)
+    peak_sprint_md = str(ctx.get("peak_sprint_md", ""))
+    history_n = len(ctx.get("previous_weeks", []))
 
-    low_sprint = False
-    intensity_gap = False
     high_risk_players = []
-    if player_risk_df is not None and not player_risk_df.empty:
-        high_risk_players = player_risk_df.loc[player_risk_df["Kockázati szint"] == "Magas", "Játékos"].head(5).tolist() if "Kockázati szint" in player_risk_df.columns and "Játékos" in player_risk_df.columns else []
+    if player_risk_df is not None and not player_risk_df.empty and {"Kockázati szint", "Játékos"}.issubset(player_risk_df.columns):
+        high_risk_players = player_risk_df.loc[player_risk_df["Kockázati szint"].eq("Magas"), "Játékos"].astype(str).head(5).tolist()
 
-    if not week_df.empty:
-        train = week_df[week_df["session_type"] == "Edzés"] if "session_type" in week_df.columns else pd.DataFrame()
-        match = week_df[week_df["session_type"] == "Meccs"] if "session_type" in week_df.columns else pd.DataFrame()
-        if not train.empty and not match.empty:
-            if "sprint_distance" in week_df.columns and match["sprint_distance"].mean() > 0:
-                low_sprint = (train["sprint_distance"].mean() / match["sprint_distance"].mean()) < 0.75
-            if "distance_per_min" in week_df.columns and match["distance_per_min"].mean() > 0:
-                intensity_gap = (train["distance_per_min"].mean() / match["distance_per_min"].mean()) < 0.88
-        elif not train.empty:
-            if "sprint_distance" in train.columns and train["sprint_distance"].mean() < 250:
-                low_sprint = True
+    def pct(v):
+        return "n.a." if pd.isna(v) else f"{v:.0%}"
 
-    if readiness_score < 60:
-        global_tone = "frissítés és terheléskontroll"
-        volume = "alacsony-közepes"
-    elif "alulterhelt" in str(periodization_type).lower() or low_sprint:
-        global_tone = "kontrollált inger pótlása"
-        volume = "közepes"
-    else:
-        global_tone = "struktúra megtartása és finomhangolás"
-        volume = "közepes"
-
-    md_structure = [
-        ("MD-4", "Fő terhelési nap", "volumen + játékmodell-specifikus intenzitás"),
-        ("MD-3", "Sebesség / intenzitás nap", "rövid maximális sebesség vagy high effort blokk"),
-        ("MD-2", "Kontrollált taktikai nap", "alacsonyabb neuromuszkuláris teher, kevesebb lassítás"),
-        ("MD-1", "Aktiváció", "rövid, frissítő, nem fárasztó inger"),
-        ("MD", "Mérkőzés", "referencianap"),
-        ("MD+1", "Regeneráció / pótlás", "játszók regeneráció, kevesebbet játszók kiegészítő munka"),
-    ]
+    overloaded = readiness_score < 60 or (pd.notna(load_r) and load_r > 1.15) or len(high_risk_players) >= 3
+    underloaded = pd.notna(load_r) and load_r < .85
+    speed_low = (pd.notna(hsr_r) and hsr_r < .85) or (pd.notna(sprint_r) and sprint_r < .80)
+    speed_late = peak_sprint_md in {"MD-2", "MD-1"}
+    dec_high = pd.notna(dec_r) and dec_r > 1.15
+    taper_bad = (pd.notna(md2_r) and md2_r > .80) or (pd.notna(md1_r) and md1_r > .50)
 
     rows = []
-    for md, role, base_goal in md_structure:
-        if md == "MD-4":
-            recommendation = "Legyen ez a hét fő terhelési napja. Játékmodellhez illeszkedő játékok, nagyobb volumen."
-            if readiness_score < 60:
-                recommendation = "Csak óvatos fő nap: ne legyen nagy load spike, inkább kontrollált volumen."
-        elif md == "MD-3":
-            if low_sprint:
-                recommendation = "Tegyél be rövid, kontrollált sprint/max sebesség blokkot. Kevés ismétlés, jó minőség."
-            elif intensity_gap:
-                recommendation = "Rövidebb, magasabb tempójú játékokkal közelítsd a meccsintenzitást."
-            else:
-                recommendation = "Tartsd meg a minőségi sebesség/intenzitás ingert, de ne volumenből oldd meg."
-        elif md == "MD-2":
-            recommendation = "Taktikai fókusz, kontrollált terhelés. Kerüld a túl sok lassítást és excentrikus terhet."
-            if high_risk_players:
-                recommendation += " Magas risk játékosoknál egyéni limit javasolt."
-        elif md == "MD-1":
-            recommendation = "Rövid aktiváció, frissesség megtartása. Ne legyen új terhelési inger."
-        elif md == "MD":
-            recommendation = "Mérkőzés referencia. A következő heti edzésterhelést ehhez viszonyítsd."
-        else:
-            recommendation = "Regeneráció a sokat játszóknak, kiegészítő kontrollált terhelés a kevesebbet játszóknak."
+    if overloaded:
+        md4_load = "a saját 4 hetes medián 85–95%-a"
+        md4_rec = "A fő nap maradjon meg, de ne legyen új load spike; csökkentsd a játékidőt vagy a blokkszámot, miközben a taktikai cél változatlan."
+    elif underloaded:
+        md4_load = "a saját 4 hetes medián 100–110%-a"
+        md4_rec = "Pótolj kontrollált volument, de egyetlen nap helyett két jól elkülönített blokkban építs terhelést."
+    else:
+        md4_load = "a saját 4 hetes medián 95–105%-a"
+        md4_rec = "Tartsd a megszokott fő terhelési napot; ne emelj csak azért, mert a readiness jó."
+    rows.append({"Nap":"MD-4","Szerep":"Fő terhelési nap","Fő cél":f"{playstyle} játékmodell + kontrollált volumen","Ajánlott terhelés":md4_load,"Javaslat":md4_rec,"Tervezési alap":f"Aktuális mezőnyjátékos-load / saját {history_n or 1} hetes medián: {pct(load_r)}; readiness {readiness_score}/100; magas risk: {len(high_risk_players)}."})
 
-        rows.append({
-            "Nap": md,
-            "Szerep": role,
-            "Fő cél": base_goal,
-            "Ajánlott terhelés": volume if md in ["MD-4", "MD-3"] else "alacsony-közepes" if md in ["MD-2", "MD+1"] else "alacsony" if md == "MD-1" else "meccs",
-            "Javaslat": recommendation,
-            "Tervezési alap": f"A jelenlegi hét értelmezése: {global_tone}. Readiness: {readiness_score}/100, periodizáció: {periodization_type}.",
-        })
+    if speed_late:
+        md3_rec = f"A fő sebességi ingert hozd előre ide, mert az aktuális ciklus csúcsa {peak_sprint_md} napra esett. Rövid, teljes pihenős sprint és meccsszerű HSR-blokk legyen, alacsony összvolumennel."
+    elif speed_low:
+        md3_rec = "Célzottan pótold a hiányzó HSR/sprint ingert: kevés, jó minőségű ismétlés, teljes pihenővel; ne általános plusz futással növeld."
+    else:
+        md3_rec = "A jelenlegi sebességi dózis fenntartható; a minőséget és a megfelelő MD-3 időzítést védd, ne növeld automatikusan a mennyiséget."
+    rows.append({"Nap":"MD-3","Szerep":"Sebesség és meccsintenzitás","Fő cél":"HSR/sprint + játékmodell-specifikus gyors akciók","Ajánlott terhelés":"HSR és sprint a saját mediánhoz igazítva","Javaslat":md3_rec,"Tervezési alap":f"HSR / medián: {pct(hsr_r)}; sprint / medián: {pct(sprint_r)}; aktuális sprintcsúcs: {peak_sprint_md or 'nem azonosítható'}."})
 
+    if taper_bad or dec_high:
+        md2_rec = "Taktikai specifikusság maradjon, de csökkentsd a pályaméret-váltásokat, az ismétlésszámot és a nagy lassításokat; a nap ne közelítse meg a fő terhelési napot."
+    else:
+        md2_rec = "Rövid ellenfél- és meccsterv-specifikus blokkok, kontrollált intenzitással; új kondicionális inger nélkül."
+    rows.append({"Nap":"MD-2","Szerep":"Meccsterv és terheléskontroll","Fő cél":"Döntési pontok, rest defense, pontrúgás-előkészítés","Ajánlott terhelés":"a fő nap legfeljebb 60–75%-a","Javaslat":md2_rec,"Tervezési alap":f"Aktuális MD-2 / fő nap: {pct(md2_r)}; lassítás / saját medián: {pct(dec_r)}."})
+
+    if pd.notna(md1_r) and md1_r > .50:
+        md1_rec = "Az aktuális MD-1 túl nagy volt: rövidítsd az időt és a blokkot, a fő sprintdózist vedd ki; csak reakció, indulás, labdás élesség és pontrúgás maradjon."
+    else:
+        md1_rec = "Rövid idegrendszeri aktiváció, kevés gyors akcióval; a cél az élesség, nem a plusz fáradtság."
+    rows.append({"Nap":"MD-1","Szerep":"Frissítés és aktiváció","Fő cél":"Kezdőhelyzetek, első döntés, rövid gyorsasági érintés","Ajánlott terhelés":"a fő nap 30–45%-a","Javaslat":md1_rec,"Tervezési alap":f"Aktuális MD-1 / fő nap: {pct(md1_r)}; tapering {'korrekciót igényel' if taper_bad else 'megtartható'}."})
+
+    rows.append({"Nap":"MD","Szerep":"Mérkőzés","Fő cél":"Referencia és végrehajtás","Ajánlott terhelés":"meccsterhelés","Javaslat":"A következő ciklus kiértékelésénél a játékperceket, a meccs HSR/sprint profilját és a csapaton belüli eltéréseket együtt használd.","Tervezési alap":f"Játékmodell: {playstyle}; a terv a saját közelmúltból, nem általános sablonból készült."})
+
+    recovery_rec = "Sokat játszóknak regeneráció; keveset játszóknak a hiányzó HSR/load célzott pótlása."
+    if high_risk_players:
+        recovery_rec += " Egyéni kontroll: " + ", ".join(high_risk_players[:3]) + "."
+    rows.append({"Nap":"MD+1","Szerep":"Regeneráció / egyéni pótlás","Fő cél":"Játékperc-alapú kettéválasztás","Ajánlott terhelés":"egyéni","Javaslat":recovery_rec,"Tervezési alap":f"Magas kockázatú játékosok: {len(high_risk_players)}; a pótlás ne legyen azonos minden játékosnak."})
     return pd.DataFrame(rows)
+
 
 
 def build_player_next_actions(player_risk_df: pd.DataFrame, df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
@@ -6223,30 +6349,27 @@ def build_next_week_plan_v5(
     past_review_df: pd.DataFrame,
     current_remaining_df: pd.DataFrame,
 ) -> Tuple[pd.DataFrame, str]:
-    """Jövő hét: múlt hét + aktuális részadat + risk alapján."""
-    base_plan = build_next_microcycle_plan(df, selected_week, playstyle, readiness_score, periodization_type, player_risk_df)
-    if base_plan is None or base_plan.empty:
-        return base_plan, "Nincs elég adat következő hét tervhez."
-
-    high_risk_count = 0
-    if player_risk_df is not None and not player_risk_df.empty and "Kockázati szint" in player_risk_df.columns:
-        high_risk_count = int((player_risk_df["Kockázati szint"] == "Magas").sum())
-
-    past_warn = 0
+    """Múlt hét + többhetes saját baseline + aktuális részadat alapján."""
+    plan = build_next_microcycle_plan(df, selected_week, playstyle, readiness_score, periodization_type, player_risk_df)
+    if plan is None or plan.empty:
+        return plan, "Nincs elég adat következő heti tervhez."
+    warning_titles = []
     if past_review_df is not None and not past_review_df.empty and "Súlyosság" in past_review_df.columns:
-        past_warn = int(past_review_df["Súlyosság"].astype(str).isin(["KRITIKUS", "FIGYELMEZTETÉS"]).sum())
-
-    base_plan = base_plan.copy()
-    base_plan["Tervezési alap"] = (
-        f"Múlt heti figyelmeztetések: {past_warn}; aktuális readiness: {readiness_score}/100; "
-        f"magas risk játékosok: {high_risk_count}; periodizáció: {periodization_type}."
-    )
-
+        warning_titles = past_review_df.loc[past_review_df["Súlyosság"].astype(str).isin(["KRITIKUS", "FIGYELMEZTETÉS"]), "Múlt heti megállapítás"].astype(str).head(3).tolist() if "Múlt heti megállapítás" in past_review_df.columns else []
+    plan = plan.copy()
+    if warning_titles:
+        plan.loc[plan["Nap"].isin(["MD-4", "MD-3", "MD-2", "MD-1"]), "Tervezési alap"] = plan.loc[plan["Nap"].isin(["MD-4", "MD-3", "MD-2", "MD-1"]), "Tervezési alap"].astype(str) + " Múlt heti jelzés: " + "; ".join(warning_titles[:2]) + "."
+    context = _fpi_v407_plan_context(df, selected_week)
+    ratios = context.get("ratios", {})
+    def p(v): return "n.a." if pd.isna(v) else f"{v:.0%}"
     txt = (
-        "A jövő heti mikrociklus a múlt teljesebb értékelésére, az aktuális hét eddig feltöltött napjaira "
-        "és a játékosszintű risk jelzésekre épül."
+        f"A következő mikrociklus a mezőnyjátékosok saját közelmúltjához készült. "
+        f"Aktuális load / saját medián: {p(ratios.get('training_load', np.nan))}, "
+        f"HSR: {p(ratios.get('hsr_distance', np.nan))}, sprint: {p(ratios.get('sprint_distance', np.nan))}, "
+        f"readiness: {readiness_score}/100. A napok ajánlása ezért adatonként változik, nem ismétlődő általános szöveg."
     )
-    return base_plan, txt
+    return plan, txt
+
 
 
 def build_premium_pdf_bytes(
@@ -7817,121 +7940,10 @@ def _fpi_v406_merge_halftime_matches(df: pd.DataFrame) -> Tuple[pd.DataFrame, Di
     }
 
 
-def _fpi_v406_data_quality_engine(
-    df: Optional[pd.DataFrame] = None,
-    master_report: Optional[Dict[str, object]] = None,
-    tactical_context: Optional[Dict[str, object]] = None,
-    mode: str = "gps",
-) -> Dict[str, object]:
-    """Egységes forrás- és adatminőségi állapot minden riporttípushoz."""
-    data = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
-    report = master_report or {}
-    tac = tactical_context or {}
-
-    gps_files = int(report.get("gps_source_files", 0) or 0)
-    if not data.empty and gps_files == 0:
-        if "_fpi_source_file" in data.columns:
-            gps_files = int(data["_fpi_source_file"].dropna().astype(str).nunique())
-        elif "_fpi_source_key" in data.columns:
-            gps_files = int(data["_fpi_source_key"].dropna().astype(str).nunique())
-        else:
-            gps_files = 1
-
-    tactical_pdf_count = int(bool(tac.get("has_own_pdf") or tac.get("own_pdf_chars") or tac.get("own_topics"))) + int(bool(tac.get("has_opp_pdf") or tac.get("opp_pdf_chars") or tac.get("opp_topics")))
-    player_excel_count = int(bool(tac.get("has_own_player_excel") or tac.get("own_player_tables") or tac.get("own_player_evaluation"))) + int(bool(tac.get("has_opp_player_excel") or tac.get("opp_player_tables") or tac.get("opponent_player_evaluation")))
-    own_team_excel = bool(tac.get("has_own_team_excel") or tac.get("own_team_metrics"))
-
-    score_parts = []
-    warnings = []
-    if mode in {"gps", "integrated", "own"}:
-        if data.empty:
-            score_parts.append(0.0)
-            warnings.append("Nincs értékelhető GPS-adat.")
-        else:
-            core_cols = [c for c in ["player_name", "start_time", "session_type", "duration_min", "total_distance"] if c in data.columns]
-            core_rates = [float(data[c].notna().mean()) for c in core_cols]
-            score_parts.append(float(np.mean(core_rates)) * 100 if core_rates else 0.0)
-
-            kpis = [c for c in ["training_load", "hsr_distance", "sprint_distance", "max_speed", "high_efforts", "acc_count", "dec_count"] if c in data.columns]
-            kpi_rates = [float(pd.to_numeric(data[c], errors="coerce").notna().mean()) for c in kpis]
-            score_parts.append(float(np.mean(kpi_rates)) * 100 if kpi_rates else 45.0)
-
-            date_rate = float(pd.to_datetime(data.get("start_time"), errors="coerce").notna().mean()) if "start_time" in data.columns else 0.0
-            score_parts.append(date_rate * 100)
-            if date_rate < 0.95:
-                warnings.append("A sessiondátumok egy része hiányzik vagy nem értelmezhető.")
-
-            half_sources = int(report.get("halftime_source_sessions", 0) or 0)
-            half_events = int(report.get("halftime_merged_events", 0) or 0)
-            if half_sources:
-                half_score = min(100.0, half_events * 2 / max(half_sources, 1) * 100.0)
-                score_parts.append(half_score)
-                if half_score < 99:
-                    warnings.append("Nem minden felismert félidő alkotott teljes Half 1 + Half 2 párt.")
-
-    if mode in {"tactical", "integrated"}:
-        tactical_components = [tactical_pdf_count > 0, player_excel_count > 0, bool(tac.get("own_team_metrics") or tac.get("opp_team_metrics"))]
-        score_parts.append(sum(tactical_components) / len(tactical_components) * 100)
-        if not any(tactical_components):
-            warnings.append("A taktikai forrásfedezet korlátozott.")
-
-    if mode == "own":
-        own_components = [own_team_excel, player_excel_count > 0, tactical_pdf_count > 0]
-        # Az Own Team GPS-only módban is működik; a hiányzó taktikai forrás csak információ.
-        if any(own_components):
-            score_parts.append(sum(own_components) / len(own_components) * 100)
-
-    score = int(round(float(np.mean(score_parts)))) if score_parts else 100
-    score = max(0, min(100, score))
-    status = "Kiváló" if score >= 90 else "Megfelelő" if score >= 75 else "Korlátozott" if score >= 55 else "Kritikus"
-    items = [
-        {"label": "GPS fájl", "value": str(gps_files) if gps_files else "nincs", "ok": gps_files > 0},
-        {"label": "Half 1 + Half 2", "value": f"{int(report.get('halftime_merged_events', 0) or 0)} meccs egyesítve", "ok": int(report.get("halftime_source_sessions", 0) or 0) == 0 or int(report.get("halftime_merged_events", 0) or 0) > 0},
-        {"label": "Taktikai PDF", "value": str(tactical_pdf_count) if tactical_pdf_count else "nincs", "ok": tactical_pdf_count > 0},
-        {"label": "Játékos Excel", "value": str(player_excel_count) if player_excel_count else "nincs", "ok": player_excel_count > 0},
-        {"label": "Saját Team Excel", "value": "igen" if own_team_excel else "nincs", "ok": own_team_excel},
-        {"label": "Adatminőség", "value": f"{score}% – {status}", "ok": score >= 75},
-    ]
-    return {"score": score, "status": status, "items": items, "warnings": warnings}
 
 
-def _fpi_v406_quality_inline_text(quality: Optional[Dict[str, object]]) -> str:
-    q = quality or {}
-    parts = []
-    for item in q.get("items", []) or []:
-        value = str(item.get("value", ""))
-        if value not in {"nincs", "0", "0 meccs egyesítve"}:
-            parts.append(f"{item.get('label')}: {value}")
-    return " | ".join(parts) if parts else f"Adatminőség: {q.get('score', 0)}%"
 
 
-def _fpi_v406_render_data_quality_ui(quality: Optional[Dict[str, object]]) -> None:
-    q = quality or {}
-    cards = []
-    for item in q.get("items", []) or []:
-        ok = bool(item.get("ok"))
-        mark = "✓" if ok else "–"
-        border = "#16A34A" if ok else "#94A3B8"
-        cards.append(
-            f"<div style='background:#fff;border:1px solid #dbe3ea;border-left:5px solid {border};"
-            "border-radius:14px;padding:10px 12px;min-height:72px;'>"
-            f"<div style='font-size:.78rem;font-weight:900;color:#475569;'>{html.escape(str(item.get('label','')))}</div>"
-            f"<div style='font-size:1rem;font-weight:900;color:#0f172a;margin-top:5px;'>{mark} {html.escape(str(item.get('value','')))}</div>"
-            "</div>"
-        )
-    warnings = q.get("warnings", []) or []
-    warning_html = "" if not warnings else (
-        "<div style='margin-top:9px;color:#92400e;font-size:.88rem;'>" +
-        html.escape(" ".join(warnings[:2])) + "</div>"
-    )
-    st.markdown(
-        "<div style='background:linear-gradient(135deg,#f8fafc,#ecfdf5);border:1px solid #bfdbfe;"
-        "border-radius:20px;padding:16px 18px;margin:12px 0 18px 0;'>"
-        f"<div style='font-weight:950;font-size:1.05rem;color:#0f172a;'>Adatminőség · {int(q.get('score',0) or 0)}% – {html.escape(str(q.get('status','')))}</div>"
-        "<div style='display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-top:11px;'>" +
-        "".join(cards) + "</div>" + warning_html + "</div>",
-        unsafe_allow_html=True,
-    )
 
 def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
     df = _fpi_to_standard_if_needed(data)
@@ -8091,58 +8103,139 @@ def _fpi_v302_week_context_factor(analysis_df: pd.DataFrame, selected_week: str)
     return {"completion":completion,"phase_factor":pf,"label":f"csonka hét, {completion*100:.0f}% időarányos cél" if completion<.96 else "teljes hét","week_type":wt,"partial":completion<.96}
 
 
-def _fpi_v302_readiness_breakdown(score:int, components:Dict[str,float], reasons:List[str]) -> pd.DataFrame:
-    """V304: magyar komponensnevek, definíció és aktuális értékelés egy mezőben."""
-    labels={
-        "load":"Terhelési egyensúly","trend":"Rövid távú trend",
-        "speed":"Sebességi expozíció","availability":"Edzésrészvétel",
-        "match":"Meccsreferencia","risk":"Játékoskockázat","freshness":"Frissesség",
-        "data":"Elemzés megbízhatósága","training availability":"Edzésrészvétel",
-        "load trend":"Terhelési trend","speed exposure":"Sebességi expozíció",
-        "tapering":"Terheléscsökkentés / frissítés",
-        "playstyle fit":"Játékmodell-illeszkedés",
-        "analysis completeness":"Elemzés megbízhatósága"
+def _fpi_v407_readiness_component_details(
+    df: pd.DataFrame,
+    selected_week: str,
+    playstyle: str,
+    components: Dict[str, float],
+) -> Dict[str, str]:
+    """Minden readiness komponenshez saját, számszerű aktuális értelmezés."""
+    details: Dict[str, str] = {}
+    daily = build_microcycle_table(df, selected_week)
+    weekly = build_weekly_fingerprints(df)
+    row = weekly[weekly["week"].astype(str).eq(str(selected_week))].iloc[0] if not weekly.empty and weekly["week"].astype(str).eq(str(selected_week)).any() else pd.Series(dtype=object)
+
+    att = _fpi_v201_week_attendance_summary(df, selected_week)
+    sessions = int(att.get("team_training_sessions", 0) or 0)
+    availability = att.get("mean_availability_pct", np.nan)
+    if pd.notna(availability) and sessions:
+        judgement = "stabil csapatszintű rendelkezésre állás" if availability >= 90 else "kisebb hiányzásokkal terhelt részvétel" if availability >= 75 else "a heti csapatterhelést érdemben torzító hiányzás"
+        details["training_availability"] = f"{sessions} csapatedzés alapján az átlagos játékosrészvétel {availability:.0f}%; ez {judgement}."
+    else:
+        details["training_availability"] = "Nincs legalább két, részvétel alapján összevethető csapatedzés; a komponens előzetes értéken marad."
+
+    load_change = row.get("training_load_change", np.nan)
+    if pd.notna(load_change):
+        direction = "nőtt" if load_change > 0 else "csökkent"
+        magnitude = abs(float(load_change)) * 100
+        if load_change > .25:
+            meaning = "hirtelen terhelésnövekedés, ezért frissességi kockázat"
+        elif load_change < -.30:
+            meaning = "nagy visszaesés, ezért alulexpozíciós kockázat"
+        else:
+            meaning = "kontrollált heti változás"
+        details["load_trend"] = f"A heti összterhelés az előző héthez képest {magnitude:.0f}%-kal {direction}; ez {meaning}."
+    else:
+        details["load_trend"] = "Nincs közvetlenül megelőző, összevethető hét; a terhelési trend pontszáma semleges előzetes érték."
+
+    train = daily[daily["session_type"].astype(str).eq("Edzés")].copy() if not daily.empty else pd.DataFrame()
+    match = daily[daily["session_type"].astype(str).eq("Meccs")].copy() if not daily.empty else pd.DataFrame()
+    if not train.empty and not match.empty and "sprint_distance" in daily.columns:
+        match_sprint = pd.to_numeric(match["sprint_distance"], errors="coerce").mean()
+        train_sprint = pd.to_numeric(train["sprint_distance"], errors="coerce")
+        if pd.notna(match_sprint) and match_sprint > 0 and train_sprint.notna().any():
+            peak_idx = train_sprint.idxmax()
+            ratio = float(train_sprint.loc[peak_idx]) / float(match_sprint)
+            md = str(train.loc[peak_idx].get("md_label", "ismeretlen napon"))
+            if md in {"MD-4", "MD-3"} and ratio >= .30:
+                meaning = "megfelelő dózis és jó meccs előtti időzítés"
+            elif md in {"MD-2", "MD-1"}:
+                meaning = "a dózis megvan, de túl közel került a mérkőzéshez"
+            else:
+                meaning = "a meccsigényhez képest alacsony sebességi expozíció"
+            details["speed_exposure"] = f"A legnagyobb edzésnapi sprintdózis a meccs sprintreferenciájának {ratio:.0%}-a volt, {md} napon; ez {meaning}."
+        else:
+            details["speed_exposure"] = "A sprintdózis vagy a teljes meccsreferencia nem értelmezhető; a komponens csak előzetes jelzés."
+    elif not train.empty:
+        peak = pd.to_numeric(train.get("sprint_distance"), errors="coerce").max() if "sprint_distance" in train.columns else np.nan
+        md = ""
+        if "sprint_distance" in train.columns and pd.to_numeric(train["sprint_distance"], errors="coerce").notna().any():
+            idx = pd.to_numeric(train["sprint_distance"], errors="coerce").idxmax()
+            md = str(train.loc[idx].get("md_label", ""))
+        details["speed_exposure"] = f"A legnagyobb edzésnapi sprintdózis {peak:.0f} m{f', {md} napon' if md else ''}, de teljes meccsreferencia nélkül a kapott pont előzetes." if pd.notna(peak) else "Nincs értékelhető sprintadat; a sebességi expozíció nem minősíthető biztosan."
+    else:
+        details["speed_exposure"] = "Nincs értékelhető edzésnapi sprintadat."
+
+    md1 = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).eq("MD-1")] if not daily.empty else pd.DataFrame()
+    md2 = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).eq("MD-2")] if not daily.empty else pd.DataFrame()
+    early = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).isin(["MD-4", "MD-3"])] if not daily.empty else pd.DataFrame()
+    taper_parts = []
+    if not early.empty:
+        peak_early = pd.to_numeric(early.get("load_index"), errors="coerce").max()
+        if pd.notna(peak_early) and peak_early > 0:
+            if not md1.empty:
+                r1 = pd.to_numeric(md1.get("load_index"), errors="coerce").sum() / peak_early
+                taper_parts.append(f"MD-1 load a fő MD-4/MD-3 nap {r1:.0%}-a")
+            if not md2.empty:
+                r2 = pd.to_numeric(md2.get("load_index"), errors="coerce").sum() / peak_early
+                taper_parts.append(f"MD-2 load {r2:.0%}")
+    taper_score = float(components.get("tapering", 65) or 65)
+    taper_meaning = "megfelelő frissítés" if taper_score >= 75 else "határeset, kontrollálandó frissítés" if taper_score >= 55 else "túl magas meccs előtti terhelés és frissességi kockázat"
+    details["tapering"] = ("; ".join(taper_parts) + f"; ez {taper_meaning}.") if taper_parts else "Nincs teljes MD-4–MD-1 terhelési lánc; a tapering pontszáma előzetes."
+
+    current = df[df["week"].astype(str).eq(str(selected_week))].copy() if "week" in df.columns else pd.DataFrame()
+    tr = current[current.get("session_type", pd.Series("", index=current.index)).astype(str).eq("Edzés")]
+    ma = current[current.get("session_type", pd.Series("", index=current.index)).astype(str).eq("Meccs")]
+    ratios = []
+    for metric, label in [("distance_per_min", "intenzitás"), ("sprint_distance", "sprint"), ("high_efforts", "High Efforts")]:
+        if metric in current.columns and not tr.empty and not ma.empty:
+            m = pd.to_numeric(ma[metric], errors="coerce").mean(); t = pd.to_numeric(tr[metric], errors="coerce").mean()
+            if pd.notna(m) and m > 0 and pd.notna(t):
+                ratios.append(f"{label} {t/m:.0%} a meccshez képest")
+    fit = float(components.get("playstyle_fit", 70) or 70)
+    fit_meaning = "jól támogatja" if fit >= 75 else "részben támogatja" if fit >= 55 else "nem támogatja elég erősen"
+    details["playstyle_fit"] = (", ".join(ratios) + f"; a heti fizikai profil {fit_meaning} a(z) {playstyle} játékmodellt.") if ratios else f"Nincs teljes edzés–meccs összevetés; a(z) {playstyle} játékmodell-illeszkedés előzetes."
+    return details
+
+
+def _fpi_v302_readiness_breakdown(
+    score: int,
+    components: Dict[str, float],
+    reasons: List[str],
+    component_details: Optional[Dict[str, str]] = None,
+) -> pd.DataFrame:
+    """Readiness komponensek: definíció + kizárólag a saját aktuális értelmezésük."""
+    labels = {
+        "training_availability": "Edzésrészvétel",
+        "load_trend": "Terhelési trend",
+        "speed_exposure": "Sebességi expozíció",
+        "tapering": "Terheléscsökkentés / frissítés",
+        "playstyle_fit": "Játékmodell-illeszkedés",
     }
-    definitions={
-        "load":"A heti volumen és intenzitás egyensúlya a saját előzményekhez és a célzónához viszonyítva.",
-        "trend":"A rövid távú terhelési változás: stabil, hirtelen emelkedő vagy csökkenő-e a terhelés.",
-        "speed":"A heti HSR- és sprintinger mennyisége, gyakorisága és megfelelő eloszlása.",
-        "availability":"A játékosok edzésrészvétele és az elemzéshez rendelkezésre álló tényleges expozíció.",
-        "match":"Az edzésterhelés összevethetősége a feltöltött teljes meccsek fizikai referenciaértékeivel.",
-        "risk":"A játékosszintű túlterhelési, alulexpozíciós és részvételi figyelmeztetések összképe.",
-        "freshness":"A meccs előtti napok terheléscsökkentése és a frissesség megtartása.",
-        "data":"Az elemzés teljessége és megbízhatósága: sessionök, dátumok, KPI-k és referenciaadatok rendelkezésre állása.",
-        "training availability":"A játékosok edzésrészvétele és az elemzéshez rendelkezésre álló tényleges expozíció.",
-        "load trend":"A rövid távú és heti terhelési trend stabilitása.",
-        "speed exposure":"A heti HSR- és sprintinger mennyisége, gyakorisága és megfelelő eloszlása.",
-        "tapering":"A meccs előtti terheléscsökkentés minősége; csökken-e a volumen úgy, hogy a mozgásminőség megmaradjon.",
-        "playstyle fit":"A fizikai terhelési profil mennyire támogatja a kiválasztott játékmodellt.",
-        "analysis completeness":"Az elemzés teljessége és megbízhatósága: sessionök, dátumok, KPI-k és referenciaadatok rendelkezésre állása."
+    definitions = {
+        "training_availability": "Azt mutatja, hogy a keret mekkora része és milyen rendszerességgel végezte el a csapat edzéseit; az alacsony részvétel torzíthatja a csapatszintű terhelési képet.",
+        "load_trend": "A kiválasztott hét összterhelésének változása a saját közelmúlthoz képest; a túl gyors emelkedés frissességi, a nagy visszaesés alulexpozíciós kockázat.",
+        "speed_exposure": "A maximális sebességű sprintinger dózisa és időzítése a saját meccs-sprintreferenciához képest; azonos mennyiség MD-3-on kedvezőbb, mint MD-1-en.",
+        "tapering": "A meccs előtti MD-2 és MD-1 terheléscsökkentés minősége; azt vizsgálja, marad-e élesség új fáradtság létrehozása nélkül.",
+        "playstyle_fit": "A heti fizikai profil mennyire szolgálja a kiválasztott játékmodell intenzitási, sprint- és nagy intenzitású akcióigényét.",
     }
-    rows=[]
-    nums={str(k):float(v) for k,v in (components or {}).items() if isinstance(v,(int,float)) and not pd.isna(v)}
-    if nums:
-        vals=list(nums.values())
-        if max(abs(v) for v in vals)<=1.5: nums={k:v*100 for k,v in nums.items()}
-        elif max(abs(v) for v in vals)<=30:
-            total=max(sum(max(0,v) for v in vals),1)
-            nums={k:max(0,min(100,v/total*score*len(vals))) for k,v in nums.items()}
-        for i,(k,v) in enumerate(nums.items()):
-            key=k.lower().strip()
-            vv=max(0,min(100,v))
-            actual=str(reasons[i]).strip() if i<len(reasons) and str(reasons[i]).strip() else "Az aktuális pontszám alapján értékelve."
-            explanation=f"Mit jelent? {definitions.get(key, 'A readiness összpontszám egyik szakmai összetevője.')} Most: {actual}"
-            rows.append({"Komponens":labels.get(key,k.replace("_"," ").title()),"Pont":round(vv),"Státusz":"Erősség" if vv>=75 else "Figyelendő" if vv>=55 else "Lehúzó tényező","Magyarázat":explanation})
-    if not rows:
-        fallback=[
-            ("Terhelési egyensúly",score,"A heti volumen és intenzitás egyensúlya.","Az összesített terhelési kép alapján."),
-            ("Sebességi expozíció",max(35,score-8),"A heti HSR- és sprintinger megfelelősége.","A sebességi benchmark és trend alapján."),
-            ("Edzésrészvétel",min(95,score+4),"A tényleges edzésrészvétel és rendelkezésre állás.","Az aktuális részvételi adatok alapján."),
-            ("Játékoskockázat",max(35,score-5),"A játékosszintű risk-jelzések összképe.","Az aktuális kockázati jelzések alapján.")
-        ]
-        for name,v,definition,actual in fallback:
-            rows.append({"Komponens":name,"Pont":v,"Státusz":"Erősség" if v>=75 else "Figyelendő" if v>=55 else "Lehúzó tényező","Magyarázat":f"Mit jelent? {definition} Most: {actual}"})
+    details = component_details or {}
+    rows = []
+    for key in ["training_availability", "load_trend", "speed_exposure", "tapering", "playstyle_fit"]:
+        if key not in (components or {}):
+            continue
+        value = float(components.get(key, 0) or 0)
+        value = max(0, min(100, value))
+        status = "Erősség" if value >= 75 else "Stabil / elfogadható" if value >= 65 else "Figyelendő" if value >= 50 else "Lehúzó tényező"
+        current = details.get(key, "Az aktuális adatból nem készült külön komponensmagyarázat.")
+        rows.append({
+            "Komponens": labels[key],
+            "Pont": round(value),
+            "Státusz": status,
+            "Magyarázat": f"Mit jelent? {definitions[key]} Most: {current} A {round(value)}/100 pont ezt jelenti: {status.lower()}.",
+        })
     return pd.DataFrame(rows)
+
 
 
 def _fpi_v302_coach_actions(benchmark_df:pd.DataFrame)->pd.DataFrame:
@@ -8279,8 +8372,9 @@ def _fpi_v300_microcycle_plan(master: pd.DataFrame, analysis: pd.DataFrame) -> p
 
 
 def _fpi_report_context(data: pd.DataFrame, selected_week: Optional[str] = None, playstyle: str = "Kiegyensúlyozott", tactical_context: Optional[Dict[str, object]] = None) -> Dict[str, object]:
-    """Riportok közös számítási magja. Ugyanezt használja a minta PDF és az éles PDF."""
+    """Riportok közös számítási magja; GPS-only és GPS+taktikai ugyanazt használja."""
     df, master_report_v300 = _fpi_v300_master_dataset(data)
+    df = _fpi_v407_apply_filename_md_inference(df)
     week = _fpi_latest_week(df, selected_week)
     if df.empty or not week:
         return {"df": df, "selected_week": week, "error": "Nincs riportképes adat."}
@@ -8290,8 +8384,10 @@ def _fpi_report_context(data: pd.DataFrame, selected_week: Optional[str] = None,
         style = playstyle_insights(df, week, playstyle)
         pattern = build_pattern_insights(df, week)
         readiness_score, readiness_components, readiness_reasons = calculate_readiness_score(df, week, playstyle)
+        component_details = _fpi_v407_readiness_component_details(df, week, playstyle, readiness_components)
+        breakdown = _fpi_v302_readiness_breakdown(readiness_score, readiness_components, readiness_reasons, component_details)
         fingerprints = build_weekly_fingerprints(df)
-        current_fp = fingerprints[fingerprints["week"].astype(str) == str(week)] if not fingerprints.empty and "week" in fingerprints.columns else pd.DataFrame()
+        current_fp = fingerprints[fingerprints["week"].astype(str).eq(str(week))] if not fingerprints.empty and "week" in fingerprints.columns else pd.DataFrame()
         periodization_type = current_fp["periodizacios_tipus"].iloc[0] if not current_fp.empty and "periodizacios_tipus" in current_fp.columns else "Nincs elég adat"
         insights = sorted(base + micro + style + pattern, key=lambda x: SEVERITY_RANK.get(x.severity, 9))[:18]
         summary = build_weekly_summary(insights, week, playstyle)
@@ -8306,44 +8402,23 @@ def _fpi_report_context(data: pd.DataFrame, selected_week: Optional[str] = None,
         weekly = aggregate_weekly(df) if "week" in df.columns else pd.DataFrame()
         player_week = player_weekly(df) if "week" in df.columns else pd.DataFrame()
         return {
-            "df": df,
-            "selected_week": week,
-            "playstyle": playstyle,
-            "readiness_score": readiness_score,
-            "readiness_components": readiness_components,
-            "readiness_reasons": readiness_reasons,
-            "periodization_type": periodization_type,
-            "insights": insights,
-            "insights_df": build_insight_export_df(insights),
-            "priorities": priorities,
+            "df": df, "selected_week": week, "playstyle": playstyle,
+            "readiness_score": readiness_score, "readiness_components": readiness_components,
+            "readiness_reasons": readiness_reasons, "readiness_component_details": component_details,
+            "readiness_breakdown_v302": breakdown, "periodization_type": periodization_type,
+            "insights": insights, "insights_df": build_insight_export_df(insights), "priorities": priorities,
             "summary": summary + f"\n\nMeccskészültség: {readiness_score}/100 ({score_to_label(readiness_score)})\nPeriodizációs besorolás: {periodization_type}",
-            "risk_df": risk,
-            "past_df": past_df,
-            "past_text": past_text,
-            "current_df": current_df,
-            "current_text": current_text,
-            "next_df": next_df,
-            "next_text": next_text,
-            "player_actions_df": player_actions,
-            "weekly": weekly,
-            "player_week": player_week,
-            "fingerprints": fingerprints,
-            "master_report_v300": master_report_v300,
+            "risk_df": risk, "past_df": past_df, "past_text": past_text,
+            "current_df": current_df, "current_text": current_text, "next_df": next_df, "next_text": next_text,
+            "player_actions_df": player_actions, "weekly": weekly, "player_week": player_week,
+            "fingerprints": fingerprints, "master_report_v300": master_report_v300,
             "match_reference_v300": _fpi_v300_match_reference(df),
-            "training_match_ratios_v300": _fpi_v300_training_match_ratios(
-                df[df["week"].astype(str).eq(str(week))].copy(), df
-            ),
-            "microcycle_plan_v300": _fpi_v300_microcycle_plan(
-                df, df[df["week"].astype(str).eq(str(week))].copy()
-            ),
-            "readiness_breakdown_v302": _fpi_v302_readiness_breakdown(readiness_score, readiness_components, readiness_reasons),
-            "data_quality_v406": _fpi_v406_data_quality_engine(
-                df, master_report_v300, tactical_context,
-                mode="integrated" if tactical_context else "gps",
-            ),
+            "training_match_ratios_v300": _fpi_v300_training_match_ratios(df[df["week"].astype(str).eq(str(week))].copy(), df),
+            "microcycle_plan_v300": next_df,
         }
     except Exception as exc:
         return {"df": df, "selected_week": week, "error": str(exc)}
+
 
 
 
@@ -9499,7 +9574,7 @@ def _fpi_match_context_label_v94() -> str:
 
 
 def _fpi_demo_match_context_label_v122() -> str:
-    """Minta PDF-ekhez: konkrét, eladható meccskontextus N/A és adatminőségi figyelmeztetés nélkül."""
+    """Minta PDF-ekhez: konkrét, eladható meccskontextus N/A és technikai figyelmeztetés nélkül."""
     return "Mérkőzés: KTE U19 – Soroksár SC | Meccsnap: 2026.06.06. szombat | Meccshét: 2026-W23"
 
 
@@ -10104,16 +10179,6 @@ def _build_fpi_product_pdf_bytes_v402_base(
             f"{data_horizon_v149['players']} játékos. {data_horizon_v149['trend_label']}",
             sub,
         ))
-        data_quality_v406 = ctx.get("data_quality_v406", {})
-        qitems_v406 = data_quality_v406.get("items", []) or []
-        if qitems_v406:
-            story.append(Spacer(1, 0.12*cm))
-            story.append(table(
-                [[P(str(x.get("label", "")), head) for x in qitems_v406]] +
-                [[P(str(x.get("value", "")), small) for x in qitems_v406]],
-                [27.7*cm/max(len(qitems_v406), 1)]*len(qitems_v406),
-                header_bg="#0F766E",
-            ))
         story.append(Spacer(1, 0.25*cm))
         kpis = [
             kpi("READINESS", f"{readiness}/100", score_to_label(readiness), "#166534" if readiness >= 75 else "#1E3A8A" if readiness >= 60 else "#991B1B"),
@@ -10626,7 +10691,7 @@ def _build_fpi_product_pdf_bytes_v402_base(
             [P("High Efforts", small), P("Ha külön High Efforts oszlop van, azt használja. Ha nincs, gyorsulás/lassítás jellegű mutatókból becsült nagy intenzitású akciót képez.", small)],
             [P("Benchmark", small), P("A jelenlegi benchmark általános referencia. Későbbi verzióban korosztály, szint, poszt és játékmodell szerint finomíthető.", small)],
             [P("Mikrociklus", small), P("A múlt hét, aktuális hét és következő hét javaslatai a volumen, HSR, sprint, High Efforts, readiness és játékosszintű risk jelzések alapján készülnek.", small)],
-            [P("Korlátok", small), P("Az eredmények adatminőségtől, GPS-exporttól és mappingtől függenek. Hibás vagy hiányos input esetén szakmai ellenőrzés szükséges.", small)],
+            [P("Korlátok", small), P("Az eredmények a GPS-export, az oszlopfelismerés és a rendelkezésre álló időszak helyességétől függenek. Hiányos input esetén szakmai ellenőrzés szükséges.", small)],
         ]
         story.append(table(meth_rows, [5.2*cm, 22.5*cm], header_bg="#1E3A8A", row_bgs=[colors.HexColor("#EFF6FF"), colors.white]))
         story.append(Spacer(1, 0.20*cm))
@@ -11484,16 +11549,28 @@ def _fpi_v204_session_summary(df: pd.DataFrame, week: str, blocked: set) -> pd.D
 
 
 def _fpi_v204_player_period(df: pd.DataFrame, week: str, blocked: set) -> pd.DataFrame:
-    data=df[df.get("week",pd.Series("",index=df.index)).astype(str)==str(week)].copy()
-    if data.empty or "player_name" not in data.columns: return pd.DataFrame()
-    data["_event204"]=_fpi_v202_event_key(data)
-    agg={}
-    for c in ["duration_min","total_distance","hsr_distance","sprint_distance","sprints","high_efforts","training_load"]:
-        if c in data.columns and c not in blocked: agg[c]="sum"
-    if not agg: return pd.DataFrame()
-    p=data.groupby("player_name",dropna=False).agg(agg).reset_index()
-    p["sessions"]=data.groupby("player_name")["_event204"].nunique().reindex(p["player_name"]).values
+    data = df[df.get("week", pd.Series("", index=df.index)).astype(str).eq(str(week))].copy()
+    if data.empty or "player_name" not in data.columns:
+        return pd.DataFrame()
+    data["_event204"] = _fpi_v202_event_key(data)
+    if "is_goalkeeper" not in data.columns:
+        if "position" in data.columns:
+            data["is_goalkeeper"] = data["position"].apply(is_keeper_position_value)
+        elif "position_group" in data.columns:
+            data["is_goalkeeper"] = data["position_group"].astype(str).str.lower().str.contains("kapus|goalkeeper|\\bgk\\b", regex=True, na=False)
+        else:
+            data["is_goalkeeper"] = False
+    agg = {}
+    for c in ["duration_min", "total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts", "training_load"]:
+        if c in data.columns and c not in blocked:
+            agg[c] = "sum"
+    if not agg:
+        return pd.DataFrame()
+    agg["is_goalkeeper"] = "max"
+    p = data.groupby("player_name", dropna=False).agg(agg).reset_index()
+    p["sessions"] = data.groupby("player_name")["_event204"].nunique().reindex(p["player_name"]).values
     return p
+
 
 
 def _fpi_v204_aligned_comparison(df: pd.DataFrame, week: str, blocked: set) -> pd.DataFrame:
@@ -11533,8 +11610,6 @@ def _fpi_v204_aligned_comparison(df: pd.DataFrame, week: str, blocked: set) -> p
 
 def _fpi_v204_recommendations(mode: Dict[str,object], sessions: pd.DataFrame, quality: Dict[str,object], player_period: pd.DataFrame) -> List[Tuple[str,str,str]]:
     code=str(mode.get("code","limited_data")); out=[]
-    if quality.get("issues"):
-        out.append(("Adatminőség", "Korlátozott riport", "Előbb az importjelzéseket ellenőrizd; a letiltott KPI-kből ne hozz terhelési döntést."))
     if code=="single_session":
         out += [("Következő 24 óra","Regeneráció vagy normál folytatás","Az aktuális session mediánjai és szélsőértékei alapján dönts; heti readiness nem értelmezhető."),
                 ("Játékoskontroll","Csapaton belüli eltérések","A mediántól jelentősen eltérő és részlegesen részt vevő játékosokat ellenőrizd.")]
@@ -11557,8 +11632,6 @@ def _fpi_v204_recommendations(mode: Dict[str,object], sessions: pd.DataFrame, qu
 
 def _fpi_v204_conclusions(mode, quality, sessions, player_period, readiness):
     out=[f"Elemzési mód: {mode.get('label')}. {mode.get('description','')}"]
-    if quality.get('issues'):
-        out.append("Adatminőségi korlátozás: "+" ".join(quality['issues'][:2]))
     if not sessions.empty:
         out.append(f"Feldolgozott események: {len(sessions)} session; átlagos létszám {sessions['Létszám'].mean():.1f} fő.")
         valid=sessions.dropna(subset=['Össztáv']) if 'Össztáv' in sessions else pd.DataFrame()
@@ -11667,17 +11740,23 @@ def _fpi_v401_top_bottom_items(players: pd.DataFrame, metric: str):
 def _fpi_v304_player_charts(players: pd.DataFrame):
     if players is None or players.empty:
         return Spacer(1, 0)
+    field_players = players.copy()
+    if "is_goalkeeper" in field_players.columns:
+        field_players = field_players[~field_players["is_goalkeeper"].fillna(False)].copy()
+    if field_players.empty:
+        return Spacer(1, 0)
     charts = []
-    for col, label, suffix in [('training_load', 'Load', ''), ('hsr_distance', 'HSR', ' m')]:
-        if col not in players.columns:
+    for col, label, suffix in [("training_load", "Load", ""), ("hsr_distance", "HSR", " m")]:
+        if col not in field_players.columns:
             continue
-        items, bottom_n, top_n = _fpi_v401_top_bottom_items(players, col)
+        items, bottom_n, top_n = _fpi_v401_top_bottom_items(field_players, col)
         if not items:
             continue
-        title = f"{label} – alsó {bottom_n} és top {top_n} ({len(items)} külön játékos)"
+        title = f"{label} – mezőnyjátékos alsó {bottom_n} és top {top_n} ({len(items)} külön játékos)"
         chart_height = 5.8 if len(items) >= 9 else 5.1
         charts.append(_fpi_v401_compact_bar_chart(items, title, 13.4, chart_height, suffix, max_items=10))
     return Table([charts[:2]], colWidths=[13.7 * cm] * len(charts[:2])) if charts else Spacer(1, 0)
+
 
 def _fpi_v304_player_risk_suggestion(level:str, reason:str)->str:
     txt=_norm_mapping_text(f"{level} {reason}")
@@ -11721,7 +11800,6 @@ def build_fpi_gps_only_pdf_bytes(
     if ctx.get("error"): return None
     df=ctx["df"]; week=str(ctx["selected_week"]); readiness=int(ctx.get("readiness_score",70) or 70)
     master_report_v300 = ctx.get("master_report_v300", {})
-    data_quality_v406 = ctx.get("data_quality_v406", {})
     match_reference_v300 = ctx.get("match_reference_v300", {})
     ratios_v300 = ctx.get("training_match_ratios_v300", pd.DataFrame())
     microcycle_v300 = ctx.get("microcycle_plan_v300", pd.DataFrame())
@@ -11759,38 +11837,27 @@ def build_fpi_gps_only_pdf_bytes(
         P(demo_label or f'Football Performance Intelligence – {report_title}',title),
         P(f'Hét/időszak: {display_period_v205} | Játékmodell: {playstyle} | Generálva: {datetime.now().strftime("%Y-%m-%d %H:%M")}',sub),
         P(
-            f'Elemzési mód: {mode.get("label")} | Adatbiztonság: {quality.get("severity")} '
-            f'| Sessionök: {len(sessions)}'
+            f'Elemzési mód: {mode.get("label")} | Sessionök: {len(sessions)}'
             + (' | Teljes feltöltött időszak' if period_mode_v205 else ''),
             sub
         ),
         P(period_scope_note_v303, sub) if period_scope_note_v303 else Spacer(1, 0),
         Spacer(1,.2*cm)
     ]
-    quality_rows_v406 = [[P("FORRÁS / ELLENŐRZÉS", head), P("ÁLLAPOT", head)]]
-    for item_v406 in data_quality_v406.get("items", []) or []:
-        quality_rows_v406.append([
-            P(str(item_v406.get("label", "")), small),
-            P(("Rendben · " if item_v406.get("ok") else "Információ · ") + str(item_v406.get("value", "")), small),
-        ])
-    story += [section("Adatminőség és forrásfedezet", "#E0F2FE"), tbl(quality_rows_v406, [8.0*cm, 19.7*cm], "#0F766E"), Spacer(1,.18*cm)]
-
     database_sessions_v301 = int(master_report_v300.get("sessions", len(sessions)) or len(sessions))
     current_sessions_v301 = int(len(sessions))
     real_matches_v300 = int(master_report_v300.get("match_events", 0) or 0)
     kpis=[
-        [P('MÓD',head),P('AKTUÁLIS SESSION',head),P('ADATBÁZIS SESSION',head),P('MECCSESEMÉNY',head),P('ADATMINŐSÉG',head),P('READINESS',head)],
-        [P(mode.get('label',''),body),P(str(current_sessions_v301),body),P(str(database_sessions_v301),body),P(str(real_matches_v300),body),P(quality.get('severity',''),body),P('előzetes' if mode.get('code')!='full_microcycle' else f'{readiness}/100',body)]
+        [P('MÓD',head),P('AKTUÁLIS SESSION',head),P('ADATBÁZIS SESSION',head),P('MECCSESEMÉNY',head),P('READINESS',head)],
+        [P(mode.get('label',''),body),P(str(current_sessions_v301),body),P(str(database_sessions_v301),body),P(str(real_matches_v300),body),P('előzetes' if mode.get('code')!='full_microcycle' else f'{readiness}/100',body)]
     ]
-    story += [tbl(kpis,[5.5*cm,3.8*cm,3.8*cm,3.4*cm,5.0*cm,6.5*cm],'#0F766E'),Spacer(1,.2*cm),section('1. Vezetői konklúziók')]
+    story += [tbl(kpis,[6.5*cm,4.6*cm,4.8*cm,4.2*cm,7.6*cm],'#0F766E'),Spacer(1,.2*cm),section('1. Vezetői konklúziók')]
     story.append(tbl([[P('#',head),P('Konklúzió',head)]]+[[P(str(i),small),P(c,small)] for i,c in enumerate(conclusions,1)],[1.0*cm,26.7*cm]))
     if readiness_breakdown_v302 is not None and not readiness_breakdown_v302.empty:
         story += [Spacer(1,.18*cm),section('Readiness - mi alakította a pontszámot?','#ECFDF5')]
         rb=[[P(x,head) for x in ['Komponens','Pont','Státusz','Magyarázat']]]
         for _,r in readiness_breakdown_v302.iterrows(): rb.append([P(str(r.get('Komponens','')),small),P(str(r.get('Pont','')),small),P(str(r.get('Státusz','')),small),P(str(r.get('Magyarázat','')),small)])
         story.append(tbl(rb,[6.0*cm,2.0*cm,4.0*cm,15.7*cm],'#166534'))
-    if quality.get('issues'):
-        story += [Spacer(1,.18*cm),section('Adatminőségi kapu – letiltott vagy korlátozott mutatók','#FEE2E2'),tbl([[P('Státusz',head),P('Jelzés',head)]]+[[P('FIGYELEM',small),P(x,small)] for x in quality['issues']],[3.2*cm,24.5*cm],'#991B1B')]
     story += [PageBreak(),section('2. Sessionönkénti terhelési profil','#FEF3C7')]
     if sessions.empty: story.append(P('Nincs sessionönként értelmezhető adat.'))
     else:
@@ -11828,17 +11895,19 @@ def build_fpi_gps_only_pdf_bytes(
             story.append(tbl(ca,[2.7*cm,4.5*cm,3.8*cm,7.6*cm,9.1*cm],'#166534'))
 
     if microcycle_v300 is not None and not microcycle_v300.empty:
-        story += [PageBreak(),section('4. Heti ciklusterv – erőnléti + taktikai cél','#EDE9FE')]
-        md_rows=[[P(x,head) for x in ['Dátum','Nap','Erőnléti fókusz','Taktikai fókusz','Edzői megjegyzés']]]
+        story += [PageBreak(),section('4. Adaptív heti ciklusterv – saját múlt és aktuális hét alapján','#EDE9FE')]
+        md_rows=[[P(x,head) for x in ['Nap','Szerep','Fő cél','Ajánlott terhelés','Konkrét javaslat','Tervezési alap']]]
         for _,r in microcycle_v300.iterrows():
             md_rows.append([
-                P(str(r.get('Dátum','')),small),
                 P(str(r.get('Nap','')),small),
-                P(str(r.get('Erőnléti fókusz','')),small),
-                P(str(r.get('Taktikai fókusz','')),small),
-                P(str(r.get('Edzői megjegyzés','')),small)
+                P(str(r.get('Szerep','')),small),
+                P(str(r.get('Fő cél','')),small),
+                P(str(r.get('Ajánlott terhelés','')),small),
+                P(str(r.get('Javaslat','')),small),
+                P(str(r.get('Tervezési alap','')),small)
             ])
-        story.append(tbl(md_rows,[2.5*cm,1.8*cm,5.0*cm,7.2*cm,11.2*cm],'#312E81'))
+        story.append(tbl(md_rows,[1.7*cm,3.6*cm,4.2*cm,3.7*cm,7.2*cm,7.3*cm],'#312E81'))
+        story += [Spacer(1,.10*cm),P('A terv a mezőnyjátékosok előző legfeljebb négy hetes mediánját, közvetlenül előző hetét, az aktuális load/HSR/sprint arányokat, a taperinget és a játékoskockázatot használja. Előzmény hiányában ezt a Tervezési alap oszlop külön jelzi.',small)]
 
     story += [PageBreak(),section('5. Időarányos trend – azonos hétközi pontig','#ECFDF5')]
     if aligned.empty: story.append(P('Nincs elegendő korábbi dátumozott adat az időarányos összevetéshez.'))
@@ -11862,9 +11931,17 @@ def build_fpi_gps_only_pdf_bytes(
     flags=[]
     if not risk_df.empty:
         pc='Játékos' if 'Játékos' in risk_df else ('player_name' if 'player_name' in risk_df else risk_df.columns[0]); lc='Kockázati szint' if 'Kockázati szint' in risk_df else None; rc='Fő okok' if 'Fő okok' in risk_df else ('Fő ok' if 'Fő ok' in risk_df else None)
+        role_col = 'Szerep' if 'Szerep' in risk_df.columns else ('position' if 'position' in risk_df.columns else None)
         for _,r in risk_df.iterrows():
             level=str(r.get(lc,'Figyelendő')) if lc else 'Figyelendő'; reason=str(r.get(rc,'')) if rc else ''
-            if level.strip().lower()!='alacsony' or 'részvétel' in reason.lower() or 'reszvetel' in _norm_mapping_text(reason): flags.append((str(r.get(pc,'')),level,reason,_fpi_v304_player_risk_suggestion(level,reason)))
+            role=str(r.get(role_col,'')) if role_col else ''
+            reason_norm=_norm_mapping_text(reason)
+            is_goalkeeper = is_keeper_position_value(role) or _norm_mapping_text(role) in {'kapus','goalkeeper','gk'}
+            low_exposure_reason = any(x in reason_norm for x in ['alacsony','elmarad','hiany','alulexpoz']) and any(x in reason_norm for x in ['load','terheles','hsr','sprint','sebesseg'])
+            if is_goalkeeper and low_exposure_reason:
+                continue
+            if level.strip().lower()!='alacsony' or 'részvétel' in reason.lower() or 'reszvetel' in reason_norm:
+                flags.append((str(r.get(pc,'')),level,reason,_fpi_v304_player_risk_suggestion(level,reason)))
     if flags:
         risk_counts=pd.Series([b for _,b,_,_ in flags]).value_counts()
         story += [_fpi_v304_compact_bar_chart(list(risk_counts.items()),'Játékoskockázati megoszlás',12.5,3.5,' fő'),Spacer(1,.10*cm)]
@@ -11894,84 +11971,95 @@ def _fpi_v403_tactical_summary(ctx):
     rel5,relstatus=_fpi_v403_scale5(rel100)
     return rows,(rel5,relstatus,sources)
 
-def build_fpi_integrated_pdf_bytes_v403(data,selected_week=None,playstyle='Kiegyensúlyozott',report_type='full',demo_label='',tactical_context=None):
-    """Kompakt, összehangolt Football Intelligence Report.
-    A GPS és taktikai jeleket közös állapot-, prioritás- és mikrociklus-logikában mutatja.
-    """
-    if SimpleDocTemplate is None: return None
-    tac=tactical_context or {}
-    ctx=_fpi_report_context(data,selected_week,playstyle,tac)
-    if ctx.get('error'): return None
-    dims,(rel5,relstatus,sources)=_fpi_v403_tactical_summary(tac)
-    gps=int(ctx.get('readiness_score',0) or 0); gps5,gpsstatus=_fpi_v403_scale5(gps)
-    tac5=round(sum(x['Pont5'] for x in dims)/len(dims),1) if dims else 3.0
-    fi5=round(gps5*.55+tac5*.45,1)
-    fi100=int(round(fi5*20))
-    risk=ctx.get('risk_df') if isinstance(ctx.get('risk_df'),pd.DataFrame) else pd.DataFrame()
-    hi,med=_fpi_count_risk_levels_v126(risk)
-    findings=list(tac.get('tactical_findings') or [])
-    plan=list(tac.get('md_plan') or [])
-    own_eval=tac.get('own_player_evaluation') or _fpi_build_player_evaluation_v132(tac.get('own_player_tables') or {},'own',8)
-    opp_eval=tac.get('opponent_player_evaluation') or _fpi_build_player_evaluation_v132(tac.get('opp_player_tables') or {},'opp',8)
-    font,fontb=_register_pdf_font(); buf=io.BytesIO()
-    doc=SimpleDocTemplate(buf,pagesize=landscape(A4),rightMargin=.9*cm,leftMargin=.9*cm,topMargin=.75*cm,bottomMargin=.75*cm)
-    styles=getSampleStyleSheet()
-    title=ParagraphStyle('V403Title',parent=styles['Title'],fontName=fontb,fontSize=21,leading=24,textColor=colors.HexColor('#0F172A'))
-    body=ParagraphStyle('V403Body',parent=styles['BodyText'],fontName=font,fontSize=9.4,leading=12.1,alignment=4,textColor=colors.HexColor('#111827'))
-    small=ParagraphStyle('V403Small',parent=body,fontSize=8.5,leading=10.8)
-    head=ParagraphStyle('V403Head',parent=body,fontName=fontb,fontSize=8.8,leading=10.5,alignment=1,textColor=colors.white)
-    big=ParagraphStyle('V403Big',parent=body,fontName=fontb,fontSize=18,leading=20,alignment=1,textColor=colors.white)
-    def txt(v): return fpi_pdf_sanitize_v406(_fpi_tactical_pdf_text_v157(v))
-    def P(v,st=body): return Paragraph(html.escape(txt(v)).replace('\n','<br/>') or '—',st)
-    def section(v,bg='#DBEAFE',line='#2563EB'):
-        t=Table([[P(v,ParagraphStyle('sec'+str(len(v)),parent=body,fontName=fontb,fontSize=12,leading=14))]],colWidths=[27.7*cm]);t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor(bg)),('BOX',(0,0),(-1,-1),.5,colors.HexColor(line)),('LEFTPADDING',(0,0),(-1,-1),7),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5)]));return t
-    def tbl(rows,widths,h='#0F172A'):
-        t=Table(rows,colWidths=widths,repeatRows=1,splitByRow=1);t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor(h)),('GRID',(0,0),(-1,-1),.3,colors.HexColor('#CBD5E1')),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#F8FAFC')]),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),6),('RIGHTPADDING',(0,0),(-1,-1),6),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5)]));return t
-    def card(label,value,note,color):
-        t=Table([[P(label,head)],[P(value,big)],[P(note,head)]],colWidths=[5.25*cm],rowHeights=[.45*cm,.78*cm,.45*cm]);t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor(color)),('BOX',(0,0),(-1,-1),.4,colors.white),('VALIGN',(0,0),(-1,-1),'MIDDLE')]));return t
-    story=[P('Football Intelligence Report – GPS + taktika',title),P(f"{demo_label or 'ÉLES RIPORT'} | V406 Fusion | Hét: {format_week_label(str(ctx.get('selected_week','')))} | Játékmodell: {playstyle}",small),Spacer(1,.15*cm)]
-    data_quality_v406 = ctx.get('data_quality_v406', {})
-    qitems_v406 = data_quality_v406.get('items', []) or []
-    if qitems_v406:
-        story.append(tbl(
-            [[P(str(x.get('label','')),head) for x in qitems_v406]] +
-            [[P(str(x.get('value','')),small) for x in qitems_v406]],
-            [27.7*cm/max(len(qitems_v406),1)]*len(qitems_v406),
-            h='#0F766E'
-        ))
-        story.append(Spacer(1,.15*cm))
-    story.append(Table([[card('FI SCORE',f'{fi100}/100',f'{fi5}/5 – közös állapot','#0F172A'),card('GPS',f'{gps5}/5',gpsstatus,'#1E3A8A'),card('TAKTIKA',f'{tac5}/5','átlagos taktikai állapot','#6D28D9'),card('HIGH RISK',f'{hi} fö','egyéni kontroll','#991B1B' if hi else '#166534'),card('ADATBIZALOM',f'{rel5}/5',relstatus,'#0F766E')]],colWidths=[5.5*cm]*5))
-    best=max(dims,key=lambda x:x['Pont5']) if dims else None; weak=min(dims,key=lambda x:x['Pont5']) if dims else None
-    executive=f"A közös Football Intelligence Score {fi5}/5. A GPS-állapot {gpsstatus.lower()} ({gps5}/5), a taktikai kép {tac5}/5. "
-    if best: executive+=f"Fö erösség: {best['Terület']} ({best['Pont5']}/5). "
-    if weak: executive+=f"Elsödleges fejlesztési pont: {weak['Terület']} ({weak['Pont5']}/5). "
-    executive+=f"Az értelmezés adatmegbízhatósága {rel5}/5; források: {sources}."
-    call=Table([[P('Vezetöi összegzés',ParagraphStyle('callh',parent=body,fontName=fontb,fontSize=10.5)),P(executive,body)]],colWidths=[4.6*cm,23.1*cm]);call.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#ECFDF5')),('BOX',(0,0),(-1,-1),.6,colors.HexColor('#10B981')),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),8),('RIGHTPADDING',(0,0),(-1,-1),8),('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]));story += [Spacer(1,.18*cm),call,Spacer(1,.18*cm),section('1. Egységes állapotkép – fizikai és taktikai oldal')]
-    rows=[[P('Terület',head),P('Skála',head),P('Állapot',head),P('Egységes edzöi olvasat',head)],[P('Fizikai readiness',small),P(f'{gps5}/5',small),P(gpsstatus,small),P('A heti terhelés, sebességi expozíció, tapering és egyéni kockázat közös értékelése.',small)]]
-    for d in dims: rows.append([P(d['Terület'],small),P(f"{d['Pont5']}/5",small),P(d['Státusz5'],small),P(f"{d['Definíció']} Aktuális minösítés: {d['Státusz5'].lower()}.",small)])
-    rows.append([P('Adatmegbízhatóság',small),P(f'{rel5}/5',small),P(relstatus,small),P(f'Forrásfedezet: {sources}.',small)]);story.append(tbl(rows,[5.0*cm,2.2*cm,3.2*cm,17.3*cm]))
-    story += [PageBreak(),section('2. Közös prioritások – mi jó, mit kell fenntartani, min kell változtatni?','#FEF3C7','#F59E0B')]
-    prows=[[P('Prioritás',head),P('Terület',head),P('Állapot',head),P('GPS + taktikai javaslat',head),P('Miért?',head)]]
-    ordered=sorted(dims,key=lambda x:x['Pont5'])
-    for i,d in enumerate(ordered[:5]):
-        level=5-i if d['Pont5']<=2 else max(1,4-i)
-        action={'Játékfelépítés':'Pozíciós játék + kontrollált HSR-kapcsolódások.','Területnyerés':'Progressziós játék nagyobb pályán, célzott futóút-dózissal.','Pressing':'Pressingjáték sprint- és High Effort dózissal.','Átmenetek':'Átmeneti játék rövid, intenzív ismétlésekkel.','Védekezési kontroll':'Blokkmunka, visszarendezödés és terheléskontroll.'}.get(d['Terület'],'Célzott taktikai gyakorlat a szükséges fizikai dózissal.')
-        prows.append([P(f'{level}/5',small),P(d['Terület'],small),P(d['Státusz5'],small),P(action,small),P('Az állapotérték a taktikai jelet és a végrehajtáshoz szükséges GPS-profilt együtt kezeli.',small)])
-    if best: prows.append([P('1/5',small),P(best['Terület'],small),P('Erösség – fenntartandó',small),P('Rövid megerösítö blokk; ne kapjon indokolatlan többletterhelést.',small),P('A riport nem csak hibákat listáz: a stabil erösségeket is védi.',small)])
-    story.append(tbl(prows,[2.2*cm,4.2*cm,4.1*cm,9.1*cm,8.1*cm],h='#92400E'))
-    story += [Spacer(1,.18*cm),section('3. Játékosszintü Football Intelligence','#FEE2E2','#EF4444')]
-    jrows=[[P('Oldal',head),P('Játékos',head),P('Szerep',head),P('Taktikai jel',head),P('Összehangolt feladat',head)]]
-    for side,arr in [('SAJÁT',own_eval),('ELLENFÉL',opp_eval)]:
+def build_fpi_integrated_pdf_bytes_v403(data, selected_week=None, playstyle='Kiegyensúlyozott', report_type='full', demo_label='', tactical_context=None):
+    """GPS + taktika: a GPS-only readiness és ciklusterv változtatás nélkül beépül."""
+    if SimpleDocTemplate is None:
+        return None
+    tac = tactical_context or {}
+    ctx = _fpi_report_context(data, selected_week, playstyle, tac)
+    if ctx.get('error'):
+        return None
+    dims, _reliability_unused = _fpi_v403_tactical_summary(tac)
+    gps = int(ctx.get('readiness_score', 0) or 0); gps5, gpsstatus = _fpi_v403_scale5(gps)
+    tac5 = round(sum(x['Pont5'] for x in dims) / len(dims), 1) if dims else 3.0
+    fi5 = round(gps5 * .55 + tac5 * .45, 1); fi100 = int(round(fi5 * 20))
+    risk = ctx.get('risk_df') if isinstance(ctx.get('risk_df'), pd.DataFrame) else pd.DataFrame()
+    hi, med = _fpi_count_risk_levels_v126(risk)
+    own_eval = tac.get('own_player_evaluation') or _fpi_build_player_evaluation_v132(tac.get('own_player_tables') or {}, 'own', 8)
+    opp_eval = tac.get('opponent_player_evaluation') or _fpi_build_player_evaluation_v132(tac.get('opp_player_tables') or {}, 'opp', 8)
+    readiness_breakdown = ctx.get('readiness_breakdown_v302', pd.DataFrame())
+    adaptive_plan = ctx.get('next_df', pd.DataFrame())
+
+    font, fontb = _register_pdf_font(); buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), rightMargin=.9*cm, leftMargin=.9*cm, topMargin=.75*cm, bottomMargin=.75*cm)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle('V407Title', parent=styles['Title'], fontName=fontb, fontSize=21, leading=24, textColor=colors.HexColor('#0F172A'))
+    body = ParagraphStyle('V407Body', parent=styles['BodyText'], fontName=font, fontSize=9.2, leading=12, alignment=4, textColor=colors.HexColor('#111827'))
+    small = ParagraphStyle('V407Small', parent=body, fontSize=8.35, leading=10.7)
+    head = ParagraphStyle('V407Head', parent=body, fontName=fontb, fontSize=8.7, leading=10.4, alignment=1, textColor=colors.white)
+    big = ParagraphStyle('V407Big', parent=body, fontName=fontb, fontSize=18, leading=20, alignment=1, textColor=colors.white)
+    def P(v, st=body): return Paragraph(html.escape(fpi_pdf_sanitize_v406(v)).replace('\n', '<br/>') or '—', st)
+    def section(v, bg='#DBEAFE', line='#2563EB'):
+        s = ParagraphStyle('sec'+str(abs(hash(v))), parent=body, fontName=fontb, fontSize=12, leading=14)
+        t = Table([[P(v, s)]], colWidths=[27.7*cm]); t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor(bg)),('BOX',(0,0),(-1,-1),.5,colors.HexColor(line)),('LEFTPADDING',(0,0),(-1,-1),7),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5)])); return t
+    def tbl(rows, widths, h='#0F172A'):
+        t = Table(rows, colWidths=widths, repeatRows=1, splitByRow=1); t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor(h)),('GRID',(0,0),(-1,-1),.3,colors.HexColor('#CBD5E1')),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#F8FAFC')]),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),6),('RIGHTPADDING',(0,0),(-1,-1),6),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5)])); return t
+    def card(label, value, note, color):
+        t = Table([[P(label, head)], [P(value, big)], [P(note, head)]], colWidths=[6.6*cm], rowHeights=[.45*cm,.78*cm,.45*cm]); t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor(color)),('BOX',(0,0),(-1,-1),.4,colors.white),('VALIGN',(0,0),(-1,-1),'MIDDLE')])); return t
+
+    story = [P('Football Intelligence Report – GPS + taktika', title), P(f"{demo_label or 'ÉLES RIPORT'} | V407 | Hét: {format_week_label(str(ctx.get('selected_week','')))} | Játékmodell: {playstyle}", small), Spacer(1,.15*cm)]
+    story.append(Table([[card('FI SCORE',f'{fi100}/100',f'{fi5}/5 – közös állapot','#0F172A'),card('GPS READINESS',f'{gps}/100',gpsstatus,'#1E3A8A'),card('TAKTIKA',f'{tac5}/5','taktikai állapot','#6D28D9'),card('HIGH RISK',f'{hi} fő','egyéni kontroll','#991B1B' if hi else '#166534')]], colWidths=[6.9*cm]*4))
+    best = max(dims, key=lambda x:x['Pont5']) if dims else None; weak = min(dims, key=lambda x:x['Pont5']) if dims else None
+    executive = f"A közös Football Intelligence Score {fi5}/5. A GPS-readiness {gps}/100 ({gpsstatus.lower()}), a taktikai kép {tac5}/5. "
+    if best: executive += f"Fő erősség: {best['Terület']} ({best['Pont5']}/5). "
+    if weak: executive += f"Elsődleges fejlesztési pont: {weak['Terület']} ({weak['Pont5']}/5). "
+    executive += f"A következő heti terv a saját előző hetekhez és az aktuális ciklushoz igazodik; {hi} magas kockázatú játékos egyéni kontrollt igényel."
+    call = Table([[P('Vezetői összegzés', ParagraphStyle('callh407', parent=body, fontName=fontb, fontSize=10.5)), P(executive, body)]], colWidths=[4.6*cm,23.1*cm]); call.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#ECFDF5')),('BOX',(0,0),(-1,-1),.6,colors.HexColor('#10B981')),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),8),('RIGHTPADDING',(0,0),(-1,-1),8),('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]))
+    story += [Spacer(1,.18*cm), call, Spacer(1,.18*cm), section('1. Readiness – minden komponens konkrét jelentése')]
+    if isinstance(readiness_breakdown, pd.DataFrame) and not readiness_breakdown.empty:
+        rows = [[P(x, head) for x in ['Komponens','Pont','Státusz','Mit jelent? / Mit jelent a kapott érték?']]]
+        for _, r in readiness_breakdown.iterrows():
+            rows.append([P(r.get('Komponens',''),small),P(f"{r.get('Pont','')}/100",small),P(r.get('Státusz',''),small),P(r.get('Magyarázat',''),small)])
+        story.append(tbl(rows,[5.1*cm,2.1*cm,3.4*cm,17.1*cm],'#166534'))
+
+    story += [Spacer(1,.18*cm), section('2. Taktikai állapotkép', '#EDE9FE', '#8B5CF6')]
+    rows = [[P('Terület',head),P('Skála',head),P('Állapot',head),P('Edzői olvasat',head)]]
+    for d in dims:
+        rows.append([P(d['Terület'],small),P(f"{d['Pont5']}/5",small),P(d['Státusz5'],small),P(f"{d['Definíció']} Aktuális minősítés: {d['Státusz5'].lower()}.",small)])
+    story.append(tbl(rows,[5.0*cm,2.2*cm,3.2*cm,17.3*cm],'#5B21B6'))
+
+    story += [PageBreak(), section('3. Közös prioritások – GPS + taktikai beavatkozás', '#FEF3C7', '#F59E0B')]
+    prows = [[P('Prioritás',head),P('Terület',head),P('Állapot',head),P('GPS + taktikai javaslat',head),P('Miért?',head)]]
+    for i, d in enumerate(sorted(dims,key=lambda x:x['Pont5'])[:5]):
+        action = {'Játékfelépítés':'Pozíciós játék + kontrollált HSR-kapcsolódások.','Területnyerés':'Progressziós játék nagyobb pályán, célzott futóút-dózissal.','Pressing':'Letámadási játék sprint- és High Effort dózissal.','Átmenetek':'Átmeneti játék rövid, intenzív ismétlésekkel.','Védekezési kontroll':'Blokkmunka, visszarendeződés és terheléskontroll.'}.get(d['Terület'],'Célzott taktikai gyakorlat a szükséges fizikai dózissal.')
+        prows.append([P(f'{max(1,5-i)}/5',small),P(d['Terület'],small),P(d['Státusz5'],small),P(action,small),P('A taktikai hiányt a végrehajtáshoz szükséges GPS-dózissal együtt kezeli.',small)])
+    story.append(tbl(prows,[2.2*cm,4.2*cm,4.1*cm,9.1*cm,8.1*cm],'#92400E'))
+
+    story += [Spacer(1,.18*cm), section('4. Játékosszintű Football Intelligence', '#FEE2E2', '#EF4444')]
+    jrows = [[P('Oldal',head),P('Játékos',head),P('Szerep',head),P('Taktikai jel',head),P('Összehangolt feladat',head)]]
+    for side, arr in [('SAJÁT',own_eval),('ELLENFÉL',opp_eval)]:
         for r in arr[:4]: jrows.append([P(side,small),P(r.get('Játékos',''),small),P(r.get('Szerep',''),small),P(r.get('Értelmezés',''),small),P(r.get('Javaslat',''),small)])
-    if len(jrows)==1:jrows.append([P('-',small),P('Nincs felismert játékosadat',small),P('-',small),P('A csapatszintü elemzés elkészült.',small),P('Játékosszintü Excel szükséges.',small)])
-    story.append(tbl(jrows,[2.1*cm,3.6*cm,4.3*cm,8.5*cm,9.2*cm],h='#991B1B'))
-    story += [PageBreak(),section('4. Integrált mikrociklus – taktikai cél és fizikai dózis együtt','#DCFCE7','#22C55E')]
-    mrows=[[P('Nap',head),P('Taktikai cél',head),P('GPS-dózis',head),P('Egységes végrehajtás',head)]]
-    defaults=[('MD-4','Játékfelépítés / területnyerés','Volumen + közepes HSR','Nagyobb területü pozíciós játék; progressziós futások és passzsávok.'),('MD-3','Pressing / átmenetek','Heti fö HSR–sprint–High Effort inger','Meccsintenzitású pressing és átmeneti játék, egyéni sebességi pótlással.'),('MD-2','Meccsterv és védekezési kontroll','Tapering; alacsonyabb volumen','Kompakt taktikai ismétlés, rövid intenzív akciók, kockázati játékosok kontrollja.'),('MD-1','Aktiváció és pontrúgás','Rövid gyorsasági aktiváció','Kezdöhelyzetek, elsö támadó gondolat, rövid sebességi inger.')]
-    for row in defaults:mrows.append([P(x,small) for x in row])
-    story.append(tbl(mrows,[2.2*cm,7.2*cm,6.4*cm,11.9*cm],h='#166534'))
-    story += [Spacer(1,.18*cm),P('Módszertani megjegyzés: az FI Score döntéstámogató index. A GPS 55%, a taktikai állapot 45% súllyal szerepel; egyik adatforrás sem írja felül a videót, az edzöi kontextust vagy az orvosi döntést.',small)]
-    _fpi_pdf_build_v406(doc, story);buf.seek(0);return buf.getvalue()
+    if len(jrows) == 1: jrows.append([P('-',small),P('Nincs felismert játékosadat',small),P('-',small),P('A csapatszintű elemzés elkészült.',small),P('Játékosszintű Excel szükséges.',small)])
+    story.append(tbl(jrows,[2.1*cm,3.6*cm,4.3*cm,8.5*cm,9.2*cm],'#991B1B'))
+
+    story += [PageBreak(), section('5. Adaptív integrált mikrociklus – saját múlt alapján', '#DCFCE7', '#22C55E')]
+    mrows = [[P('Nap',head),P('Taktikai cél',head),P('GPS-terhelési cél',head),P('Egységes végrehajtás',head),P('Tervezési alap',head)]]
+    tactical_by_md = {}
+    for item in (tac.get('md_plan') or []):
+        if isinstance(item, dict):
+            md = str(item.get('Nap') or item.get('MD') or item.get('day') or '')
+            tactical_by_md[md] = str(item.get('Fókusz') or item.get('Taktikai cél') or item.get('focus') or '')
+        elif isinstance(item, (list,tuple)) and item:
+            tactical_by_md[str(item[0])] = ' – '.join(str(x) for x in item[1:] if x)
+    if isinstance(adaptive_plan, pd.DataFrame) and not adaptive_plan.empty:
+        for _, r in adaptive_plan.iterrows():
+            md = str(r.get('Nap',''))
+            tac_goal = tactical_by_md.get(md, str(r.get('Fő cél','')))
+            mrows.append([P(md,small),P(tac_goal,small),P(r.get('Ajánlott terhelés',''),small),P(r.get('Javaslat',''),small),P(r.get('Tervezési alap',''),small)])
+    story.append(tbl(mrows,[1.8*cm,5.1*cm,4.7*cm,8.8*cm,7.3*cm],'#166534'))
+    story += [Spacer(1,.15*cm), P('A GPS-only és a GPS+taktikai riport ugyanazt a readiness-magyarázatot, kapuskizárást és adaptív mikrociklus-motort használja.', small)]
+    _fpi_pdf_build_v406(doc, story); buf.seek(0); return buf.getvalue()
+
 
 def build_fpi_product_pdf_bytes(data,selected_week=None,playstyle='Kiegyensúlyozott',report_type='full',demo_label='',tactical_context=None):
     tac=tactical_context if tactical_context is not None else st.session_state.get('tactical_pro_context',None)
@@ -13852,13 +13940,6 @@ def render_fpi_clean_workspace_v101() -> None:
         f"ISO-hetek: {', '.join(v300_summary.get('weeks', [])) or 'n.a.'} | "
         f"Dátummentés: {v300_summary.get('date_changed_rows',0)} javított sor"
     )
-    tactical_quality_ctx_v406 = st.session_state.get("tactical_pro_context", {}) or {}
-    quality_mode_v406 = "integrated" if _fpi_has_tactical_signal_v95(tactical_quality_ctx_v406) else "gps"
-    data_quality_clean_v406 = _fpi_v406_data_quality_engine(
-        df_clean, master_report_v300_clean, tactical_quality_ctx_v406, mode=quality_mode_v406
-    )
-    _fpi_v406_render_data_quality_ui(data_quality_clean_v406)
-
     # 2. Heti kontextus és saját csapat heti profil
     _fpi_section_header_v113("2. Heti kontextus", "Csak a legfontosabb kérdések: ellenfél, meccsnap, referencia, heti edzésszám és a saját csapat heti alapprofilja.", "settings")
     st.markdown('<div class="fpi-quick-panel"><h3>Gyors beállítások</h3><p>Az alapfelállás, védekezési blokk és fő támadási út az adott hétre / ellenfélre is értelmezhető, ezért marad nyitva.</p></div>', unsafe_allow_html=True)
@@ -15860,6 +15941,19 @@ def _fpi_read_many_gps_files_v143(
                 row["Import típus"] = forced_type or "Vegyes / fájlból"
                 rows.append(row)
 
+    if all_sheets:
+        combined_parts = []
+        for key, frame in all_sheets.items():
+            part = frame.copy()
+            part["_fpi_v407_frame_key"] = key
+            part["_fpi_v407_row_order"] = np.arange(len(part))
+            combined_parts.append(part)
+        combined = pd.concat(combined_parts, ignore_index=True, sort=False)
+        combined = _fpi_v407_apply_filename_md_inference(combined)
+        rebuilt = {}
+        for key, group in combined.groupby("_fpi_v407_frame_key", sort=False):
+            rebuilt[str(key)] = group.sort_values("_fpi_v407_row_order").drop(columns=["_fpi_v407_frame_key", "_fpi_v407_row_order"], errors="ignore").reset_index(drop=True)
+        all_sheets = rebuilt
     return all_sheets, pd.DataFrame(rows), hashlib.md5("|".join(signature_parts).encode("utf-8")).hexdigest()
 
 
@@ -18126,7 +18220,7 @@ def build_fpi_tactical_only_pdf_bytes_v156(
     """V402 Tactical Engine + Tactical-only Report 2.0.
 
     A GPS-only riporttal azonos vezetői logika: kulcsüzenet, állapotkép,
-    forrásmegbízhatóság, konkrét prioritások, játékosfeladatok és mikrociklus.
+    konkrét prioritások, játékosfeladatok és mikrociklus.
     """
     if SimpleDocTemplate is None:
         return None
@@ -18140,7 +18234,6 @@ def build_fpi_tactical_only_pdf_bytes_v156(
     opp_eval = ctx.get("opponent_player_evaluation", []) or []
     own_eval = ctx.get("own_player_evaluation", []) or []
     dimensions = _fpi_v402_tactical_dimensions(ctx, findings)
-    reliability, reliability_status, sources = _fpi_v402_tactical_reliability(ctx)
 
     font_name, font_bold = _register_pdf_font()
     buffer = io.BytesIO()
@@ -18172,24 +18265,13 @@ def build_fpi_tactical_only_pdf_bytes_v156(
     else:
         executive="A feltöltött taktikai forrásokból nem azonosítható kellően erős, önálló vezetői megállapítás."
 
-    story=[P("Football Performance Intelligence – Tactical-only",title),P(f"{demo_label or 'ÉLES RIPORT'} | Tactical Engine V406 | GPS-adat nélkül.",small),Spacer(1,.12*cm)]
-    data_quality_v406 = _fpi_v406_data_quality_engine(None, None, ctx, mode="tactical")
-    qitems_v406 = data_quality_v406.get("items", []) or []
-    if qitems_v406:
-        story.append(tbl(
-            [[P(str(x.get("label","")),head) for x in qitems_v406]] +
-            [[P(str(x.get("value","")),small) for x in qitems_v406]],
-            [27.7*cm/max(len(qitems_v406),1)]*len(qitems_v406),
-            header="#0F766E",
-        ))
-        story.append(Spacer(1,.15*cm))
+    story=[P("Football Performance Intelligence – Tactical-only",title),P(f"{demo_label or 'ÉLES RIPORT'} | Tactical Engine V407 | GPS-adat nélkül.",small),Spacer(1,.12*cm)]
     call=Table([[P("A riport kulcsüzenete",strong),P(executive,body)]],colWidths=[5.2*cm,22.5*cm])
     call.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#ECFDF5")),("BOX",(0,0),(-1,-1),.7,colors.HexColor("#10B981")),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),8),("RIGHTPADDING",(0,0),(-1,-1),8),("TOPPADDING",(0,0),(-1,-1),7),("BOTTOMPADDING",(0,0),(-1,-1),7)]))
-    story += [call,Spacer(1,.18*cm),section("1. Taktikai állapotkép és adatmegbízhatóság","#E0F2FE")]
+    story += [call,Spacer(1,.18*cm),section("1. Taktikai állapotkép","#E0F2FE")]
     state_rows=[[P("Terület",head),P("Értékelés",head),P("Státusz",head),P("Magyarázat",head)]]
     for r in dimensions:
         state_rows.append([P(r['Terület'],small),P(f"{_fpi_v403_scale5(r['Pont'])[0]}/5",small),P(_fpi_v403_scale5(r['Pont'])[1],small),P(f"Mit jelent? {r['Definíció']} Most: a taktikai források alapján {r['Státusz'].lower()} állapot.",small)])
-    state_rows.append([P("Adatmegbízhatóság",small),P(f"{_fpi_v403_scale5(reliability)[0]}/5",small),P(_fpi_v403_scale5(reliability)[1],small),P(f"Mit jelent? A következtetések forrásfedezete. Most: {sources}.",small)])
     story.append(tbl(state_rows,[5.1*cm,2.0*cm,3.2*cm,17.4*cm]))
 
     story += [Spacer(1,.18*cm),section("2. Edzői prioritások – mit csináljunk?","#FEF3C7","#F59E0B")]
@@ -18224,7 +18306,7 @@ def build_fpi_tactical_only_pdf_bytes_v156(
     for d,label,text in default_micro:
         mr.append([P(d,small),P(label,small),P(text,small),P("GPS-only adattal együtt az integrált riportban kap egzakt fizikai dózist.",small)])
     story.append(tbl(mr,[2.5*cm,4.8*cm,13.0*cm,7.4*cm],header="#166534"))
-    story += [Spacer(1,.18*cm),P(f"Forrásfedezet: {sources}. Az 1–5 skála döntéstámogató állapotjelzés: 1 fejlesztendö, 2 figyelendö, 3 stabil, 4 jó, 5 kiemelkedö; a videó és az edzői kontextus elsőbbséget élvez.",small)]
+    story += [Spacer(1,.18*cm),P("Az 1–5 skála döntéstámogató állapotjelzés: 1 fejlesztendő, 2 figyelendő, 3 stabil, 4 jó, 5 kiemelkedő. A videó és az edzői kontextus elsőbbséget élvez.",small)]
 
     _fpi_pdf_build_v406(doc, story)
     buffer.seek(0)
@@ -18327,7 +18409,7 @@ def build_fpi_own_team_tactical_only_pdf_bytes_v156(
 FPI_METHODOLOGY_SECTIONS_V143 = [
     ("1. GPS-only metodika", [
         "Cél: a heti fizikai terhelés, a sebességi expozíció, a frissesség és a játékosszintű terhelési eltérések egységes értelmezése.",
-        "A Readiness 0-100 közötti döntéstámogató index. Fő összetevői: terhelési trend, sebességi expozíció, tapering, játékmodell-illeszkedés, edzésrészvétel és adatmegbízhatóság.",
+        "A Readiness 0-100 közötti döntéstámogató index. Fő összetevői: terhelési trend, sebességi expozíció, tapering, játékmodell-illeszkedés és edzésrészvétel.",
         "A heti benchmark korosztály, versenyszint, posztösszetétel, játékmodell és heti típus szerint változik. Nem merev norma, hanem összehasonlítási célzóna.",
         "A Player Risk Score nem sérülésjóslat. A saját korábbi terheléshez viszonyított kiugrásokat, alulexpozíciót, sprint- és HSR-profilt, gyorsításokat, lassításokat és High Efforts értéket jelzi.",
         "A sebességi expozíció értékelése a V405-től a dózis mellett az időzítést is figyelembe veszi. A fő sprintinger általában MD-4/MD-3 környékén kap teljes értéket; MD-2-n csökkentett, MD-1-en erősen csökkentett értékelést kap.",
@@ -18337,7 +18419,6 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
         "Cél: a saját csapat és az ellenfél taktikai mintáinak kompakt, edzői döntésekké alakított értelmezése GPS-adatok nélkül.",
         "A taktikai állapotkép 1-5 skálát használ: 1 fejlesztendő, 2 figyelendő, 3 stabil, 4 jó, 5 kiemelkedő.",
         "A fő területek: játékfelépítés, területnyerés, pressing, átmenetek és védekezési kontroll. A pontok a rendelkezésre álló PDF- és Excel-forrásokból képzett döntéstámogató indexek, nem abszolút futballminősítések.",
-        "Az adatmegbízhatóság külön jelzi a saját és ellenfél csapat-, játékos- és PDF-források lefedettségét. Hiányos forrás esetén a rendszer visszafogja az állítások bizonyosságát.",
         "A riport erősségeket, stabil területeket, figyelendő pontokat és fejlesztendő elemeket is megjelenít; nem abból indul ki, hogy minden terület rossz.",
         "A játékos Excel felismerése többek között a Player, Position, Minutes played, Passes, Progressive passes, Key passes, Interceptions és párharcmutatók mezőire épül.",
     ]),
@@ -18347,7 +18428,7 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
         "Az integrált riport fizikai és taktikai állításai ugyanabból a motorból származnak, mint a GPS-only és Tactical-only riport megfelelő részei. Azonos input esetén nem mondhatnak ellent egymásnak.",
         "A közös prioritás egy taktikai célt a szükséges fizikai dózissal kapcsol össze. Például pressingfejlesztésnél a taktikai gyakorlat mellett a HSR-, sprint- és High Efforts-igény is megjelenik.",
         "A közös mikrociklus naponta egymás mellé rendezi a taktikai célt, a GPS-dózist és a frissességi korlátot.",
-        "Ha valamelyik adatforrás hiányzik vagy gyenge minőségű, az integrált következtetés súlya és bizonyossága ennek megfelelően csökken.",
+        "Az integrált következtetések kizárólag a ténylegesen rendelkezésre álló GPS- és taktikai inputokra épülnek; hiányzó területről a rendszer nem állít konkrétumot.",
     ]),
     ("4. Saját csapat elemzés", [
         "A saját csapat riport az elérhető forrásokhoz igazodik: készülhet GPS-only, taktikai-only vagy GPS+taktikai módban.",
@@ -18364,10 +18445,9 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
         "Playstyle Fit (játékmodell-illeszkedés): annak becslése, hogy a heti fizikai terhelési profil támogatja-e a kiválasztott játékmodellt, például a pressing, átmeneti vagy pozíciós játék várható intenzitási igényét.",
         "Speed Exposure (sebességi expozíció): a heti HSR- és sprintinger mennyiségének, gyakoriságának és időzítésének megfelelősége.",
         "Tapering (terheléscsökkentés/frissítés): a meccs előtti napok terhelésének kontrollált csökkentése úgy, hogy a játékos friss legyen, de a szükséges intenzitási inger megmaradjon.",
-        "Analysis Completeness / Data Reliability (elemzési teljesség / adatmegbízhatóság): azt jelzi, mennyi szükséges adat áll rendelkezésre, mennyire teljes a hét, és milyen bizonyossággal értelmezhetők a következtetések. Nem teljesítménypontszám.",
         "Readiness (készenlét): a terhelési mintázatból becsült aktuális fizikai állapot; nem orvosi diagnózis és nem önálló kiválasztási döntés.",
         "Player Risk Score (játékoskockázati jelzés): korai figyelmeztető index a szokatlan terhelési mintákra; nem sérülés valószínűsége.",
-        "Football Intelligence Score - FI Score: a GPS- és taktikai állapot összevont vezetői indexe. A részpontszámok és az adatmegbízhatóság nélkül önmagában nem értelmezendő.",
+        "Football Intelligence Score - FI Score: a GPS- és taktikai állapot összevont vezetői indexe. A GPS- és taktikai részpontszámok nélkül önmagában nem értelmezendő.",
     ]),
     ("6. Skálák és értelmezési korlátok", [
         "GPS Readiness: 80-100 magas készenlét; 60-79 elfogadható, figyelendő; 40-59 csökkent; 0-39 alacsony.",
@@ -18382,10 +18462,7 @@ def build_fpi_methodology_pdf_bytes_v143() -> Optional[bytes]:
     if SimpleDocTemplate is None:
         return None
     output = io.BytesIO()
-    try:
-        regular_font, bold_font = _register_pdf_fonts() if "_register_pdf_fonts" in globals() else ("Helvetica", "Helvetica-Bold")
-    except Exception:
-        regular_font, bold_font = "Helvetica", "Helvetica-Bold"
+    regular_font, bold_font = _register_pdf_font()
 
     styles = getSampleStyleSheet()
     title = ParagraphStyle(
@@ -18835,6 +18912,12 @@ micro_insights = microcycle_insights(analysis_base_df, selected_week)
 style_insights = playstyle_insights(analysis_base_df, selected_week, selected_playstyle)
 pattern_insights = build_pattern_insights(analysis_base_df, selected_week)
 readiness_score, readiness_components, readiness_reasons = calculate_readiness_score(analysis_base_df, selected_week, selected_playstyle)
+readiness_component_details = _fpi_v407_readiness_component_details(
+    analysis_base_df, selected_week, selected_playstyle, readiness_components
+)
+readiness_breakdown_df = _fpi_v302_readiness_breakdown(
+    readiness_score, readiness_components, readiness_reasons, readiness_component_details
+)
 weekly_fingerprints = build_weekly_fingerprints(analysis_base_df)
 current_fp = weekly_fingerprints[weekly_fingerprints["week"] == selected_week]
 periodization_type = current_fp["periodizacios_tipus"].iloc[0] if not current_fp.empty and "periodizacios_tipus" in current_fp.columns else "Nincs elég adat"
@@ -21653,7 +21736,6 @@ def _fpi_v404_render_own_team(tactical_context: Dict[str, object], readiness: Op
         return None
     dims = _fpi_v404_own_dimensions(readiness, metrics)
     priorities = _fpi_v404_priority_rows(dims)
-    rel_n, rel_status, rel_sources = _fpi_v404_source_reliability(tactical_context, readiness is not None)
     best, weakest = max(dims, key=lambda x: int(x["Pont"])), min(dims, key=lambda x: int(x["Pont"]))
     font_name, font_bold = _register_pdf_font()
     sty = _fpi_v404_pdf_styles(font_name, font_bold)
@@ -21671,47 +21753,36 @@ def _fpi_v404_render_own_team(tactical_context: Dict[str, object], readiness: Op
         return t
     high_risk, med_risk = risk_counts
     story = [P("FOOTBALL INTELLIGENCE", "title"), P(f"Own Team Intelligence | {demo_label or 'ÉLES RIPORT'} | {mode} | {week_label}", "subtitle"), Spacer(1, .14*cm)]
-    data_quality_v406 = data_quality or _fpi_v406_data_quality_engine(None, None, tactical_context, mode="own")
-    qitems_v406 = data_quality_v406.get("items", []) or []
-    if qitems_v406:
-        story.append(tbl(
-            [[P(str(x.get("label", "")), "head") for x in qitems_v406]] +
-            [[P(str(x.get("value", "")), "small") for x in qitems_v406]],
-            [27.7*cm/max(len(qitems_v406),1)]*len(qitems_v406),
-            "#0F766E",
-        ))
-        story.append(Spacer(1, .15*cm))
-    executive = f"Legerösebb terület: {best['Terület']} ({best['Pont']}/5). Fö fejlesztési pont: {weakest['Terület']} ({weakest['Pont']}/5)."
+    executive = f"Legerősebb terület: {best['Terület']} ({best['Pont']}/5). Fő fejlesztési pont: {weakest['Terület']} ({weakest['Pont']}/5)."
     if readiness is not None:
         executive += f" A readiness {int(round(readiness))}/100; {high_risk} magas és {med_risk} közepes kockázatú játékos látható."
-    call = Table([[P("VEZETÖI KULCSÜZENET", "strong"), P(executive)]], colWidths=[5.4*cm, 22.3*cm])
+    call = Table([[P("VEZETŐI KULCSÜZENET", "strong"), P(executive)]], colWidths=[5.4*cm, 22.3*cm])
     call.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#ECFDF5")), ("BOX", (0,0), (-1,-1), .8, colors.HexColor("#22C55E")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 8), ("RIGHTPADDING", (0,0), (-1,-1), 8), ("TOPPADDING", (0,0), (-1,-1), 7), ("BOTTOMPADDING", (0,0), (-1,-1), 7)]))
     story += [call, Spacer(1, .18*cm), sec("1. Saját csapat állapotképe")]
     rows = [[P("Terület", "head"), P("Értékelés", "head"), P("Állapot", "head"), P("Mit jelent? / Most", "head")]]
     for d in dims:
         rows.append([P(d["Terület"], "small"), P(f"{d['Pont']}/5", "small"), P(d["Státusz"], "small"), P(f"Mit jelent? {d['Def']} Most: {d['Most']}", "small")])
-    rows.append([P("Adatmegbízhatóság", "small"), P(f"{rel_n}/5", "small"), P(rel_status, "small"), P(f"Felhasznált források: {rel_sources}.", "small")])
     story.append(tbl(rows, [4.5*cm, 2.0*cm, 3.4*cm, 17.8*cm], "#1D4ED8"))
-    story += [PageBreak(), sec("2. Erösségek, figyelendö és fejlesztendö területek", "#FEF3C7", "#F59E0B")]
-    pr = [[P("Prioritás", "head"), P("Típus", "head"), P("Terület", "head"), P("Állapot", "head"), P("Edzöi javaslat", "head"), P("Miért?", "head")]]
+    story += [PageBreak(), sec("2. Erősségek, figyelendő és fejlesztendő területek", "#FEF3C7", "#F59E0B")]
+    pr = [[P("Prioritás", "head"), P("Típus", "head"), P("Terület", "head"), P("Állapot", "head"), P("Edzői javaslat", "head"), P("Miért?", "head")]]
     for r in priorities:
         pr.append([P(f"{r['Prioritás']}/5", "small"), P(r["Típus"], "small"), P(r["Terület"], "small"), P(r["Állapot"], "small"), P(r["Javaslat"], "small"), P(r["Miért"], "small")])
     story.append(tbl(pr, [2.0*cm, 2.8*cm, 3.8*cm, 3.0*cm, 8.3*cm, 7.8*cm], "#92400E"))
     if findings:
-        story += [Spacer(1, .16*cm), sec("3. Saját taktikai PDF – visszatérö minták", "#EDE9FE", "#8B5CF6")]
+        story += [Spacer(1, .16*cm), sec("3. Saját taktikai PDF – visszatérő minták", "#EDE9FE", "#8B5CF6")]
         story.append(tbl([[P("Forrás", "head"), P("Megállapítás", "head")]] + [[P("Saját taktikai PDF", "small"), P(x, "small")] for x in findings], [5.0*cm, 22.7*cm], "#5B21B6"))
-    story += [PageBreak(), sec("4. Játékosszintü Own Team Intelligence", "#DCFCE7", "#22C55E")]
+    story += [PageBreak(), sec("4. Játékosszintű Own Team Intelligence", "#DCFCE7", "#22C55E")]
     rr = [[P("Játékos", "head"), P("Szerep", "head"), P("Bizonyíték", "head"), P("Értelmezés", "head"), P("Konkrét feladat", "head")]]
     for r in own_eval[:10]:
         rr.append([P(r.get("Játékos", ""), "small"), P(r.get("Szerep", ""), "small"), P(r.get("Bizonyíték", ""), "small"), P(r.get("Értelmezés", ""), "small"), P(r.get("Javaslat", "") or "Egyéni videós és pályafeladat.", "small")])
     if len(rr) == 1:
-        rr.append([P("Nincs játékos Excel", "small"), P("—", "small"), P("Csapatszintü források", "small"), P("Játékosszintü állítás nem készíthetö.", "small"), P("Tölts fel saját játékos Excelt.", "small")])
+        rr.append([P("Nincs játékos Excel", "small"), P("—", "small"), P("Csapatszintű inputok", "small"), P("Játékosszintű állítás nem készíthető.", "small"), P("Tölts fel saját játékos Excelt.", "small")])
     story.append(tbl(rr, [3.8*cm, 4.3*cm, 5.6*cm, 6.5*cm, 7.5*cm], "#166534"))
     story += [PageBreak(), sec("5. Egységes heti végrehajtás", "#DBEAFE", "#3B82F6")]
-    micro = [("MD-4", "Játékfelépítés + volumen", "Pozíciós játék közepes-magas volumennel; a technikai minöség maradjon elsödleges."), ("MD-3", "Fö intenzitási nap", "A leggyengébb taktikai dimenzió meccsintenzitáson, szükség esetén HSR/sprint dózissal."), ("MD-2", "Meccsterv és kontroll", "Rövid, specifikus blokkok; a terhelés csökken, a döntési pontok élesednek."), ("MD-1", "Aktiváció", "Kezdöhelyzetek, elsö támadó gondolat, pontrúgás és rövid aktiváció.")]
+    micro = [("MD-4", "Játékfelépítés + volumen", "Pozíciós játék közepes-magas volumennel; a technikai minőség maradjon elsődleges."), ("MD-3", "Fő intenzitási nap", "A leggyengébb taktikai dimenzió meccsintenzitáson, szükség esetén HSR/sprint dózissal."), ("MD-2", "Meccsterv és kontroll", "Rövid, specifikus blokkok; a terhelés csökken, a döntési pontok élesednek."), ("MD-1", "Aktiváció", "Kezdőhelyzetek, első támadó gondolat, pontrúgás és rövid aktiváció.")]
     story.append(tbl([[P("Nap", "head"), P("Közös fókusz", "head"), P("Végrehajtás", "head")]] + [[P(a, "small"), P(b, "small"), P(c, "small")] for a,b,c in micro], [2.5*cm, 6.0*cm, 19.2*cm], "#1E3A8A"))
     story.append(Spacer(1, .12*cm))
-    story.append(P("Skála: 1 fejlesztendö, 2 figyelendö, 3 stabil, 4 jó, 5 kiemelkedö. A négy riportmód közös státusz- és prioritáslogikát használ.", "small"))
+    story.append(P("Skála: 1 fejlesztendő, 2 figyelendő, 3 stabil, 4 jó, 5 kiemelkedő. A négy riportmód közös státusz- és prioritáslogikát használ.", "small"))
     _fpi_pdf_build_v406(doc, story)
     buf.seek(0)
     return buf.getvalue()
@@ -21730,31 +21801,31 @@ def build_fpi_own_team_profile_pdf_bytes(data: pd.DataFrame, selected_week: Opti
     risk_df = ctx.get("risk_df") if isinstance(ctx.get("risk_df"), pd.DataFrame) else pd.DataFrame()
     risk_counts = _fpi_count_risk_levels_v126(risk_df) if "_fpi_count_risk_levels_v126" in globals() else (0, 0)
     mode = "GPS + taktikai" if (tctx.get("own_team_metrics") or tctx.get("own_player_tables") or _fpi_own_pdf_findings_v156(tctx, 1)) else "GPS-only"
-    return _fpi_v404_render_own_team(tctx, readiness, risk_counts, f"Hét: {format_week_label(str(ctx.get('selected_week', '')))}", demo_label, mode, ctx.get("data_quality_v406"))
+    return _fpi_v404_render_own_team(tctx, readiness, risk_counts, f"Hét: {format_week_label(str(ctx.get('selected_week', '')))}", demo_label, mode, None)
 
 
 def build_fpi_own_team_tactical_only_pdf_bytes_v156(tactical_context: Optional[Dict[str, object]], demo_label: str = "") -> Optional[bytes]:
-    return _fpi_v404_render_own_team(tactical_context or {}, None, (0, 0), "GPS-adat nélkül", demo_label, "Tactical-only", _fpi_v406_data_quality_engine(None, None, tactical_context or {}, mode="own"))
+    return _fpi_v404_render_own_team(tactical_context or {}, None, (0, 0), "GPS-adat nélkül", demo_label, "Tactical-only", None)
 
 
 FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
-    ("7. V406 – PDF-karakterkezelés, HalfTime merge és adatminőség", [
-        "Minden PDF-export ugyanazon végső sanitize kapun fut át. A hosszú ö/ü karakterpár PDF-biztos alakra kerül, miközben az alkalmazás és a táblázatos export eredeti magyar szövege változatlan marad.",
+    ("7. V407 – PDF-karakterkezelés, HalfTime merge, kapuskezelés és MD-következtetés", [
+        "Minden PDF-export ugyanazon végső sanitize kapun fut át, és beágyazott Unicode-betűtípust használ. Az ő és ű karakterek változatlanul, helyesen maradnak a PDF-ben.",
         "Az azonos mérkőzéshez tartozó HalfTime 1 és HalfTime 2 automatikusan egy Match eseménnyé egyesül. Az össztáv, Load, sprint, HSR, High Efforts, gyorsítások és lassítások összeadódnak; a Max Speed a két félidő átlaga.",
         "A játékperc, per90, readiness, benchmark és játékosszintű kockázat az összevont teljes mérkőzésből újraszámolódik; a két félidő nem jelenik meg két külön sessionként.",
-        "A Data Quality Engine a riport elején jelzi a GPS-források számát, a félidő-összevonást, a taktikai PDF- és Excel-források rendelkezésre állását, valamint a számított adatminőségi százalékot.",
-        "Az adatminőségi százalék nem teljesítménypontszám: az importálhatóságot, mezőkitöltöttséget, dátumérvényességet, félidő-integritást és forrásfedezetet jelzi.",
+        "A Load- és HSR-rangsorok alsó és felső mezőnye mezőnyjátékosokra készül. A beavatkozást igénylő játékosok részben a kapusok alacsony mezőnyjátékos-terhelése nem generál Load-, HSR- vagy sprintlemaradás-jelzést.",
+        "Ha egy GPS-fájl neve MD-napot, egy másik pedig dátumot tartalmaz, az app a dátumkülönbségből következteti ki a másik fájl MD-címkéjét. Például egy dátumozott, az MD-3 fájl utáni napi session MD-2 besorolást kap.",
     ]),
 ]
 
 
 FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
-    ("14. V404 – Platformkonzisztencia és Own Team Intelligence", [
+    ("14. V407 – Platformkonzisztencia és Own Team Intelligence", [
         "A saját csapat riport ugyanazt az 1–5 állapot- és prioritásskálát használja, mint a Tactical-only és a GPS+taktikai riport.",
-        "A saját csapat elemzés automatikusan GPS-only, Tactical-only vagy GPS+taktikai módba kerül az elérhetö források alapján.",
-        "A riport külön jelöli az erösséget, a stabil állapotot, a figyelendö és a fejlesztendö területeket.",
-        "Az adatmegbízhatóság a tényleges forrásfedezetet értékeli: GPS, saját csapat Excel, saját játékos Excel és taktikai PDF.",
-        "A négy termék közös fejlécet, táblázati ritmust, státusznyelvet, oldallogikát és vezetöi kulcsüzenetet használ."
+        "A saját csapat elemzés automatikusan GPS-only, Tactical-only vagy GPS+taktikai módba kerül az elérhető inputok alapján.",
+        "A riport külön jelöli az erősséget, a stabil állapotot, a figyelendő és a fejlesztendő területeket.",
+        "A négy termék közös fejlécet, táblázati ritmust, státusznyelvet, oldallogikát és vezetői kulcsüzenetet használ.",
+        "A GPS-only és a GPS+taktikai riport ugyanazt a readiness-magyarázatot, kapuskizárást, MD-következtetést és adaptív ciklustervet használja."
     ])
 ]
 
@@ -22137,7 +22208,7 @@ def _fpi_has_tactical_signal_v95(tactical_context: Optional[Dict[str, object]]) 
 
 
 # Tabok
-tab_exec, tab_intro, tab1, tab_premium, tab_export, tab_methodology, tab_tactical_pro, tab_intel, tab_micro, tab_risk, tab2, tab3, tab4, tab5 = st.tabs([
+tab_exec, tab_intro, tab1, tab_premium, tab_export, tab_methodology, tab_tactical_pro, tab_intel, tab_micro, tab_risk, tab2, tab3, tab5 = st.tabs([
     "🏠 Dashboard",
     "ℹ️ Rendszer",
     "📌 Áttekintő",
@@ -22150,7 +22221,6 @@ tab_exec, tab_intro, tab1, tab_premium, tab_export, tab_methodology, tab_tactica
     "🚨 Kockázat",
     "🎯 Javaslatok",
     "👤 Játékosok",
-    "✅ Adatminőség",
     "🧾 Nyers adatok",
 ])
 
@@ -22423,11 +22493,17 @@ with tab_premium:
     with k4:
         render_premium_kpi("Periodizáció", periodization_type, "Automatikus heti besorolás", "#a78bfa")
     st.markdown("### Meccskészültség komponensek")
-    if readiness_components:
-        comp_df = pd.DataFrame([{"Komponens": k, "Pont": round(v, 1)} for k, v in readiness_components.items()])
+    if readiness_breakdown_df is not None and not readiness_breakdown_df.empty:
+        comp_df = readiness_breakdown_df[["Komponens", "Pont"]].copy()
         fig = px.bar(comp_df, x="Komponens", y="Pont", range_y=[0, 100], title="Meccskészültség komponensek")
         fig.update_layout(xaxis_title="", yaxis_title="Pont", template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(
+            readiness_breakdown_df[["Komponens", "Pont", "Státusz", "Magyarázat"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={"Magyarázat": st.column_config.TextColumn("Mit jelent? / Mit jelent a kapott érték?", width="large")},
+        )
     st.markdown("### Top 3 edzői teendő")
     render_coaching_priorities(coaching_priorities)
     st.markdown("### Top játékos kockázat")
@@ -22582,14 +22658,17 @@ with tab_intel:
         )
     with c2:
         st.markdown("### Meccskészültség komponensek")
-        if readiness_components:
-            comp_df = pd.DataFrame([
-                {"Komponens": k, "Pont": round(v, 1)}
-                for k, v in readiness_components.items()
-            ])
+        if readiness_breakdown_df is not None and not readiness_breakdown_df.empty:
+            comp_df = readiness_breakdown_df[["Komponens", "Pont"]].copy()
             fig = px.bar(comp_df, x="Komponens", y="Pont", range_y=[0, 100], title="Meccskészültség komponensek")
-            fig.update_layout(xaxis_title="", yaxis_title="Pont")
+            fig.update_layout(xaxis_title="", yaxis_title="Pont", template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(
+                readiness_breakdown_df[["Komponens", "Pont", "Státusz", "Magyarázat"]],
+                use_container_width=True,
+                hide_index=True,
+                column_config={"Magyarázat": st.column_config.TextColumn("Mit jelent? / Mit jelent a kapott érték?", width="large")},
+            )
         else:
             st.info("Nincs elég adat a komponensekhez.")
 
@@ -22858,38 +22937,6 @@ with tab3:
         st.dataframe(show, use_container_width=True, hide_index=True)
     else:
         st.info("Nincs adat az aktuális szűrésre.")
-
-with tab4:
-    st.subheader("✅ Adatminőség")
-    st.caption("Ez azért fontos, mert a sportadat a valóságban mindig kicsit koszos.")
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        metric_card("Nyers sor", len(raw_df))
-    with c2:
-        metric_card("Standardizált sor", len(df))
-    with c3:
-        metric_card("Hetek", df["week"].nunique())
-    with c4:
-        metric_card("Típusok", ", ".join(session_types))
-
-    st.markdown("### Performance memória állapot")
-    mem_df = load_memory_df()
-    if mem_df.empty:
-        st.info("Nincs még mentett lokális memory adat.")
-    else:
-        st.success(f"Mentett memory: {len(mem_df)} sor, {mem_df['week'].nunique() if 'week' in mem_df.columns else 'ismeretlen'} hét.")
-    st.markdown("### Automatikus oszlopmapping")
-    map_df = pd.DataFrame([
-        {"standard mező": k, "forrás oszlop": v if v is not None else "NINCS"}
-        for k, v in mapping.items()
-    ])
-    st.dataframe(map_df, use_container_width=True, hide_index=True)
-
-    st.markdown("### Hiányzó értékek a standard mezőkben")
-    na = df.isna().mean().sort_values(ascending=False).reset_index()
-    na.columns = ["oszlop", "hiányzó arány"]
-    st.dataframe(na.head(30), use_container_width=True, hide_index=True)
 
 with tab5:
     st.subheader("Nyers / standardizált adatok")
