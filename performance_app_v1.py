@@ -4091,11 +4091,13 @@ def team_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
 # V2 - Football Intelligence Layer
 # -----------------------------------------------------------------------------
 def fpi_pdf_sanitize_v406(value: object) -> str:
-    """Közös V408 PDF-karakter-normalizálás.
+    """Közös V409 PDF-karakter-normalizálás.
 
-    A magyar hosszú ő/ű karaktereket változatlanul hagyja. Csak a láthatatlan,
-    tördelést vagy másolást zavaró Unicode-jeleket távolítja el, majd NFC alakra
-    normalizál. A PDF-ekhez a _register_pdf_font Unicode-képes fontot választ.
+    Normál működésben az ő/Ő/ű/Ű karaktereket változatlanul hagyja. Ha egy
+    rendkívül szűk szerverkörnyezetben semmilyen Unicode-font nem érhető el,
+    a PDF-export nem áll le: csak ebben a végső fallback módban történik
+    ő→ö és ű→ü helyettesítés, mert a ReportLab alap Helvetica fontja ezeket
+    a karaktereket nem tartalmazza.
     """
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return ""
@@ -4109,6 +4111,11 @@ def fpi_pdf_sanitize_v406(value: object) -> str:
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
+
+    if globals().get("_FPI_PDF_STANDARD_FONT_FALLBACK", False):
+        text = text.translate(str.maketrans({
+            "ő": "ö", "Ő": "Ö", "ű": "ü", "Ű": "Ü",
+        }))
     return text
 
 
@@ -5798,13 +5805,88 @@ def _fpi_v408_font_supports_hungarian(path: object) -> bool:
         return any(name in low for name in ("dejavu", "notosans", "liberationsans", "arial"))
 
 
+def _fpi_v409_python_font_pairs() -> List[Tuple[str, str]]:
+    """Unicode-font párok keresése a telepített Python-csomagokban.
+
+    Streamlit Cloudon előfordul, hogy nincs rendszerfont a szokásos
+    /usr/share/fonts útvonalon, miközben a Matplotlib saját DejaVu Sans
+    készlete elérhető a site-packages könyvtárban.
+    """
+    pairs: List[Tuple[str, str]] = []
+    seen: set = set()
+
+    relative_pairs = [
+        (
+            Path("matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf"),
+            Path("matplotlib/mpl-data/fonts/ttf/DejaVuSans-Bold.ttf"),
+        ),
+        (
+            Path("cv2/qt/fonts/DejaVuSans.ttf"),
+            Path("cv2/qt/fonts/DejaVuSans-Bold.ttf"),
+        ),
+    ]
+    for raw_root in sys.path:
+        if not raw_root:
+            continue
+        root = Path(raw_root)
+        try:
+            root_key = str(root.resolve())
+        except Exception:
+            root_key = str(root)
+        if root_key in seen or not root.exists():
+            continue
+        seen.add(root_key)
+        for regular_rel, bold_rel in relative_pairs:
+            regular = root / regular_rel
+            bold = root / bold_rel
+            if regular.exists():
+                pairs.append((str(regular), str(bold if bold.exists() else regular)))
+    return pairs
+
+
+def _fpi_v409_fontconfig_pair() -> Tuple[Optional[str], Optional[str]]:
+    """A Linux fontconfig adatbázisából kér Unicode-fontot, ha elérhető."""
+    families = ("DejaVu Sans", "Noto Sans", "Liberation Sans", "Arial")
+    for family in families:
+        try:
+            regular_run = subprocess.run(
+                ["fc-match", "-f", "%{file}", family],
+                capture_output=True,
+                text=True,
+                timeout=4,
+                check=False,
+            )
+            regular = regular_run.stdout.strip()
+            if not regular or not Path(regular).exists() or not _fpi_v408_font_supports_hungarian(regular):
+                continue
+
+            bold_run = subprocess.run(
+                ["fc-match", "-f", "%{file}", f"{family}:style=Bold"],
+                capture_output=True,
+                text=True,
+                timeout=4,
+                check=False,
+            )
+            bold = bold_run.stdout.strip()
+            if not bold or not Path(bold).exists() or not _fpi_v408_font_supports_hungarian(bold):
+                bold = regular
+            return regular, bold
+        except Exception:
+            continue
+    return None, None
+
+
 def _fpi_v408_find_unicode_font_pair() -> Tuple[Optional[str], Optional[str]]:
-    """Platformfüggetlen fontkeresés, környezeti változóval felülírható."""
+    """V409: platformfüggetlen Unicode-fontkeresés több biztonsági szinttel."""
     env_regular = os.environ.get("FPI_PDF_FONT_REGULAR", "").strip()
     env_bold = os.environ.get("FPI_PDF_FONT_BOLD", "").strip()
-    pairs = []
+    pairs: List[Tuple[str, str]] = []
     if env_regular:
         pairs.append((env_regular, env_bold or env_regular))
+
+    # Elsőként a Python-környezetbe csomagolt fontok: Streamlit Cloudon ez a
+    # legmegbízhatóbb útvonal, mert nem függ az operációs rendszer image-étől.
+    pairs.extend(_fpi_v409_python_font_pairs())
     pairs.extend([
         ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
@@ -5821,16 +5903,28 @@ def _fpi_v408_find_unicode_font_pair() -> Tuple[Optional[str], Optional[str]]:
             valid_bold = bold if bold and Path(bold).exists() and _fpi_v408_font_supports_hungarian(bold) else regular
             return str(regular), str(valid_bold)
 
-    # Utolsó kör: ismert fontnevek keresése a tipikus rendszerkönyvtárakban.
+    # Második biztonsági szint: kérdezzük le a rendszer fontconfig adatbázisát.
+    fc_regular, fc_bold = _fpi_v409_fontconfig_pair()
+    if fc_regular:
+        return fc_regular, fc_bold or fc_regular
+
+    # Harmadik szint: ismert fontnevek rekurzív keresése a tipikus könyvtárakban.
     roots = [
         Path("/usr/share/fonts"), Path("/usr/local/share/fonts"),
-        Path.home() / ".fonts", Path("C:/Windows/Fonts"),
-        Path("/Library/Fonts"), Path("/System/Library/Fonts"),
+        Path.home() / ".fonts", Path.home() / ".local/share/fonts",
+        Path("C:/Windows/Fonts"), Path("/Library/Fonts"),
+        Path("/System/Library/Fonts"),
     ]
-    wanted_regular = ("NotoSans-Regular.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf", "Arial.ttf")
-    wanted_bold = ("NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "Arial Bold.ttf", "arialbd.ttf")
-    found_regular = None
-    found_bold = None
+    wanted_regular = {
+        "NotoSans-Regular.ttf", "DejaVuSans.ttf", "DejaVuSansCondensed.ttf",
+        "LiberationSans-Regular.ttf", "Arial.ttf", "arial.ttf",
+    }
+    wanted_bold = {
+        "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf", "DejaVuSansCondensed-Bold.ttf",
+        "LiberationSans-Bold.ttf", "Arial Bold.ttf", "arialbd.ttf",
+    }
+    found_regular: Optional[str] = None
+    found_bold: Optional[str] = None
     for root in roots:
         if not root.exists():
             continue
@@ -5852,41 +5946,56 @@ def _fpi_v408_find_unicode_font_pair() -> Tuple[Optional[str], Optional[str]]:
 
 
 def _register_pdf_font() -> Tuple[str, str]:
-    """V408: ellenőrzött Unicode-fontcsalád minden PDF-hez.
+    """V409: felhőbiztos Unicode-fontregisztráció, leállás nélküli fallbackkel.
 
-    Fontcsalád-regisztrációt is végez, ezért a Paragraph inline <b>/<strong>
-    részei sem váltanak vissza olyan alapfontra, amely szétszedi az ő/ű betűket.
+    Elsődlegesen ő/Ő/ű/Ű glyph-eket tartalmazó TTF/OTF családot használ.
+    Ha ilyen a futtatókörnyezetben egyáltalán nincs, nem dob RuntimeError-t:
+    a ReportLab alapfontjára vált, és a sanitizer csak ebben a vészmódban
+    ő→ö, ű→ü helyettesítést alkalmaz.
     """
-    if pdfmetrics is None or TTFont is None:
-        raise RuntimeError("A PDF exporthoz a ReportLab TTFont támogatása szükséges.")
-
     cached = globals().get("_FPI_V408_PDF_FONT_CACHE")
     if cached:
         return cached
 
+    if pdfmetrics is None or TTFont is None:
+        globals()["_FPI_PDF_STANDARD_FONT_FALLBACK"] = True
+        fallback = ("Helvetica", "Helvetica-Bold")
+        globals()["_FPI_V408_PDF_FONT_CACHE"] = fallback
+        globals()["_FPI_V408_PDF_FONT_PATHS"] = (None, None)
+        return fallback
+
     normal_path, bold_path = _fpi_v408_find_unicode_font_pair()
     if not normal_path:
-        raise RuntimeError(
-            "Nem található ő/ű karaktereket támogató Unicode-font. "
-            "Állítsd be az FPI_PDF_FONT_REGULAR és FPI_PDF_FONT_BOLD környezeti változókat "
-            "Noto Sans, DejaVu Sans, Liberation Sans vagy Arial TTF fájlra."
-        )
+        globals()["_FPI_PDF_STANDARD_FONT_FALLBACK"] = True
+        fallback = ("Helvetica", "Helvetica-Bold")
+        globals()["_FPI_V408_PDF_FONT_CACHE"] = fallback
+        globals()["_FPI_V408_PDF_FONT_PATHS"] = (None, None)
+        return fallback
 
-    regular_name = "FPIUnicodeV408"
-    bold_name = "FPIUnicodeV408-Bold"
-    registered = set(pdfmetrics.getRegisteredFontNames())
-    if regular_name not in registered:
-        pdfmetrics.registerFont(TTFont(regular_name, normal_path))
-    if bold_name not in registered:
-        pdfmetrics.registerFont(TTFont(bold_name, bold_path or normal_path))
-    # Kritikus javítás: az inline félkövér/kurzív tagek ugyanabban a Unicode családban maradnak.
-    pdfmetrics.registerFontFamily(
-        regular_name,
-        normal=regular_name,
-        bold=bold_name,
-        italic=regular_name,
-        boldItalic=bold_name,
-    )
+    regular_name = "FPIUnicodeV409"
+    bold_name = "FPIUnicodeV409-Bold"
+    try:
+        registered = set(pdfmetrics.getRegisteredFontNames())
+        if regular_name not in registered:
+            pdfmetrics.registerFont(TTFont(regular_name, normal_path))
+        if bold_name not in registered:
+            pdfmetrics.registerFont(TTFont(bold_name, bold_path or normal_path))
+        pdfmetrics.registerFontFamily(
+            regular_name,
+            normal=regular_name,
+            bold=bold_name,
+            italic=regular_name,
+            boldItalic=bold_name,
+        )
+    except Exception:
+        # Hibás vagy a ReportLab által nem olvasható font se állítsa le az appot.
+        globals()["_FPI_PDF_STANDARD_FONT_FALLBACK"] = True
+        fallback = ("Helvetica", "Helvetica-Bold")
+        globals()["_FPI_V408_PDF_FONT_CACHE"] = fallback
+        globals()["_FPI_V408_PDF_FONT_PATHS"] = (None, None)
+        return fallback
+
+    globals()["_FPI_PDF_STANDARD_FONT_FALLBACK"] = False
     globals()["_FPI_V408_PDF_FONT_CACHE"] = (regular_name, bold_name)
     globals()["_FPI_V408_PDF_FONT_PATHS"] = (normal_path, bold_path)
     return regular_name, bold_name
