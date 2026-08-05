@@ -12126,7 +12126,7 @@ def _fpi_v401_compact_bar_chart(items, title_text: str, width_cm: float = 13.2, 
             d.add(String(0, y, label[:25], fontName=chart_font, fontSize=6.8, fillColor=rl_colors.HexColor('#334155')))
             d.add(Rect(label_w, y - 2, bar_w, 6, fillColor=rl_colors.HexColor('#E2E8F0'), strokeColor=None))
             d.add(Rect(label_w, y - 2, max(1, bar_w * abs(v) / vmax), 6, fillColor=rl_colors.HexColor('#0F766E'), strokeColor=None))
-            val = f"{v:.0f}{value_suffix}" if abs(v) >= 10 else f"{v:.1f}{value_suffix}"
+            val = (_fpi_v414_number(v, 0) if abs(v) >= 10 else _fpi_v414_number(v, 1)) + value_suffix
             d.add(String(label_w + bar_w + 4, y - 1, val, fontName=chart_bold, fontSize=6.7, fillColor=rl_colors.HexColor('#0F172A')))
         return d
     except Exception:
@@ -12235,10 +12235,28 @@ def build_fpi_gps_only_pdf_bytes(
         report_data_v205, master_report_period_v300 = _fpi_v300_master_dataset(report_data_v205)
         period_label_v205 = _fpi_v205_period_label(report_data_v205)
         report_data_v205 = report_data_v205.copy()
-        # A teljes időszakos riport több valódi, lezárt hetet tart meg.
-        # A döntési ablak a legutóbbi teljes hét; a trend az összes korábbi teljes hétből készül.
-        complete_weeks_v411 = _fpi_v411_complete_week_codes(report_data_v205)
-        selected_week = complete_weeks_v411[-1] if complete_weeks_v411 else _fpi_latest_week(report_data_v205)
+        # V414: a "Teljes feltöltött időszak" valóban minden kiválasztott sort elemez.
+        # Az eredeti ISO-hetet külön oszlopban megőrizzük, ezért a 4+ hetes trendmotor
+        # továbbra is valódi hetekből dolgozik, miközben a session- és játékostáblák
+        # az egész feltöltött időszakot mutatják.
+        full_period_key_v414 = "__FPI_FULL_PERIOD_V414__"
+        if "_fpi_original_week_v300" not in report_data_v205.columns:
+            report_data_v205["_fpi_original_week_v300"] = report_data_v205.get(
+                "week", pd.Series("", index=report_data_v205.index)
+            ).astype(str)
+        report_data_v205["week"] = full_period_key_v414
+        report_data_v205["_fpi_scope_selected_v411"] = True
+        report_data_v205["_fpi_scope_code_v411"] = full_period_key_v414
+        selected_week = full_period_key_v414
+        st.session_state["fpi_analysis_scope_v411"] = {
+            "mode_selection": "Teljes feltöltött időszak",
+            "scope_type": "full_period",
+            "report_key": full_period_key_v414,
+            "label": period_label_v205,
+            "selected_week": None,
+            "selected_event": None,
+            "date_range": None,
+        }
 
     ctx=_fpi_report_context(report_data_v205,selected_week,playstyle)
     if ctx.get("error"): return None
@@ -12278,7 +12296,7 @@ def build_fpi_gps_only_pdf_bytes(
     report_title = ('Teljes időszakos GPS trendriport' if period_mode_v205 else {'single_session':'Egyszeri edzés – GPS-pillanatkép','training_block':'Edzésblokk-elemzés','week_in_progress':'Folyamatban lévő hét – adatok eddig','preseason_block':'Felkészülési terhelési blokk','full_microcycle':'Teljes mikrociklus – GPS-riport','match_only':'Meccsterhelési riport'}.get(mode.get('code'),'GPS-only teljesítményriport'))
     display_period_v205 = period_label_v205 if period_mode_v205 else format_week_label(week)
     period_scope_note_v303 = (
-        f"Teljes adatbázis: {period_label_v205}; aktuális döntési ablak: {week}."
+        f"Teljes adatbázis: {period_label_v205}; a session- és játékostáblák minden kiválasztott eseményt tartalmaznak."
         if period_mode_v205 else ""
     )
     story += [
@@ -12312,8 +12330,8 @@ def build_fpi_gps_only_pdf_bytes(
     else:
         rows=[[P(x,head) for x in ['Dátum','Típus','Session','Létszám','Perc','Össztáv','m/perc','HSR','Sprint','Load']]]
         for _,r in sessions.iterrows():
-            def f(v,d=0): return '—' if pd.isna(v) else f'{float(v):.{d}f}'
-            rows.append([P(str(r['Dátum']),small),P(str(r['Típus']),small),P(str(r['Session']),small),P(str(r['Létszám']),small),P(f(r['Perc'],1),small),P(f(r['Össztáv']),small),P(f(r['m/perc'],1),small),P(f(r['HSR']),small),P(f(r['Sprint']),small),P(f(r['Load']),small)])
+            def f(v,d=0): return _fpi_v414_number(v, decimals=d)
+            rows.append([P(str(r['Dátum']),small),P(str(r['Típus']),small),P(str(r['Session']),small),P(_fpi_v414_number(r['Létszám']),small),P(f(r['Perc'],1),small),P(f(r['Össztáv']),small),P(f(r['m/perc'],1),small),P(f(r['HSR']),small),P(f(r['Sprint']),small),P(f(r['Load']),small)])
         story.append(tbl(rows,[3.4*cm,2.0*cm,6.0*cm,1.8*cm,2.0*cm,2.6*cm,2.2*cm,2.2*cm,2.2*cm,2.3*cm],'#92400E'))
         story += [Spacer(1,.12*cm), _fpi_v304_session_chart(sessions), Spacer(1,.08*cm)]
         story.append(P('Az értékek sessionönként a játékosok mediánját mutatják, nem a teljes keret összeadott távolságát. Így különböző létszámú edzések is összevethetők.',small))
@@ -12327,10 +12345,10 @@ def build_fpi_gps_only_pdf_bytes(
             actual=r.get('Tényleges érték'); matchref=r.get('Meccsreferencia'); pctv=r.get('Tényleges %'); unit=str(r.get('Egység',''))
             ratio_rows.append([
                 P(str(r.get('Mutató','')),small),P(str(r.get('Szint','')),small),
-                P('n.a.' if pd.isna(actual) else f'{float(actual):.0f} {unit}',small),
-                P('n.a.' if pd.isna(matchref) else f'{float(matchref):.0f} {unit}',small),
+                P('n.a.' if pd.isna(actual) else f'{_fpi_v414_number(actual)} {unit}',small),
+                P('n.a.' if pd.isna(matchref) else f'{_fpi_v414_number(matchref)} {unit}',small),
                 P('n.a.' if pd.isna(pctv) else f'{float(pctv):.0f}%',small),
-                P(str(r.get('Benchmark %','')),small),P(str(r.get('Benchmark érték','')),small),
+                P(str(r.get('Benchmark %','')),small),P(_fpi_v414_format_numeric_text(r.get('Benchmark érték','')),small),
                 P(str(r.get('Értékelés','')),small)
             ])
         story.append(tbl(ratio_rows,[3.1*cm,3.5*cm,3.4*cm,3.2*cm,2.8*cm,3.2*cm,4.2*cm,4.2*cm],'#92400E'))
@@ -12369,7 +12387,7 @@ def build_fpi_gps_only_pdf_bytes(
         if trend_status_v411.get('available'):
             story += [_fpi_v304_trend_charts(aligned.tail(6)), Spacer(1,.10*cm)]
         rows=[[P(c,head) for c in aligned.columns]]
-        for _,r in aligned.tail(6).iterrows(): rows.append([P('—' if pd.isna(r[c]) else (f'{float(r[c]):.0f}' if isinstance(r[c],(int,float,np.integer,np.floating)) else str(r[c])),small) for c in aligned.columns])
+        for _,r in aligned.tail(6).iterrows(): rows.append([P('—' if pd.isna(r[c]) else (_fpi_v414_number(r[c]) if isinstance(r[c],(int,float,np.integer,np.floating)) else _fpi_v414_format_numeric_text(r[c])),small) for c in aligned.columns])
         story.append(tbl(rows,[3.2*cm,4.3*cm,5.0*cm,4.5*cm,4.5*cm,4.5*cm],'#047857'))
         note_v411 = ('A trend csak legalább négy teljes hétből készül.' if trend_status_v411.get('available') else 'A rendelkezésre álló 2–3 teljes hét csak összehasonlítás; a riport ezt nem nevezi trendnek.')
         story.append(Spacer(1,.15*cm)); story.append(P(note_v411 + ' Folyamatban lévő hétnél csak azonos hétközi pontig gyűlt korábbi terheléshez hasonlítunk.',small))
@@ -12381,7 +12399,7 @@ def build_fpi_gps_only_pdf_bytes(
         labels={'player_name':'Játékos','sessions':'Session','duration_min':'Perc','total_distance':'Össztáv','hsr_distance':'HSR','sprint_distance':'Sprint','sprints':'Sprint db','high_efforts':'High Eff.','training_load':'Load'}
         sortcol='total_distance' if 'total_distance' in display else metric_cols[0]; display=display.sort_values(sortcol,ascending=False).head(20)
         cols=['player_name']+metric_cols; rows=[[P(labels.get(c,c),head) for c in cols]]
-        for _,r in display.iterrows(): rows.append([P(str(r[c]) if c=='player_name' else ('—' if pd.isna(r[c]) else f'{float(r[c]):.0f}'),small) for c in cols])
+        for _,r in display.iterrows(): rows.append([P(str(r[c]) if c=='player_name' else _fpi_v414_number(r[c]),small) for c in cols])
         widths=[5.8*cm]+[(21.9/len(metric_cols))*cm for _ in metric_cols]; story.append(tbl(rows,widths,'#0369A1'))
     story += [PageBreak(),section('7. Beavatkozást igénylő játékosok','#FEE2E2')]
     flags=[]
@@ -14631,7 +14649,7 @@ def render_fpi_clean_workspace_v101() -> None:
     # 1. GPS import
     _fpi_section_header_v113(
         "1. GPS import",
-        "Brainsports, PlayerTek, Polar Team Pro, Catapult és egyéb Excel/CSV exportok. Egy fájl alapértelmezetten egy edzés vagy meccs; a játékosonként eltérő GPS-indítási időket a rendszer egy csapateseménybe vonja össze. Egy fájl, több fájl vagy ZIP is használható.",
+        "Brainsports, PlayerTek, Polar Team Pro, Catapult és egyéb Excel/CSV exportok. Egy fájl alapértelmezetten egy edzés vagy meccs; többmunkalapos Excelben minden valódi adatlap külön esemény lehet. A játékosonként eltérő GPS-indítási időket a rendszer egy csapateseménybe vonja össze. Egy fájl, több fájl vagy ZIP is használható.",
         "gps",
     )
 
@@ -20265,9 +20283,12 @@ def _fpi_v413_assign_source_events(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame() if df is None else df.copy()
 
     out = df.copy()
-    start = pd.to_datetime(out.get("start_time", pd.Series(pd.NaT, index=out.index)), errors="coerce")
+    raw_start_v414 = _fpi_v414_series_alias(out, "start_time", "Start Time", "Kezdési idő", "Date", "Dátum", default=pd.NaT)
+    raw_type_v414 = _fpi_v414_series_alias(out, "session_type", "Session Type", "Típus", "Type", default="")
+    raw_name_v414 = _fpi_v414_series_alias(out, "session_name", "Session Name", "Szakasz neve", "Session", default="Session")
+    start = pd.to_datetime(raw_start_v414, errors="coerce")
     day = start.dt.strftime("%Y-%m-%d").fillna("")
-    kind = out.get("session_type", pd.Series("", index=out.index)).apply(_fpi_v200_session_kind).replace({"other": "training"})
+    kind = raw_type_v414.apply(_fpi_v200_session_kind).replace({"other": "training"})
     source = _fpi_v413_source_token(out)
     name = _fpi_v413_clean_event_name(out)
 
@@ -20316,8 +20337,9 @@ def _fpi_v413_assign_source_events(df: pd.DataFrame) -> pd.DataFrame:
         modes = clean.mode()
         return str(modes.iloc[0] if not modes.empty else clean.iloc[0])
 
-    out["_fpi_event_name"] = out.groupby("_fpi_event_id", dropna=False)["session_name"].transform(_mode_name)
-    return out
+    out["_fpi_event_raw_name_v414"] = raw_name_v414
+    out["_fpi_event_name"] = out.groupby("_fpi_event_id", dropna=False)["_fpi_event_raw_name_v414"].transform(_mode_name)
+    return out.drop(columns=["_fpi_event_raw_start_v414", "_fpi_event_raw_name_v414"], errors="ignore")
 
 
 def _fpi_v413_event_key(df: pd.DataFrame) -> pd.Series:
@@ -20642,6 +20664,449 @@ def _fpi_v204_session_summary(df: pd.DataFrame, week: str, blocked: set) -> pd.D
             row[label] = np.nan if col in blocked else (float(values.median()) if values.notna().any() else np.nan)
         rows.append(row)
     return pd.DataFrame(rows).sort_values("Dátum").reset_index(drop=True)
+
+
+
+# =========================================================
+# V414 - Többfájlos / többmunkalapos eseménymotor + HU számformátum
+# =========================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V414_MULTISOURCE_EVENT_FORMATTING_2026_08_05"
+FPI_FULL_PERIOD_KEY_V414 = "__FPI_FULL_PERIOD_V414__"
+
+
+def _fpi_v414_number(value: object, decimals: int = 0) -> str:
+    """Magyar táblázati számformátum: 10 000 és 53,2."""
+    try:
+        if value is None or pd.isna(value):
+            return "—"
+        number = float(value)
+        rendered = f"{number:,.{max(0, int(decimals))}f}"
+        return rendered.replace(",", " ").replace(".", ",")
+    except Exception:
+        return str(value) if value not in (None, "") else "—"
+
+
+def _fpi_v414_format_numeric_text(value: object) -> str:
+    """Szövegbe ágyazott egész számok ezres tagolása, mértékegység megtartásával."""
+    text_value = str(value or "")
+    def repl(match):
+        token = match.group(0)
+        try:
+            return f"{int(token):,}".replace(",", " ")
+        except Exception:
+            return token
+    return re.sub(r"(?<![\d.,])\d{4,}(?![\d.,])", repl, text_value)
+
+
+def _fpi_v414_sheet_event_token(df: pd.DataFrame) -> pd.Series:
+    """Valódi eseménylap neve; helper-, summary- és félidőlapok nem bontanak eseményt."""
+    sheet = _fpi_v413_nonempty_text_series(df, "_fpi_source_sheet")
+    normalized = sheet.map(_norm_mapping_text)
+    helper_pattern = (
+        r"^(data|adat|adatok|raw data|gps data|summary|overall|osszesites|összesítés|"
+        r"dashboard|targets?|settings?|config|metadata|main table|all)$|"
+        r"(?:^|\b)(?:first|second|1st|2nd|elso|első|masodik|második)[ _.-]*(?:half|felido|félidő)(?:\b|$)|"
+        r"(?:^|\b)(?:half|felido|félidő|warm.?up|bemelegites|bemelegítés|cool.?down|levezetes|levezetés)(?:\b|$)|"
+        r"^ts\b|^ti\b"
+    )
+    helper = normalized.str.contains(helper_pattern, regex=True, na=False)
+    return normalized.mask(helper, "").astype(str)
+
+
+def _fpi_v414_source_token(df: pd.DataFrame) -> pd.Series:
+    """Egyedi fizikai feltöltés azonosító; azonos fájlnév nem olvaszt össze eseményeket."""
+    token = pd.Series("", index=df.index, dtype="object")
+    # A read_many V414 minden top-level feltöltéshez tartalom-alapú upload ID-t ad.
+    # A source_key a biztos fallback, mert a csomagon belül mindig egyedivé válik.
+    for col in ["_fpi_source_upload_id", "_fpi_source_key", "_fpi_source_file", "_source_file"]:
+        candidate = _fpi_v413_nonempty_text_series(df, col)
+        token = token.where(token.astype(str).str.strip().ne(""), candidate)
+    return token.astype(str).str.strip()
+
+
+
+def _fpi_v414_series_alias(df: pd.DataFrame, *names: str, default: object = "") -> pd.Series:
+    for name in names:
+        if name in df.columns:
+            return df[name]
+    return pd.Series(default, index=df.index)
+
+
+def _fpi_v414_clean_name_series(df: pd.DataFrame) -> pd.Series:
+    raw = _fpi_v414_series_alias(df, "session_name", "Session Name", "Szakasz neve", "Session", default="")
+    name = raw.astype("string").fillna("").astype(str).str.strip().map(_fpi_v200_norm)
+    generic = name.str.contains(
+        r"^period\b|^split\b|^drill\b|^quarter\b|^half\b|"
+        r"első félidő|elso felido|második félidő|masodik felido|"
+        r"warm.?up|bemelegítés|bemelegites|cool.?down|levezetés|levezetes|"
+        r"^all$|^game$|^session$",
+        regex=True, na=False,
+    )
+    return name.mask(generic, "session").replace({"": "session"})
+
+def _fpi_v414_event_name_token(
+    df: pd.DataFrame,
+    source: pd.Series,
+    sheet: pd.Series,
+    day: pd.Series,
+    kind: pd.Series,
+) -> pd.Series:
+    """Azonos fájlon/lapon belüli több session cím alapján csak biztos esetben bont."""
+    clean_name = _fpi_v414_clean_name_series(df)
+    base = pd.DataFrame({
+        "source": source.astype(str),
+        "sheet": sheet.astype(str),
+        "day": day.astype(str),
+        "kind": kind.astype(str),
+        "name": clean_name.astype(str),
+        "player": _fpi_v414_series_alias(df, "player_name", "Player Name", "Játékos neve", default="").astype("string").fillna("").astype(str).str.strip(),
+    }, index=df.index)
+    token = pd.Series("", index=df.index, dtype="object")
+    group_cols = ["source", "sheet", "day", "kind"]
+    for _, group in base.groupby(group_cols, dropna=False, sort=False):
+        valid = group[group["name"].ne("session") & group["name"].ne("")].copy()
+        if valid.empty or valid["name"].nunique() <= 1:
+            continue
+        support = valid.groupby("name").agg(rows=("name", "size"), players=("player", "nunique"))
+        accepted = set(support[(support["rows"] >= 3) & (support["players"] >= 2)].index.astype(str))
+        if len(accepted) >= 2:
+            idx = group.index[group["name"].isin(accepted)]
+            token.loc[idx] = group.loc[idx, "name"].astype(str)
+    return token
+
+
+def _fpi_v413_source_token(df: pd.DataFrame) -> pd.Series:
+    return _fpi_v414_source_token(df)
+
+
+def _fpi_v413_assign_source_events(df: pd.DataFrame) -> pd.DataFrame:
+    """Providerfüggetlen eseményazonosítás fájl-, munkalap-, dátum- és session szinten."""
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+
+    out = df.copy()
+    raw_start_v414 = _fpi_v414_series_alias(out, "start_time", "Start Time", "Kezdési idő", "Date", "Dátum", default=pd.NaT)
+    raw_type_v414 = _fpi_v414_series_alias(out, "session_type", "Session Type", "Típus", "Type", default="")
+    raw_name_v414 = _fpi_v414_series_alias(out, "session_name", "Session Name", "Szakasz neve", "Session", default="Session")
+    start = pd.to_datetime(raw_start_v414, errors="coerce")
+    day = start.dt.strftime("%Y-%m-%d").fillna("")
+    kind = raw_type_v414.apply(_fpi_v200_session_kind).replace({"other": "training"})
+    source = _fpi_v414_source_token(out)
+    sheet = _fpi_v414_sheet_event_token(out)
+    name_token = _fpi_v414_event_name_token(out, source, sheet, day, kind)
+
+    # Egy fizikai feltöltésen belül a valódi adatlap külön esemény lehet.
+    # Helper-/félidőlapok üres sheet-tokenje ugyanahhoz az eseményhez csatlakozik.
+    group_keys = pd.DataFrame({
+        "source": source.where(source.ne(""), "__NO_SOURCE__"),
+        "sheet": sheet,
+        "day": day,
+        "kind": kind.astype(str),
+        "name": name_token,
+    }, index=out.index)
+    cluster = _fpi_v413_time_clusters(start, group_keys, FPI_EVENT_SPLIT_GAP_MIN_V413)
+
+    source_id = source.where(source.ne(""), "fallback")
+    fallback_name = _fpi_v414_clean_name_series(out).where(source.eq(""), "")
+    event_id = (
+        source_id.astype(str)
+        + "|sheet:" + sheet.astype(str)
+        + "|" + day.astype(str)
+        + "|" + kind.astype(str)
+        + "|name:" + name_token.where(name_token.ne(""), fallback_name).astype(str)
+        + "|c" + cluster.astype(str)
+    )
+    missing_day = day.eq("")
+    if missing_day.any():
+        event_id.loc[missing_day] = (
+            source_id.loc[missing_day].astype(str)
+            + "|sheet:" + sheet.loc[missing_day].astype(str)
+            + "|nodate|" + kind.loc[missing_day].astype(str)
+            + "|name:" + name_token.loc[missing_day].where(
+                name_token.loc[missing_day].ne(""), fallback_name.loc[missing_day]
+            ).astype(str)
+            + "|c" + cluster.loc[missing_day].astype(str)
+        )
+
+    out["_fpi_event_id"] = event_id.astype(str)
+    out["_fpi_event_cluster"] = cluster.astype(int)
+    out["_fpi_event_source"] = source.astype(str)
+    out["_fpi_event_sheet"] = sheet.astype(str)
+
+    out["_fpi_event_raw_start_v414"] = start
+    event_start = out.groupby("_fpi_event_id", dropna=False)["_fpi_event_raw_start_v414"].transform("min")
+    out["_fpi_event_start"] = pd.to_datetime(event_start, errors="coerce")
+
+    def _mode_name(series: pd.Series) -> str:
+        clean = series.astype("string").fillna("").astype(str).str.strip()
+        clean = clean[~clean.isin(["", "nan", "None"])]
+        if clean.empty:
+            return "Session"
+        modes = clean.mode()
+        return str(modes.iloc[0] if not modes.empty else clean.iloc[0])
+
+    out["_fpi_event_raw_name_v414"] = raw_name_v414
+    out["_fpi_event_name"] = out.groupby("_fpi_event_id", dropna=False)["_fpi_event_raw_name_v414"].transform(_mode_name)
+    return out.drop(columns=["_fpi_event_raw_start_v414", "_fpi_event_raw_name_v414"], errors="ignore")
+
+
+def _fpi_v413_event_key(df: pd.DataFrame) -> pd.Series:
+    if df is None or df.empty:
+        return pd.Series(dtype="object")
+    assigned = _fpi_v413_assign_source_events(df)
+    # A régi session_id csak akkor használható, ha már a V414 eseményazonosítóból készült.
+    if "session_id" in assigned.columns:
+        key = assigned["session_id"].astype("string").fillna("").astype(str).str.strip()
+        v414_key = assigned["_fpi_event_id"].astype(str)
+        legacy_like = ~key.str.contains(r"\|sheet:|^match\|", regex=True, na=False)
+        key = key.where(key.ne("") & ~legacy_like, v414_key)
+        return key
+    return assigned["_fpi_event_id"].astype(str)
+
+
+def _fpi_v201_training_session_key(df: pd.DataFrame) -> pd.Series:
+    return _fpi_v413_event_key(df)
+
+
+def _fpi_v202_event_key(df: pd.DataFrame) -> pd.Series:
+    if df is None or df.empty:
+        return pd.Series(dtype="object")
+    data = df.copy()
+    kind = data.get("session_type", pd.Series("", index=data.index)).apply(_fpi_v200_session_kind)
+    key = _fpi_v413_event_key(data)
+    if "match_event_id" in data.columns:
+        match_event = data["match_event_id"].astype("string").fillna("").astype(str).str.strip()
+        use_match = kind.eq("match") & match_event.ne("")
+        key = key.where(~use_match, "match|" + match_event)
+    return key.astype(str)
+
+
+# --- Többmunkalapos, providerfüggetlen import ---
+_fpi_v414_base_read_single = _fpi_read_single_gps_file_v143
+
+
+def _fpi_v414_prepare_one_sheet(
+    raw: pd.DataFrame,
+    sheet_name: str,
+    provider: str,
+    forced_type: Optional[str],
+    file_name: str,
+) -> pd.DataFrame:
+    try:
+        if provider == "PlayerTek":
+            frame = _fpi_prepare_playertek_v143(raw, forced_type, file_name)
+        elif provider == "Polar Team Pro":
+            frame = _fpi_prepare_polar_v143({sheet_name: raw}, forced_type, file_name)
+        elif provider == "Catapult":
+            frame = _fpi_prepare_catapult_vector_v160({sheet_name: raw}, forced_type, file_name)
+            if frame.empty:
+                frame = _fpi_prepare_catapult_v143({sheet_name: raw}, forced_type, file_name)
+        else:
+            frame, _mapping, missing = standardize_dataframe(raw)
+            if missing:
+                return pd.DataFrame()
+        if frame is None or frame.empty:
+            return pd.DataFrame()
+        frame = frame.copy()
+        frame["_fpi_source_sheet"] = str(sheet_name)
+        player_col = "Player Name" if "Player Name" in frame.columns else ("player_name" if "player_name" in frame.columns else None)
+        if player_col is not None:
+            players = frame[player_col].astype("string").fillna("").astype(str).str.strip()
+            if int(players[players.ne("")].nunique()) < 2 and len(frame) < 3:
+                return pd.DataFrame()
+        return frame
+    except Exception:
+        return pd.DataFrame()
+
+
+def _fpi_read_single_gps_file_v143(
+    uploaded_file,
+    forced_type: Optional[str] = None,
+    provider_override: str = "Automatikus felismerés",
+) -> Tuple[Dict[str, pd.DataFrame], List[Dict[str, object]]]:
+    name = str(getattr(uploaded_file, "name", "gps_file"))
+    data = _fpi_bytes_from_upload_v143(uploaded_file)
+    ext = Path(name).suffix.lower()
+
+    # ZIP: a belső forráskulcsot később a V414 source_key különíti el.
+    if ext == ".zip":
+        sheets, report = _fpi_v414_base_read_single(uploaded_file, forced_type, provider_override)
+        outer_hash = hashlib.md5(data).hexdigest()[:16] if data else "empty"
+        for key, frame in list(sheets.items()):
+            enriched = frame.copy()
+            enriched["_fpi_source_upload_id"] = f"zip:{outer_hash}:{key}"
+            sheets[key] = enriched
+        return sheets, report
+
+    # Többmunkalapos Excel: minden valódi, standardizálható eseménylap külön forrás.
+    if ext in {".xlsx", ".xlsm", ".xls"} and data:
+        try:
+            raw_sheets = _fpi_read_excel_bytes_v165(data, name, header=None)
+            provider = provider_override if provider_override != "Automatikus felismerés" else _fpi_detect_provider_v143(raw_sheets, name)
+            if len(raw_sheets) > 1 and provider != "Brainsports":
+                prepared_parts: Dict[str, pd.DataFrame] = {}
+                report_rows: List[Dict[str, object]] = []
+                for sheet_name, raw in raw_sheets.items():
+                    if raw is None or raw.empty or sheet_is_likely_helper(sheet_name, raw):
+                        continue
+                    frame = _fpi_v414_prepare_one_sheet(raw, str(sheet_name), provider, forced_type, name)
+                    if frame.empty:
+                        continue
+                    frame, post_report = _fpi_v200_universal_postprocess(
+                        frame,
+                        provider=provider,
+                        file_name=f"{name} / {sheet_name}",
+                    )
+                    frame["_fpi_source_sheet"] = str(sheet_name)
+                    key = f"{Path(name).stem}__{sheet_name}__{post_report.get('provider', provider)}"
+                    prepared_parts[key] = frame
+                    row = _fpi_v200_report_row(f"{name} / {sheet_name}", post_report, status="OK")
+                    row["Megjegyzés"] = str(row.get("Megjegyzés", "")) + " | V414: külön eseménylap"
+                    report_rows.append(row)
+                if len(prepared_parts) >= 2:
+                    return prepared_parts, report_rows
+        except Exception:
+            pass
+
+    sheets, report = _fpi_v414_base_read_single(uploaded_file, forced_type, provider_override)
+    # Egylapos / generic eredménynél is őrizzük meg a munkalap nevét, ha egyértelmű.
+    if ext in {".xlsx", ".xlsm", ".xls"} and data and sheets:
+        try:
+            raw_sheets = _fpi_read_excel_bytes_v165(data, name, header=None)
+            raw_names = list(raw_sheets.keys())
+            for key, frame in list(sheets.items()):
+                if "_fpi_source_sheet" in frame.columns and frame["_fpi_source_sheet"].astype(str).str.strip().ne("").any():
+                    continue
+                matched = next((sheet for sheet in raw_names if _norm_mapping_text(str(sheet)) in _norm_mapping_text(str(key))), None)
+                if matched is None and len(raw_names) == 1:
+                    matched = raw_names[0]
+                if matched is not None:
+                    enriched = frame.copy()
+                    enriched["_fpi_source_sheet"] = str(matched)
+                    sheets[key] = enriched
+        except Exception:
+            pass
+    return sheets, report
+
+
+def _fpi_read_many_gps_files_v143(
+    training_files: Optional[List[object]],
+    match_files: Optional[List[object]],
+    mixed_files: Optional[List[object]],
+    provider_override: str = "Automatikus felismerés",
+) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame, str]:
+    all_sheets: Dict[str, pd.DataFrame] = {}
+    rows: List[Dict[str, object]] = []
+    signature_parts: List[str] = []
+    groups = [
+        ("Edzés", training_files or []),
+        ("Meccs", match_files or []),
+        (None, mixed_files or []),
+    ]
+    upload_index = 0
+    for forced_type, files in groups:
+        for upload in files:
+            upload_index += 1
+            name = str(getattr(upload, "name", "gps_file"))
+            data = _fpi_bytes_from_upload_v143(upload)
+            content_hash = hashlib.md5(data).hexdigest() if data else f"empty-{upload_index}"
+            upload_id = f"{forced_type or 'Vegyes'}:{upload_index}:{content_hash[:16]}"
+            signature_parts.append(f"{forced_type}:{name}:{len(data)}:{content_hash}")
+            sheets, report = _fpi_read_single_gps_file_v143(
+                upload,
+                forced_type=forced_type,
+                provider_override=provider_override,
+            )
+            for key, frame in sheets.items():
+                unique = key
+                counter = 2
+                while unique in all_sheets:
+                    unique = f"{key}_{counter}"
+                    counter += 1
+                enriched = frame.copy()
+                # ZIP belső azonosítóját megtartjuk; normál fájlnál fizikai upload ID.
+                if "_fpi_source_upload_id" not in enriched.columns or not enriched["_fpi_source_upload_id"].astype(str).str.strip().ne("").any():
+                    enriched["_fpi_source_upload_id"] = upload_id
+                enriched["_fpi_source_file"] = name
+                enriched["_fpi_source_key"] = unique
+                enriched["_fpi_upload_group"] = forced_type or "Vegyes"
+                all_sheets[unique] = enriched
+            for row in report:
+                row["Import típus"] = forced_type or "Vegyes / fájlból"
+                rows.append(row)
+
+    if all_sheets:
+        combined_parts = []
+        for key, frame in all_sheets.items():
+            part = frame.copy()
+            part["_fpi_v407_frame_key"] = key
+            part["_fpi_v407_row_order"] = np.arange(len(part))
+            combined_parts.append(part)
+        combined = pd.concat(combined_parts, ignore_index=True, sort=False)
+        combined = _fpi_v407_apply_filename_md_inference(combined)
+        rebuilt = {}
+        for key, group in combined.groupby("_fpi_v407_frame_key", sort=False):
+            rebuilt[str(key)] = group.sort_values("_fpi_v407_row_order").drop(
+                columns=["_fpi_v407_frame_key", "_fpi_v407_row_order"], errors="ignore"
+            ).reset_index(drop=True)
+        all_sheets = rebuilt
+    signature = hashlib.md5("|".join(signature_parts).encode("utf-8")).hexdigest()
+    return all_sheets, pd.DataFrame(rows), signature
+
+
+# A forrásmetaadatokat a Smart Mapper / standardizálás után is megőrizzük.
+_fpi_v414_base_standardize_dataframe = standardize_dataframe
+
+def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Optional[str]], List[str]]:
+    out, mapping, missing = _fpi_v414_base_standardize_dataframe(raw)
+    if out is None or raw is None or raw.empty:
+        return out, mapping, missing
+    meta_cols = [
+        "_fpi_source_upload_id", "_fpi_source_file", "_fpi_source_key",
+        "_fpi_source_sheet", "_fpi_upload_group",
+    ]
+    for col in meta_cols:
+        if col not in raw.columns or col in out.columns:
+            continue
+        source = raw[col]
+        try:
+            if len(source) == len(out):
+                out[col] = source.reset_index(drop=True).to_numpy()
+            elif set(out.index).issubset(set(source.index)):
+                out[col] = source.reindex(out.index).to_numpy()
+        except Exception:
+            pass
+    return out, mapping, missing
+
+
+# A V413 master wrapper után újraszámoljuk a V414 esemény- és forrásszámokat.
+_fpi_v414_base_master_dataset = _fpi_v300_master_dataset
+
+
+def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    out, report = _fpi_v414_base_master_dataset(data)
+    if out is None or out.empty:
+        return out, report
+    out = _fpi_v413_assign_source_events(out)
+    out["session_id"] = out["_fpi_event_id"].astype(str)
+    if "match_event_id" in out.columns:
+        match_id = out["match_event_id"].astype("string").fillna("").astype(str).str.strip()
+        match_mask = out.get("session_type", pd.Series("", index=out.index)).astype(str).eq("Meccs") & match_id.ne("")
+        out.loc[match_mask, "session_id"] = "match|" + match_id.loc[match_mask]
+    out = _fpi_v201_add_training_attendance(out, recovery_log=[])
+    report = dict(report or {})
+    event_key = _fpi_v202_event_key(out)
+    kinds = out.get("session_type", pd.Series("", index=out.index)).apply(_fpi_v200_session_kind)
+    report["sessions"] = int(event_key.dropna().astype(str).nunique())
+    report["training_sessions"] = int(event_key[kinds.eq("training")].dropna().astype(str).nunique())
+    report["analysis_match_sessions"] = int(event_key[kinds.eq("match")].dropna().astype(str).nunique())
+    source_uploads = _fpi_v413_nonempty_text_series(out, "_fpi_source_upload_id")
+    source_keys = _fpi_v413_nonempty_text_series(out, "_fpi_source_key")
+    report["gps_source_files"] = int(source_uploads[source_uploads.ne("")].nunique()) or int(source_keys[source_keys.ne("")].nunique())
+    report["event_source_files_v413"] = report["gps_source_files"]
+    report["event_engine_v413"] = "V414: upload + valódi munkalap + dátum/típus + 120 perces időklaszter"
+    out.attrs["fpi_v300_master_report"] = report
+    return out, report
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
