@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V407_COACH_CONTEXT_2026_07_26"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V411_ADAPTIVE_SCOPE_BENCHMARKS_2026_08_05"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -5327,19 +5327,31 @@ def calculate_readiness_score(df: pd.DataFrame, selected_week: str, playstyle: s
         0, min(100, attendance_component)
     )
 
-    # 1. Load trend komponens
+    # 1. Load idősoros komponens – trend csak legalább 4 teljes hétből.
     load_change = row.get("training_load_change", np.nan)
+    trend_status_v411 = (
+        _fpi_v411_trend_status(df, selected_week)
+        if "_fpi_v411_trend_status" in globals()
+        else {"available": False, "count": 0, "label": "nincs elég teljes hét"}
+    )
     if incomplete_week:
         components["load_trend"] = 55
         if pd.notna(load_change):
             reasons.append("A heti terhelésváltozás még nem minősített: a kiválasztott időszak nem teljes mikrociklus.")
+    elif not trend_status_v411.get("available"):
+        # 2–3 hétből lehet összehasonlítást mutatni, de az nem trend és nem módosítja a Readinesst.
+        components["load_trend"] = 60 if int(trend_status_v411.get("count", 0) or 0) >= 2 else 55
+        reasons.append(
+            f"Terhelési trend nem készült: {trend_status_v411.get('label', 'legalább 4 teljes hét szükséges')}. "
+            "Az elérhető hetek csak leíró összehasonlításként jelennek meg."
+        )
     elif pd.notna(load_change):
         if load_change > 0.25:
             score -= 12
-            reasons.append("A heti terhelés jelentősen nőtt az előző héthez képest.")
+            reasons.append("A legalább négy teljes hetes idősorban a terhelés jelentősen nőtt az előző teljes héthez képest.")
         elif load_change < -0.30:
             score -= 6
-            reasons.append("A heti terhelés jelentősen visszaesett, ami alulterheltséget is jelezhet.")
+            reasons.append("A legalább négy teljes hetes idősorban a terhelés jelentősen visszaesett, ami alulterheltséget is jelezhet.")
         else:
             score += 4
         components["load_trend"] = max(0, min(100, 80 - abs(load_change) * 60))
@@ -8129,7 +8141,8 @@ _FPI_V406_HALFTIME_SUM_COLUMNS = [
     "dec_low", "dec_mid", "dec_high", "speed_zone_3", "speed_zone_4",
     "speed_zone_5", "muscle_load",
 ]
-_FPI_V406_HALFTIME_AVG_COLUMNS = ["max_speed"]
+_FPI_V406_HALFTIME_AVG_COLUMNS = []
+_FPI_V411_HALFTIME_MAX_COLUMNS = ["max_speed"]
 
 
 def _fpi_v406_half_number(value: object) -> Optional[int]:
@@ -8234,6 +8247,10 @@ def _fpi_v406_merge_halftime_matches(df: pd.DataFrame) -> Tuple[pd.DataFrame, Di
             if col in group.columns:
                 nums = pd.to_numeric(group[col], errors="coerce")
                 row[col] = nums.mean() if nums.notna().any() else np.nan
+        for col in _FPI_V411_HALFTIME_MAX_COLUMNS:
+            if col in group.columns:
+                nums = pd.to_numeric(group[col], errors="coerce")
+                row[col] = nums.max() if nums.notna().any() else np.nan
 
         duration = pd.to_numeric(pd.Series([row.get("duration_min")]), errors="coerce").iloc[0]
         distance = pd.to_numeric(pd.Series([row.get("total_distance")]), errors="coerce").iloc[0]
@@ -8381,13 +8398,13 @@ def _fpi_v300_match_reference(master: pd.DataFrame) -> Dict[str, object]:
             "acc_count", "dec_count", "acc_high", "dec_high"
         ] if c in matches.columns
     ]
-    avg_metrics = [c for c in ["max_speed"] if c in matches.columns]
-    metrics = sum_metrics + avg_metrics
+    max_metrics = [c for c in ["max_speed"] if c in matches.columns]
+    metrics = sum_metrics + max_metrics
     for c in metrics:
         matches[c] = pd.to_numeric(matches[c], errors="coerce")
 
     agg = {c: "sum" for c in sum_metrics}
-    agg.update({c: "mean" for c in avg_metrics})
+    agg.update({c: "max" for c in max_metrics})
     player_match = matches.groupby(
         ["match_event_id", "player_name"], dropna=False
     ).agg(agg).reset_index()
@@ -8572,6 +8589,42 @@ def _fpi_v302_coach_actions(benchmark_df:pd.DataFrame)->pd.DataFrame:
             out.append({"Prioritás":"Közepes","Fejlesztendő terület":area,"Hiány / többlet":f"+{actual-hi:.0f} {unit}","Javasolt beavatkozás":"Csökkentett volumen, megtartott végrehajtási intenzitás.","Miért?":"A heti érték a célzóna felső határa fölé került; további volumen helyett frissítés indokolt."})
     return pd.DataFrame(out).head(5)
 
+def _fpi_v411_single_session_actions(benchmark_df: pd.DataFrame) -> pd.DataFrame:
+    """Egyetlen edzéshez sessioncélzóna-alapú olvasat; nem számol heti hiányt."""
+    if benchmark_df is None or benchmark_df.empty:
+        return pd.DataFrame()
+    source = benchmark_df[benchmark_df["Szint"].astype(str).eq("Egy edzés mediánja")].copy()
+    rows = []
+    for _, r in source.iterrows():
+        metric = str(r.get("Mutató", ""))
+        actual = pd.to_numeric(pd.Series([r.get("Tényleges érték")]), errors="coerce").iloc[0]
+        nums = re.findall(r"\d+(?:[.,]\d+)?", str(r.get("Benchmark érték", "")))
+        if pd.isna(actual) or len(nums) < 2:
+            continue
+        lo, hi = float(nums[0].replace(",", ".")), float(nums[1].replace(",", "."))
+        unit = str(r.get("Egység", ""))
+        if actual < lo:
+            state = "Alacsony sessiondózis"
+            suggestion = "Az edzés jellegével együtt értékeld; önmagában nem jelent heti alulterhelést. Ha ez volt a hét fő ingere, a következő megfelelő napon célzott kiegészítés mérlegelhető."
+            why = f"Az adott edzés {metric.lower()} értéke az egyedzéses célzóna alatt volt, de a rendszer ebből nem számol heti hiányt."
+        elif actual > hi:
+            state = "Magas sessiondózis"
+            suggestion = "A következő nap terhelését és a játékosok egyéni reakcióját kontrolláld; újabb azonos inger csak indokolt esetben kerüljön be."
+            why = f"Az adott edzés {metric.lower()} értéke az egyedzéses célzóna fölé került."
+        else:
+            state = "Sessioncélzónában"
+            suggestion = "Az inger az adott session szintjén megfelelő; a heti következtetéshez további napok adata szükséges."
+            why = f"Az adott edzés {metric.lower()} értéke az egyedzéses célzónában volt."
+        rows.append({
+            "Prioritás": "Közepes" if state != "Sessioncélzónában" else "Információ",
+            "Fejlesztendő terület": metric,
+            "Hiány / többlet": state,
+            "Javasolt beavatkozás": suggestion,
+            "Miért?": why + f" Tényleges érték: {actual:.0f} {unit}; sessioncél: {lo:.0f}-{hi:.0f} {unit}."
+        })
+    return pd.DataFrame(rows).head(5)
+
+
 def _fpi_v300_training_match_ratios(
     analysis_df: pd.DataFrame,
     master_df: pd.DataFrame,
@@ -8614,6 +8667,9 @@ def _fpi_v300_training_match_ratios(
         if match_value in {None,0} or pd.isna(match_value): continue
         _,_,wlo,whi,alo,ahi,profile = _fpi_composition_reference_ranges_v116(master_df, selected_week, col)
         context_v302=_fpi_v302_week_context_factor(training,selected_week)
+        scope_meta_v411 = _fpi_v411_scope_meta_for_week(selected_week) if "_fpi_v411_scope_meta_for_week" in globals() else {}
+        if scope_meta_v411.get("scope_type") == "single_session":
+            context_v302 = {"completion":1.0,"phase_factor":1.0,"label":"egyetlen esemény; csak sessioncélzóna","week_type":"session","partial":True}
         wlo=wlo*context_v302["completion"]*context_v302["phase_factor"]; whi=whi*context_v302["completion"]*context_v302["phase_factor"]
         alo=alo*context_v302["phase_factor"]; ahi=ahi*context_v302["phase_factor"]
         profile=f"{profile} | {context_v302['week_type']} | {context_v302['label']}"
@@ -11104,7 +11160,7 @@ def _build_demo_tactical_context() -> Dict[str, object]:
 # =========================================================
 
 FPI_REFERENCE_AGE_OPTIONS_V112 = ["Felnőtt", "U21", "U19", "U17", "U16", "U15", "U14", "U13"]
-FPI_REFERENCE_LEVEL_OPTIONS_V112 = ["NB I", "NB II", "NB III", "Akadémia", "Regionális", "Megye I", "Egyéb"]
+FPI_REFERENCE_LEVEL_OPTIONS_V112 = ["NB I", "NB II", "NB III", "Román SuperLiga (előzetes)", "Román Liga II (előzetes)", "Akadémia", "Regionális", "Megye I", "Egyéb"]
 FPI_REFERENCE_POSITION_OPTIONS_V112 = ["Kapus", "Középhátvéd", "Szélső hátvéd", "Védekező középpályás", "Középpályás", "Támadó középpályás", "Szélső", "Csatár"]
 
 # V303 – gyors benchmarkprofilok. Az „Egyéni beállítás” mellett továbbra is
@@ -11114,6 +11170,8 @@ FPI_BENCHMARK_PRESETS_V303 = {
     "Felnőtt – NB I": ("Felnőtt", "NB I"),
     "Felnőtt – NB II": ("Felnőtt", "NB II"),
     "Felnőtt – NB III": ("Felnőtt", "NB III"),
+    "Felnőtt – Román SuperLiga (előzetes)": ("Felnőtt", "Román SuperLiga (előzetes)"),
+    "Felnőtt – Román Liga II (előzetes)": ("Felnőtt", "Román Liga II (előzetes)"),
     "Felnőtt – Regionális": ("Felnőtt", "Regionális"),
     "Felnőtt – Megye I": ("Felnőtt", "Megye I"),
     "U21 – NB I/NB II környezet": ("U21", "NB II"),
@@ -11169,8 +11227,9 @@ FPI_AGE_FACTOR_V112 = {
     "U16": 0.80, "U15": 0.73, "U14": 0.66, "U13": 0.58,
 }
 FPI_LEVEL_FACTOR_V112 = {
-    "NB I": 1.08, "NB II": 1.00, "NB III": 0.92, "Akadémia": 0.94,
-    "Regionális": 0.84, "Megye I": 0.78, "Egyéb": 0.82,
+    "NB I": 1.08, "NB II": 1.00, "NB III": 0.92,
+    "Román SuperLiga (előzetes)": 1.08, "Román Liga II (előzetes)": 1.00,
+    "Akadémia": 0.94, "Regionális": 0.84, "Megye I": 0.78, "Egyéb": 0.82,
 }
 FPI_POSITION_FACTORS_V112 = {
     "Kapus": {"total_distance": .62, "training_load": .65, "hsr_distance": .35, "sprint_distance": .25, "sprints": .35, "high_efforts": .55},
@@ -11183,15 +11242,15 @@ FPI_POSITION_FACTORS_V112 = {
     "Csatár": {"total_distance": .96, "training_load": .98, "hsr_distance": 1.08, "sprint_distance": 1.18, "sprints": 1.15, "high_efforts": 1.05},
 }
 FPI_PLAYMODEL_FACTORS_V112 = {
-    "Dominancia": {"total_distance": 1.03, "training_load": .98, "hsr_distance": .92, "sprint_distance": .88, "sprints": .90, "high_efforts": .94},
-    "Magas presszing": {"total_distance": 1.04, "training_load": 1.08, "hsr_distance": 1.10, "sprint_distance": 1.08, "sprints": 1.12, "high_efforts": 1.22},
-    "Átmeneti játék": {"total_distance": 1.00, "training_load": 1.03, "hsr_distance": 1.18, "sprint_distance": 1.22, "sprints": 1.18, "high_efforts": 1.10},
-    "Direkt játék": {"total_distance": .98, "training_load": 1.02, "hsr_distance": 1.16, "sprint_distance": 1.18, "sprints": 1.12, "high_efforts": 1.02},
+    "Dominancia": {"total_distance": 1.02, "training_load": .98, "hsr_distance": .96, "sprint_distance": .94, "sprints": .95, "high_efforts": .97},
+    "Magas presszing": {"total_distance": 1.03, "training_load": 1.05, "hsr_distance": 1.07, "sprint_distance": 1.06, "sprints": 1.08, "high_efforts": 1.10},
+    "Átmeneti játék": {"total_distance": 1.00, "training_load": 1.03, "hsr_distance": 1.08, "sprint_distance": 1.10, "sprints": 1.08, "high_efforts": 1.06},
+    "Direkt játék": {"total_distance": .99, "training_load": 1.02, "hsr_distance": 1.07, "sprint_distance": 1.08, "sprints": 1.06, "high_efforts": 1.03},
     "Kiegyensúlyozott": {"total_distance": 1.00, "training_load": 1.00, "hsr_distance": 1.00, "sprint_distance": 1.00, "sprints": 1.00, "high_efforts": 1.00},
-    "Pressing": {"total_distance": 1.04, "training_load": 1.08, "hsr_distance": 1.10, "sprint_distance": 1.08, "sprints": 1.12, "high_efforts": 1.22},
-    "Transition": {"total_distance": 1.00, "training_load": 1.03, "hsr_distance": 1.18, "sprint_distance": 1.22, "sprints": 1.18, "high_efforts": 1.10},
-    "Possession": {"total_distance": 1.03, "training_load": .98, "hsr_distance": .92, "sprint_distance": .88, "sprints": .90, "high_efforts": .94},
-    "Low Block": {"total_distance": .92, "training_load": .94, "hsr_distance": .88, "sprint_distance": .92, "sprints": .92, "high_efforts": .96},
+    "Pressing": {"total_distance": 1.03, "training_load": 1.05, "hsr_distance": 1.07, "sprint_distance": 1.06, "sprints": 1.08, "high_efforts": 1.10},
+    "Transition": {"total_distance": 1.00, "training_load": 1.03, "hsr_distance": 1.08, "sprint_distance": 1.10, "sprints": 1.08, "high_efforts": 1.06},
+    "Possession": {"total_distance": 1.02, "training_load": .98, "hsr_distance": .96, "sprint_distance": .94, "sprints": .95, "high_efforts": .97},
+    "Low Block": {"total_distance": .97, "training_load": .98, "hsr_distance": .95, "sprint_distance": .96, "sprints": .96, "high_efforts": .98},
 }
 
 
@@ -12097,11 +12156,10 @@ def build_fpi_gps_only_pdf_bytes(
         report_data_v205, master_report_period_v300 = _fpi_v300_master_dataset(report_data_v205)
         period_label_v205 = _fpi_v205_period_label(report_data_v205)
         report_data_v205 = report_data_v205.copy()
-        # Teljes időszakhoz egy ideiglenes, közös riportablak készül,
-        # miközben az eredeti ISO-hetek megmaradnak a master metaadatban.
-        report_data_v205["_fpi_original_week_v300"] = report_data_v205["week"]
-        report_data_v205["week"] = "__FULL_PERIOD__"
-        selected_week = "__FULL_PERIOD__"
+        # A teljes időszakos riport több valódi, lezárt hetet tart meg.
+        # A döntési ablak a legutóbbi teljes hét; a trend az összes korábbi teljes hétből készül.
+        complete_weeks_v411 = _fpi_v411_complete_week_codes(report_data_v205)
+        selected_week = complete_weeks_v411[-1] if complete_weeks_v411 else _fpi_latest_week(report_data_v205)
 
     ctx=_fpi_report_context(report_data_v205,selected_week,playstyle)
     if ctx.get("error"): return None
@@ -12111,8 +12169,12 @@ def build_fpi_gps_only_pdf_bytes(
     ratios_v300 = ctx.get("training_match_ratios_v300", pd.DataFrame())
     microcycle_v300 = ctx.get("microcycle_plan_v300", pd.DataFrame())
     readiness_breakdown_v302=ctx.get("readiness_breakdown_v302",pd.DataFrame())
+    readiness_status_v411=str(ctx.get("readiness_status_v411","full"))
+    trend_status_v411=ctx.get("trend_status_v411",{}) or {}
     coach_actions_v302=_fpi_v302_coach_actions(ratios_v300)
     mode=_fpi_v204_context(df,week); quality=_fpi_v204_quality_gate(df,week); blocked=set(quality.get("blocked",set()))
+    if mode.get("code") == "single_session":
+        coach_actions_v302 = _fpi_v411_single_session_actions(ratios_v300)
     sessions=_fpi_v204_session_summary(df,week,blocked); players=_fpi_v204_player_period(df,week,blocked)
     aligned=_fpi_v204_aligned_comparison(df,week,blocked)
     recs=_fpi_v204_recommendations(mode,sessions,quality,players)
@@ -12135,7 +12197,7 @@ def build_fpi_gps_only_pdf_bytes(
         t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor(bg)),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),font_bold),('GRID',(0,0),(-1,-1),.25,colors.HexColor('#CBD5E1')),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),6),('RIGHTPADDING',(0,0),(-1,-1),6),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#F8FAFC')])]))
         return t
     report_title = ('Teljes időszakos GPS trendriport' if period_mode_v205 else {'single_session':'Egyszeri edzés – GPS-pillanatkép','training_block':'Edzésblokk-elemzés','week_in_progress':'Folyamatban lévő hét – adatok eddig','preseason_block':'Felkészülési terhelési blokk','full_microcycle':'Teljes mikrociklus – GPS-riport','match_only':'Meccsterhelési riport'}.get(mode.get('code'),'GPS-only teljesítményriport'))
-    display_period_v205 = period_label_v205 if period_mode_v205 else week
+    display_period_v205 = period_label_v205 if period_mode_v205 else format_week_label(week)
     period_scope_note_v303 = (
         f"Teljes adatbázis: {period_label_v205}; aktuális döntési ablak: {week}."
         if period_mode_v205 else ""
@@ -12156,11 +12218,11 @@ def build_fpi_gps_only_pdf_bytes(
     real_matches_v300 = int(master_report_v300.get("match_events", 0) or 0)
     kpis=[
         [P('MÓD',head),P('AKTUÁLIS SESSION',head),P('ADATBÁZIS SESSION',head),P('MECCSESEMÉNY',head),P('READINESS',head)],
-        [P(mode.get('label',''),body),P(str(current_sessions_v301),body),P(str(database_sessions_v301),body),P(str(real_matches_v300),body),P('előzetes' if mode.get('code')!='full_microcycle' else f'{readiness}/100',body)]
+        [P(mode.get('label',''),body),P(str(current_sessions_v301),body),P(str(database_sessions_v301),body),P(str(real_matches_v300),body),P('nem számolható' if readiness_status_v411=='not_available' else ('előzetes' if readiness_status_v411=='preliminary' else f'{readiness}/100'),body)]
     ]
     story += [tbl(kpis,[6.5*cm,4.6*cm,4.8*cm,4.2*cm,7.6*cm],'#0F766E'),Spacer(1,.2*cm),section('1. Vezetői konklúziók')]
     story.append(tbl([[P('#',head),P('Konklúzió',head)]]+[[P(str(i),small),P(c,small)] for i,c in enumerate(conclusions,1)],[1.0*cm,26.7*cm]))
-    if readiness_breakdown_v302 is not None and not readiness_breakdown_v302.empty:
+    if readiness_status_v411 != 'not_available' and readiness_breakdown_v302 is not None and not readiness_breakdown_v302.empty:
         story += [Spacer(1,.18*cm),section('Readiness - mi alakította a pontszámot?','#ECFDF5')]
         rb=[[P(x,head) for x in ['Komponens','Pont','Státusz','Magyarázat']]]
         for _,r in readiness_breakdown_v302.iterrows(): rb.append([P(str(r.get('Komponens','')),small),P(str(r.get('Pont','')),small),P(str(r.get('Státusz','')),small),P(str(r.get('Magyarázat','')),small)])
@@ -12178,8 +12240,10 @@ def build_fpi_gps_only_pdf_bytes(
         story.append(P('Az értékek sessionönként a játékosok mediánját mutatják, nem a teljes keret összeadott távolságát. Így különböző létszámú edzések is összevethetők.',small))
     if ratios_v300 is not None and not ratios_v300.empty:
         story += [PageBreak(),section('3. Edzés–meccs referencia','#FEF3C7')]
-        ratio_rows=[[P(x,head) for x in ['Mutató','Időszak','Tényleges','Meccsref.','Tényleges %','Cél %','Heti célérték','Értékelés']]]
-        weekly_ratios_v304 = ratios_v300[ratios_v300['Szint'].astype(str).eq('Heti edzésösszeg')].copy()
+        ratio_target_header_v411 = 'Session célérték' if mode.get('code') == 'single_session' else 'Heti célérték'
+        ratio_rows=[[P(x,head) for x in ['Mutató','Időszak','Tényleges','Meccsref.','Tényleges %','Cél %',ratio_target_header_v411,'Értékelés']]]
+        ratio_scope_v411 = 'Egy edzés mediánja' if mode.get('code') == 'single_session' else 'Heti edzésösszeg'
+        weekly_ratios_v304 = ratios_v300[ratios_v300['Szint'].astype(str).eq(ratio_scope_v411)].copy()
         for _,r in weekly_ratios_v304.iterrows():
             actual=r.get('Tényleges érték'); matchref=r.get('Meccsreferencia'); pctv=r.get('Tényleges %'); unit=str(r.get('Egység',''))
             ratio_rows.append([
@@ -12197,7 +12261,8 @@ def build_fpi_gps_only_pdf_bytes(
             f"a félidők játékosonként összeadódnak. Benchmarkprofil: {profile_text}.",small)]
         story += [Spacer(1,.10*cm),P('<b>Mutatók:</b> HSR = nagysebességű futás a beállított HSR-küszöb felett; Sprint = sprintküszöb feletti futás; High Efforts = nagy intenzitású, robbanékony akciók összesített mutatója (külön mező hiányában gyorsulás/lassítás alapú becslés); Load = a szolgáltató vagy az import által adott összterhelési pont.',small)]
         if coach_actions_v302 is not None and not coach_actions_v302.empty:
-            story += [Spacer(1,.18*cm),section('Konkrét edzői beavatkozás','#DCFCE7')]
+            action_title_v411 = 'Sessionolvasat és következő lépés' if mode.get('code') == 'single_session' else 'Konkrét edzői beavatkozás'
+            story += [Spacer(1,.18*cm),section(action_title_v411,'#DCFCE7')]
             ca=[[P(x,head) for x in ['Prioritás','Fejlesztendő terület','Hiány / többlet','Javasolt beavatkozás','Miért?']]]
             for _,r in coach_actions_v302.iterrows(): ca.append([P(str(r.get('Prioritás','')),small),P(str(r.get('Fejlesztendő terület','')),small),P(str(r.get('Hiány / többlet','')),small),P(str(r.get('Javasolt beavatkozás','')),small),P(str(r.get('Miért?','')),small)])
             story.append(tbl(ca,[2.7*cm,4.5*cm,3.8*cm,7.6*cm,9.1*cm],'#166534'))
@@ -12217,14 +12282,18 @@ def build_fpi_gps_only_pdf_bytes(
         story.append(tbl(md_rows,[1.7*cm,3.6*cm,4.2*cm,3.7*cm,7.2*cm,7.3*cm],'#312E81'))
         story += [Spacer(1,.10*cm),P('A terv a mezőnyjátékosok előző legfeljebb négy hetes mediánját, közvetlenül előző hetét, az aktuális load/HSR/sprint arányokat, a taperinget és a játékoskockázatot használja. Előzmény hiányában ezt a Tervezési alap oszlop külön jelzi.',small)]
 
-    story += [PageBreak(),section('5. Időarányos trend – azonos hétközi pontig','#ECFDF5')]
-    if aligned.empty: story.append(P('Nincs elegendő korábbi dátumozott adat az időarányos összevetéshez.'))
+    trend_title_v411 = ('5. Időarányos trend – legalább 4 teljes hét' if trend_status_v411.get('available') else ('5. Időarányos összehasonlítás – még nem trend' if int(trend_status_v411.get('count',0) or 0) >= 2 else '5. Idősoros értékelés'))
+    story += [PageBreak(),section(trend_title_v411,'#ECFDF5')]
+    if aligned.empty:
+        story.append(P(str(trend_status_v411.get('label','Nincs elegendő korábbi, teljes hét az összevetéshez.'))))
     else:
-        story += [_fpi_v304_trend_charts(aligned.tail(6)), Spacer(1,.10*cm)]
+        if trend_status_v411.get('available'):
+            story += [_fpi_v304_trend_charts(aligned.tail(6)), Spacer(1,.10*cm)]
         rows=[[P(c,head) for c in aligned.columns]]
         for _,r in aligned.tail(6).iterrows(): rows.append([P('—' if pd.isna(r[c]) else (f'{float(r[c]):.0f}' if isinstance(r[c],(int,float,np.integer,np.floating)) else str(r[c])),small) for c in aligned.columns])
         story.append(tbl(rows,[3.2*cm,4.3*cm,5.0*cm,4.5*cm,4.5*cm,4.5*cm],'#047857'))
-        story.append(Spacer(1,.15*cm)); story.append(P('Folyamatban lévő hétnél csak azonos hétközi pontig (például szerda estig) gyűlt korábbi terheléshez hasonlítunk, nem teljes hetekhez.',small))
+        note_v411 = ('A trend csak legalább négy teljes hétből készül.' if trend_status_v411.get('available') else 'A rendelkezésre álló 2–3 teljes hét csak összehasonlítás; a riport ezt nem nevezi trendnek.')
+        story.append(Spacer(1,.15*cm)); story.append(P(note_v411 + ' Folyamatban lévő hétnél csak azonos hétközi pontig gyűlt korábbi terheléshez hasonlítunk.',small))
     story += [PageBreak(),section('6. Játékosonkénti kumulált terhelés és eltérések','#E0F2FE')]
     if players.empty: story.append(P('Nincs játékosonként aggregálható mutató.'))
     else:
@@ -14733,73 +14802,183 @@ def render_fpi_clean_workspace_v101() -> None:
         f"ISO-hetek: {', '.join(v300_summary.get('weeks', [])) or 'n.a.'} | "
         f"Dátummentés: {v300_summary.get('date_changed_rows',0)} javított sor"
     )
-    # 2. Heti kontextus és saját csapat heti profil
-    _fpi_section_header_v113("2. Heti kontextus", "Csak a legfontosabb kérdések: ellenfél, meccsnap, referencia, heti edzésszám és a saját csapat heti alapprofilja.", "settings")
-    st.markdown('<div class="fpi-quick-panel"><h3>Gyors beállítások</h3><p>Az alapfelállás, védekezési blokk és fő támadási út az adott hétre / ellenfélre is értelmezhető, ezért marad nyitva.</p></div>', unsafe_allow_html=True)
+    # 2. Elemzési kontextus és benchmarkprofil
+    _fpi_section_header_v113(
+        "2. Elemzési kontextus",
+        "Egyetlen játékmodell-beállítás, egy következő mérkőzésdátum és egyértelmű elemzési időszak.",
+        "settings",
+    )
+    st.markdown(
+        '<div class="fpi-quick-panel"><h3>Gyors beállítások</h3><p>A benchmarkprofil adja a korosztályt és a versenyszintet. A saját játékmodell elsődleges és opcionális másodlagos modellből áll; a benchmarkban 70–30%-os súlyozást használunk.</p></div>',
+        unsafe_allow_html=True,
+    )
 
     benchmark_preset_clean_v303 = st.selectbox(
         "Gyors benchmarkprofil",
         list(FPI_BENCHMARK_PRESETS_V303.keys()),
         index=list(FPI_BENCHMARK_PRESETS_V303.keys()).index("Felnőtt – NB II"),
-        key="clean_benchmark_preset_v303",
-        help="Gyors beállítás. Az Egyéni beállítás választásával bármely korosztály és szint kombinálható.",
+        key="clean_benchmark_preset_v411",
+        help="A román profilok induláskor előzetesek: SuperLiga = NB I, Liga II = NB II alapfaktor. Három saját teljes meccstől a saját meccsmedián az elsődleges.",
     )
     preset_age_v303, preset_level_v303 = _fpi_benchmark_preset_values_v303(
         benchmark_preset_clean_v303,
         user_defaults_clean.get("reference_age", "Felnőtt"),
         user_defaults_clean.get("reference_level", "NB II"),
     )
+    if benchmark_preset_clean_v303 == "Egyéni beállítás":
+        bp1, bp2 = st.columns(2)
+        with bp1:
+            reference_age_clean = st.selectbox(
+                "Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112,
+                index=_fpi_idx_v113(FPI_REFERENCE_AGE_OPTIONS_V112, preset_age_v303, 0),
+                key="clean_ref_age_v411",
+            )
+        with bp2:
+            reference_level_clean = st.selectbox(
+                "Versenyszint", FPI_REFERENCE_LEVEL_OPTIONS_V112,
+                index=_fpi_idx_v113(FPI_REFERENCE_LEVEL_OPTIONS_V112, preset_level_v303, 1),
+                key="clean_ref_level_v411",
+            )
+    else:
+        reference_age_clean, reference_level_clean = preset_age_v303, preset_level_v303
+        st.caption(f"Benchmarkprofil: {reference_age_clean} / {reference_level_clean}")
 
     q1, q2, q3, q4 = st.columns(4)
     with q1:
-        opponent_clean = st.text_input("Ellenfél", value=st.session_state.get("fpi_match_opponent_v94", user_defaults_clean.get("opponent", "")), key="clean_opponent_v137")
+        opponent_clean = st.text_input(
+            "Következő ellenfél",
+            value=st.session_state.get("fpi_match_opponent_v94", user_defaults_clean.get("opponent", "")),
+            key="clean_opponent_v411",
+        )
     with q2:
-        match_date_clean = st.date_input("Meccsnap", value=st.session_state.get("fpi_match_date_v94", pd.Timestamp.today().date()), key="clean_match_date_v137")
+        next_match_date_clean = st.date_input(
+            "Következő mérkőzés dátuma",
+            value=st.session_state.get("fpi_manual_match_date_v300", None),
+            key="clean_next_match_date_v411",
+            help="Csak a jövőbeli tervezéshez használjuk. Az elemzett időszakot külön választod ki.",
+        )
     with q3:
-        reference_age_clean = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=_fpi_idx_v113(FPI_REFERENCE_AGE_OPTIONS_V112, preset_age_v303, 0), key="clean_ref_age_v137")
+        n_train_clean = st.number_input(
+            "Tervezett heti edzések",
+            min_value=0, max_value=7,
+            value=int(user_defaults_clean.get("training_days", 4)), step=1,
+            key="clean_n_train_v411",
+        )
     with q4:
-        reference_level_clean = st.selectbox("Szint", FPI_REFERENCE_LEVEL_OPTIONS_V112, index=_fpi_idx_v113(FPI_REFERENCE_LEVEL_OPTIONS_V112, preset_level_v303, 1), key="clean_ref_level_v137")
+        week_type_clean = st.selectbox(
+            "Következő ciklus célja",
+            FPI_COACH_WEEK_OPTIONS_V112,
+            index=_fpi_idx_v113(FPI_COACH_WEEK_OPTIONS_V112, user_defaults_clean.get("coach_week_type", "Stabilizáló mikrociklus"), 1),
+            key="clean_week_type_v411",
+        )
 
     q5, q6, q7, q8 = st.columns(4)
     with q5:
-        playmodel_profile_clean = st.selectbox("Játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=_fpi_idx_v113(FPI_PLAYMODEL_OPTIONS_V112, user_defaults_clean.get("playmodel_profile", "Kiegyensúlyozott"), 4), key="clean_playmodel_profile_v137")
+        primary_playmodel_clean = st.selectbox(
+            "Elsődleges játékmodell",
+            FPI_PLAYMODEL_OPTIONS_V112,
+            index=_fpi_idx_v113(FPI_PLAYMODEL_OPTIONS_V112, user_defaults_clean.get("playmodel_profile", "Kiegyensúlyozott"), 4),
+            key="clean_primary_playmodel_v411",
+        )
     with q6:
-        n_train_clean = st.number_input("Heti edzések száma", min_value=0, max_value=7, value=int(user_defaults_clean.get("training_days", 4)), step=1, key="clean_n_train_v137")
+        secondary_options_v411 = ["Nincs"] + [x for x in FPI_PLAYMODEL_OPTIONS_V112 if x != primary_playmodel_clean]
+        secondary_default_v411 = user_defaults_clean.get("secondary_playmodel", "Nincs")
+        secondary_playmodel_clean = st.selectbox(
+            "Másodlagos játékmodell (30%)",
+            secondary_options_v411,
+            index=_fpi_idx_v113(secondary_options_v411, secondary_default_v411, 0),
+            key="clean_secondary_playmodel_v411",
+        )
     with q7:
-        week_type_clean = st.selectbox("Heti cél", FPI_COACH_WEEK_OPTIONS_V112, index=_fpi_idx_v113(FPI_COACH_WEEK_OPTIONS_V112, user_defaults_clean.get("coach_week_type", "Fenntartó hét"), 1), key="clean_week_type_v137")
         season_phase_clean_v205 = st.selectbox(
             "Időszak típusa",
             ["Automatikus felismerés", "Felkészülési időszak", "Versenyidőszak"],
             index=0,
-            key="clean_season_phase_v205",
-            help="A kézi választás felülírja az automatikus felismerést."
+            key="clean_season_phase_v411",
+            help="A kézi választás felülírja az automatikus felismerést.",
         )
         st.session_state["fpi_season_phase_v205"] = season_phase_clean_v205
-        manual_match_date_v300 = st.date_input(
-            "Következő meccsnap",
-            value=None,
-            key="clean_manual_match_date_v300",
-            help="A meccsfájlokból nem felismerhető következő meccsnél add meg kézzel."
-        )
-        st.session_state["fpi_manual_match_date_v300"] = manual_match_date_v300
     with q8:
-        selected_playstyle_clean = st.selectbox("Riport játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=_fpi_idx_v113(FPI_PLAYMODEL_OPTIONS_V112, user_defaults_clean.get("playmodel_profile", "Kiegyensúlyozott"), 4), key="clean_playstyle_v137")
+        own_formation_clean = st.selectbox(
+            "Saját alapfelállás",
+            FPI_FORMATION_OPTIONS_V132,
+            index=_fpi_idx_v113(FPI_FORMATION_OPTIONS_V132, user_defaults_clean.get("own_formation", "4-2-3-1"), 0),
+            key="clean_own_formation_v411",
+        )
 
-    oc1, oc2, oc3 = st.columns(3)
+    oc1, oc2 = st.columns(2)
+    block_options_clean_v411 = [x for x in FPI_BLOCK_OPTIONS_V132 if "Vegyes" not in x]
+    attack_options_clean_v411 = [x for x in FPI_ATTACK_ROUTE_OPTIONS_V132 if "Vegyes" not in x]
+    default_blocks_v411 = [x for x in _fpi_v411_list_value(user_defaults_clean.get("own_block"), ["Középső blokk"]) if x in block_options_clean_v411] or ["Középső blokk"]
+    default_routes_v411 = [x for x in _fpi_v411_list_value(user_defaults_clean.get("own_attack_route"), ["Szélek", "Centrum / félterületek"]) if x in attack_options_clean_v411] or ["Szélek"]
     with oc1:
-        own_formation_clean = st.selectbox("Saját alapfelállás erre a hétre", FPI_FORMATION_OPTIONS_V132, index=_fpi_idx_v113(FPI_FORMATION_OPTIONS_V132, user_defaults_clean.get("own_formation", "4-2-3-1"), 0), key="clean_own_formation_v137")
+        own_block_clean = st.multiselect(
+            "Használt védekezési blokkok",
+            block_options_clean_v411,
+            default=default_blocks_v411,
+            key="clean_own_blocks_v411",
+            help="Több blokk is választható; a kiválasztás a taktikai és integrált értelmezést módosítja.",
+        )
     with oc2:
-        own_block_clean = st.selectbox("Védekezési blokk erre a hétre", FPI_BLOCK_OPTIONS_V132, index=_fpi_idx_v113(FPI_BLOCK_OPTIONS_V132, user_defaults_clean.get("own_block", "Középső blokk"), 1), key="clean_own_block_v137")
-    with oc3:
-        own_attack_route_clean = st.selectbox("Fő támadási út erre a hétre", FPI_ATTACK_ROUTE_OPTIONS_V132, index=_fpi_idx_v113(FPI_ATTACK_ROUTE_OPTIONS_V132, user_defaults_clean.get("own_attack_route", "Vegyes"), 4), key="clean_own_attack_route_v137")
+        own_attack_route_clean = st.multiselect(
+            "Használt támadási utak",
+            attack_options_clean_v411,
+            default=default_routes_v411,
+            key="clean_attack_routes_v411",
+            help="Több támadási út is választható. Ez nem emeli automatikusan az összes GPS-benchmarkot.",
+        )
 
-    match_week_clean = _fpi_iso_week_from_date_v94(match_date_clean)
-    default_idx_clean = weeks_clean.index(match_week_clean) if match_week_clean in weeks_clean else (len(weeks_clean)-1 if weeks_clean else 0)
-    w1, w2 = st.columns([1, 2.5])
-    with w1:
-        selected_week_clean = st.selectbox("Elemzett hét", weeks_clean, index=default_idx_clean, format_func=week_label_short, key="clean_week_v137")
-    with w2:
-        st.caption(f"Aktív referencia: {reference_age_clean} / {reference_level_clean} / játékosonkénti poszt / {playmodel_profile_clean}")
+    st.markdown("#### Elemzési időszak")
+    sc1, sc2 = st.columns([1.1, 2.1])
+    with sc1:
+        analysis_mode_selection_clean = st.selectbox(
+            "Elemzési mód",
+            FPI_ANALYSIS_MODE_OPTIONS_V411,
+            index=0,
+            key="clean_analysis_mode_v411",
+        )
+
+    latest_week_clean_v411 = weeks_clean[-1] if weeks_clean else ""
+    selected_week_clean = latest_week_clean_v411
+    analysis_event_key_clean = None
+    analysis_date_range_clean = None
+    with sc2:
+        if analysis_mode_selection_clean in {"Automatikus felismerés", "Teljes vagy csonka naptári hét"}:
+            selected_week_clean = st.selectbox(
+                "Elemzett hét",
+                weeks_clean,
+                index=max(0, len(weeks_clean) - 1),
+                format_func=week_label_short,
+                key="clean_week_v411",
+            )
+        elif analysis_mode_selection_clean == "Egyetlen esemény":
+            event_keys_v411, event_labels_v411 = _fpi_v411_event_options(df_clean)
+            analysis_event_key_clean = st.selectbox(
+                "Elemzett edzés vagy meccs",
+                event_keys_v411,
+                index=max(0, len(event_keys_v411) - 1),
+                format_func=lambda x: event_labels_v411.get(str(x), str(x)),
+                key="clean_event_v411",
+            ) if event_keys_v411 else None
+        elif analysis_mode_selection_clean == "Egyéni dátumtartomány":
+            valid_dates_v411 = pd.to_datetime(df_clean.get("start_time"), errors="coerce").dropna()
+            default_start_v411 = valid_dates_v411.min().date() if not valid_dates_v411.empty else pd.Timestamp.today().date()
+            default_end_v411 = valid_dates_v411.max().date() if not valid_dates_v411.empty else pd.Timestamp.today().date()
+            analysis_date_range_clean = st.date_input(
+                "Elemzett dátumtartomány",
+                value=(default_start_v411, default_end_v411),
+                key="clean_date_range_v411",
+            )
+        else:
+            st.info("A GPS-only riport a teljes feltöltött időszakot mutatja; a Readiness és az aktuális döntési blokk a legutóbbi teljes hétből készül.")
+
+    selected_playstyle_clean = primary_playmodel_clean
+    playmodel_profile_clean = primary_playmodel_clean
+    playmodel_label_clean_v411 = _fpi_v411_playmodel_label(primary_playmodel_clean, secondary_playmodel_clean)
+    provisional_note_v411 = " | előzetes liga-profil" if str(reference_level_clean).startswith("Román ") else ""
+    st.caption(
+        f"Aktív referencia: {reference_age_clean} / {reference_level_clean} / játékosonkénti poszt / {playmodel_label_clean_v411}{provisional_note_v411}"
+    )
 
     selected_players_clean = players_clean
     cycle_days_clean = 7
@@ -14819,6 +14998,7 @@ def render_fpi_clean_workspace_v101() -> None:
                 "reference_level": reference_level_clean,
                 "coach_week_type": week_type_clean,
                 "playmodel_profile": playmodel_profile_clean,
+                "secondary_playmodel": secondary_playmodel_clean,
                 "cycle_days": int(cycle_days_clean),
                 "training_days": int(n_train_clean),
                 "rest_days": int(n_rest_clean),
@@ -14855,105 +15035,198 @@ def render_fpi_clean_workspace_v101() -> None:
                 note_v = st.text_input(f"Edzői megjegyzés {i+1}", value="", key=f"clean_md_note_v137_{i}")
             session_plan_clean.append({"md": md_v, "type": typ_v, "note": note_v})
 
+    # V411: egyetlen közös kontextus minden GPS-t használó riporthoz.
     st.session_state["fpi_match_opponent_v94"] = opponent_clean
-    st.session_state["fpi_match_date_v94"] = match_date_clean
-    st.session_state["fpi_match_context_v94"] = {"opponent": opponent_clean.strip() if isinstance(opponent_clean, str) else "", "match_date": match_date_clean, "match_week": match_week_clean, "today": pd.Timestamp.today().date(), "today_week": _fpi_iso_week_from_date_v94(pd.Timestamp.today().date())}
+    st.session_state["fpi_manual_match_date_v300"] = next_match_date_clean
+    st.session_state["fpi_match_date_v94"] = next_match_date_clean
+    match_week_clean = _fpi_iso_week_from_date_v94(next_match_date_clean) if next_match_date_clean else None
+    st.session_state["fpi_match_context_v94"] = {
+        "opponent": opponent_clean.strip() if isinstance(opponent_clean, str) else "",
+        "match_date": next_match_date_clean,
+        "match_week": match_week_clean,
+        "today": pd.Timestamp.today().date(),
+        "today_week": _fpi_iso_week_from_date_v94(pd.Timestamp.today().date()),
+    }
     st.session_state["clean_own_formation_v132"] = own_formation_clean
-    st.session_state["clean_own_block_v132"] = own_block_clean
-    st.session_state["clean_own_attack_route_v132"] = own_attack_route_clean
+    st.session_state["clean_own_block_v132"] = list(own_block_clean or [])
+    st.session_state["clean_own_attack_route_v132"] = list(own_attack_route_clean or [])
 
-    ref_profile_clean = f"{reference_age_clean} / {reference_level_clean} / játékosonkénti poszt / {playmodel_profile_clean}"
+    ref_profile_clean = (
+        f"{reference_age_clean} / {reference_level_clean} / játékosonkénti poszt / "
+        f"{playmodel_label_clean_v411}"
+    )
     st.session_state["fpi_coach_context_v97"] = {
         "reference_profile": ref_profile_clean,
         "reference_age": reference_age_clean,
         "reference_level": reference_level_clean,
-        "playmodel_profile": playmodel_profile_clean,
+        "benchmark_is_provisional": str(reference_level_clean).startswith("Román "),
+        "benchmark_source_note": (
+            "Előzetes román liga-profil: a SuperLiga induló célzónái a magyar NB I, "
+            "a Liga II induló célzónái a magyar NB II profilját követik. "
+            "Három saját teljes meccstől a saját meccsmedián az elsődleges referencia."
+            if str(reference_level_clean).startswith("Román ") else "FPI liga- és korosztályprofil"
+        ),
+        "playmodel_profile": primary_playmodel_clean,
+        "primary_playmodel": primary_playmodel_clean,
+        "secondary_playmodel": secondary_playmodel_clean,
+        "playmodel_weights": {"primary": 0.70, "secondary": 0.30 if secondary_playmodel_clean != "Nincs" else 0.0},
+        "playmodel_label": playmodel_label_clean_v411,
         "selected_playstyle": selected_playstyle_clean,
         "coach_week_type": week_type_clean,
         "cycle_days": int(cycle_days_clean),
         "training_days": int(n_train_clean),
         "rest_days": int(n_rest_clean),
         "md_day": md_match_day_clean,
+        "next_match_date": next_match_date_clean,
         "session_plan": session_plan_clean,
         "own_formation": own_formation_clean,
-        "own_block": own_block_clean,
-        "own_attack_route": own_attack_route_clean,
+        "own_block": list(own_block_clean or []),
+        "own_attack_route": list(own_attack_route_clean or []),
     }
 
-    with st.expander("📅 Hét / meccsnap ellenőrzés", expanded=False):
-        week_context_clean = _fpi_week_context_df_v94(df_clean, match_date_clean)
-        warnings_clean = _fpi_match_week_warning_v94(df_clean, selected_week_clean, match_date_clean)
-        st.markdown(f"**Mai hét:** {_fpi_iso_week_from_date_v94(pd.Timestamp.today().date())} | **Meccshét:** {match_week_clean} | **Kiválasztott hét:** {selected_week_clean}")
-        if not week_context_clean.empty:
-            st.dataframe(week_context_clean, use_container_width=True, hide_index=True)
-        for w in warnings_clean:
-            st.warning(w)
+    analysis_base_clean = (
+        df_clean[df_clean["player_name"].astype(str).isin(selected_players_clean)].copy()
+        if selected_players_clean else df_clean.copy()
+    )
+    analysis_clean, analysis_report_key_clean, analysis_scope_meta_clean = _fpi_v411_prepare_scope(
+        analysis_base_clean,
+        analysis_mode_selection_clean,
+        selected_week=selected_week_clean,
+        selected_event=analysis_event_key_clean,
+        date_range=analysis_date_range_clean,
+    )
+    if analysis_scope_meta_clean.get("scope_type") in {"single_session", "date_range"}:
+        scope_mask_v411 = analysis_clean.get("_fpi_scope_selected_v411", pd.Series(False, index=analysis_clean.index)).fillna(False).astype(bool)
+        if not bool(scope_mask_v411.any()):
+            st.error("A kiválasztott elemzési időszakban nincs feldolgozható GPS-adat.")
+            st.stop()
 
-    analysis_clean = df_clean[df_clean["player_name"].astype(str).isin(selected_players_clean)].copy() if selected_players_clean else df_clean.copy()
+    with st.expander("📅 Elemzési időszak ellenőrzése", expanded=False):
+        st.markdown(f"**Elemzett időszak:** {analysis_scope_meta_clean.get('label', analysis_report_key_clean)}")
+        st.markdown(f"**Elemzési mód:** {analysis_mode_selection_clean}")
+        if next_match_date_clean:
+            st.markdown(f"**Következő mérkőzés:** {next_match_date_clean} | **meccshét:** {match_week_clean}")
+        else:
+            st.markdown("**Következő mérkőzés:** nincs megadva")
+        if analysis_scope_meta_clean.get("scope_type") == "week":
+            week_context_clean = _fpi_week_context_df_v94(analysis_clean, next_match_date_clean)
+            if not week_context_clean.empty:
+                st.dataframe(week_context_clean, use_container_width=True, hide_index=True)
+        st.caption(
+            "A kiválasztott időszakot minden GPS-alapú export ugyanazzal a központi scope-kulccsal használja; "
+            "nincs automatikus visszaesés a legutolsó hétre."
+        )
 
     try:
-        ctx_clean = _fpi_report_context(analysis_clean, selected_week_clean, selected_playstyle_clean)
-        readiness_clean = int(ctx_clean.get("readiness_score", 70) or 70)
-        tactical_gps_context_clean = {"has_gps": True, "selected_week": selected_week_clean, "readiness_score": readiness_clean, "playstyle": selected_playstyle_clean, "priorities": ctx_clean.get("priorities", []), "periodization_type": ctx_clean.get("periodization_type", "n.a."), "df": analysis_clean}
-    except Exception:
-        tactical_gps_context_clean = {"has_gps": True, "selected_week": selected_week_clean, "readiness_score": 70, "playstyle": selected_playstyle_clean, "priorities": [], "periodization_type": "n.a.", "df": analysis_clean}
+        ctx_clean = _fpi_report_context(analysis_clean, analysis_report_key_clean, selected_playstyle_clean)
+        readiness_status_clean_v411 = str(ctx_clean.get("readiness_status_v411", "not_available"))
+        readiness_clean = (
+            int(ctx_clean.get("readiness_score", 70) or 70)
+            if readiness_status_clean_v411 != "not_available" else None
+        )
+        tactical_gps_context_clean = {
+            "has_gps": True,
+            "selected_week": analysis_report_key_clean,
+            "analysis_scope": analysis_scope_meta_clean,
+            "analysis_mode": ctx_clean.get("analysis_mode_v411", {}),
+            "trend_status": ctx_clean.get("trend_status_v411", {}),
+            "readiness_score": readiness_clean,
+            "readiness_status": readiness_status_clean_v411,
+            "playstyle": selected_playstyle_clean,
+            "playmodel_label": playmodel_label_clean_v411,
+            "priorities": ctx_clean.get("priorities", []),
+            "periodization_type": ctx_clean.get("periodization_type", "n.a."),
+            "df": analysis_clean,
+        }
+    except Exception as exc:
+        st.warning(f"Az előzetes GPS-kontextus részben készült el: {exc}")
+        tactical_gps_context_clean = {
+            "has_gps": True,
+            "selected_week": analysis_report_key_clean,
+            "analysis_scope": analysis_scope_meta_clean,
+            "readiness_score": None,
+            "readiness_status": "not_available",
+            "playstyle": selected_playstyle_clean,
+            "playmodel_label": playmodel_label_clean_v411,
+            "priorities": [],
+            "periodization_type": "n.a.",
+            "df": analysis_clean,
+        }
 
-    # 3. Opcionális taktikai input – önálló szekció, csak ha van anyag.
+    # 3. Opcionális taktikai input – ugyanazt a GPS-scope-ot kapja, mint a GPS-only.
     clean_tactical_context = _fpi_clean_tactical_import_v102(tactical_gps_context_clean)
     st.session_state["fpi_clean_tactical_context_v115"] = clean_tactical_context
 
-    # 4. Exportok – öt konzisztens riportmód.
+    # 4. Exportok – minden GPS-alapú export ugyanazt a kiválasztott időszakot használja.
     _fpi_section_header_v113(
         "4. Export",
-        "Az integrált riport ugyanazokat a GPS-megállapításokat használja, mint a GPS-only, és ugyanazokat a taktikai megállapításokat, mint a Taktikai-only.",
+        "A GPS-only, GPS+taktikai és Saját csapat riport ugyanabból a kiválasztott időszakból, benchmarkprofilból és játékmodellből készül.",
         "export",
     )
-    date_span_clean_v205 = (
-        pd.to_datetime(analysis_clean.get("start_time"), errors="coerce").max()
-        - pd.to_datetime(analysis_clean.get("start_time"), errors="coerce").min()
-    ).days if "start_time" in analysis_clean.columns else 0
-    full_period_pdf_clean_v205 = st.checkbox(
-        "GPS-only PDF: a teljes feltöltött időszak elemzése",
-        value=bool(date_span_clean_v205 >= 14),
-        key="clean_full_period_pdf_v205",
-        help="Kikapcsolva csak a fent kiválasztott hét kerül a GPS-only PDF-be."
+    gps_pdf_period_clean_v205 = (
+        "__ALL__" if analysis_mode_selection_clean == "Teljes feltöltött időszak"
+        else analysis_report_key_clean
     )
-    gps_pdf_period_clean_v205 = "__ALL__" if full_period_pdf_clean_v205 else selected_week_clean
-    safe_week_clean = "teljes_idoszak" if full_period_pdf_clean_v205 else _safe_filename_week(selected_week_clean)
+    scope_filename_v411 = str(analysis_scope_meta_clean.get("label") or analysis_report_key_clean or "riport")
+    safe_week_clean = re.sub(r"[^0-9A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű_-]+", "_", scope_filename_v411).strip("_")[:80] or "riport"
     canonical_bundle_v156 = _fpi_canonical_report_bundle_v156(
-        analysis_clean, selected_week_clean, selected_playstyle_clean, clean_tactical_context
+        analysis_clean, analysis_report_key_clean, selected_playstyle_clean, clean_tactical_context
+    )
+
+    trend_state_v411 = ctx_clean.get("trend_status_v411", {}) if "ctx_clean" in locals() else {}
+    analysis_mode_state_v411 = ctx_clean.get("analysis_mode_v411", {}) if "ctx_clean" in locals() else {}
+    st.caption(
+        f"Riportmód: {analysis_mode_state_v411.get('label', analysis_mode_selection_clean)} | "
+        f"Idősoros státusz: {trend_state_v411.get('label', 'nem értékelhető')} | "
+        f"Referencia: {ref_profile_clean}"
     )
 
     ex1, ex2, ex3, ex4, ex5 = st.columns(5)
     with ex1:
-        gps_pdf_clean = build_fpi_gps_only_pdf_bytes(analysis_clean, gps_pdf_period_clean_v205, selected_playstyle_clean)
+        gps_pdf_clean = build_fpi_gps_only_pdf_bytes(
+            analysis_clean, gps_pdf_period_clean_v205, selected_playstyle_clean
+        )
         if gps_pdf_clean is not None:
-            st.download_button("⬇️ GPS-only", gps_pdf_clean, f"fpi_gps_only_{safe_week_clean}.pdf", "application/pdf", use_container_width=True, key="clean_export_gps_v156")
+            st.download_button(
+                "⬇️ GPS-only", gps_pdf_clean, f"fpi_gps_only_{safe_week_clean}.pdf",
+                "application/pdf", use_container_width=True, key="clean_export_gps_v411",
+            )
     with ex2:
         tactical_only_pdf_clean_v156 = build_fpi_tactical_only_pdf_bytes_v156(clean_tactical_context)
         if tactical_only_pdf_clean_v156 is not None:
-            st.download_button("⬇️ Taktikai-only", tactical_only_pdf_clean_v156, f"fpi_taktikai_only_{safe_week_clean}.pdf", "application/pdf", use_container_width=True, key="clean_export_tactical_only_v156")
+            st.download_button(
+                "⬇️ Taktikai-only", tactical_only_pdf_clean_v156, f"fpi_taktikai_only_{safe_week_clean}.pdf",
+                "application/pdf", use_container_width=True, key="clean_export_tactical_only_v411",
+            )
         else:
             st.caption("Nincs taktikai input.")
     with ex3:
         integrated_pdf_clean_v156 = build_fpi_product_pdf_bytes(
-            analysis_clean, selected_week_clean, selected_playstyle_clean,
+            analysis_clean, analysis_report_key_clean, selected_playstyle_clean,
             report_type="executive", tactical_context=clean_tactical_context,
         )
         if integrated_pdf_clean_v156 is not None:
-            st.download_button("⬇️ GPS + taktikai", integrated_pdf_clean_v156, f"fpi_gps_taktikai_{safe_week_clean}.pdf", "application/pdf", use_container_width=True, key="clean_export_integrated_v156")
+            st.download_button(
+                "⬇️ GPS + taktikai", integrated_pdf_clean_v156, f"fpi_gps_taktikai_{safe_week_clean}.pdf",
+                "application/pdf", use_container_width=True, key="clean_export_integrated_v411",
+            )
     with ex4:
         own_team_pdf_clean_v156 = build_fpi_own_team_profile_pdf_bytes(
-            analysis_clean, selected_week_clean, selected_playstyle_clean,
+            analysis_clean, analysis_report_key_clean, selected_playstyle_clean,
             tactical_context=clean_tactical_context,
         )
         if own_team_pdf_clean_v156 is not None:
-            st.download_button("⬇️ Saját csapat", own_team_pdf_clean_v156, f"fpi_sajat_csapat_{safe_week_clean}.pdf", "application/pdf", use_container_width=True, key="clean_export_own_v156")
+            st.download_button(
+                "⬇️ Saját csapat", own_team_pdf_clean_v156, f"fpi_sajat_csapat_{safe_week_clean}.pdf",
+                "application/pdf", use_container_width=True, key="clean_export_own_v411",
+            )
     with ex5:
         method_pdf_clean_v156 = build_fpi_methodology_pdf_bytes_v143()
         if method_pdf_clean_v156 is not None:
-            st.download_button("⬇️ Metodika", method_pdf_clean_v156, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="clean_export_method_v156")
-
+            st.download_button(
+                "⬇️ Metodika", method_pdf_clean_v156, "fpi_metodika.pdf",
+                "application/pdf", use_container_width=True, key="clean_export_method_v411",
+            )
 
 
 # =========================================================
@@ -19204,12 +19477,20 @@ def build_fpi_own_team_tactical_only_pdf_bytes_v156(
 # =========================================================
 FPI_METHODOLOGY_SECTIONS_V143 = [
     ("1. GPS-only metodika", [
-        "Cél: a heti fizikai terhelés, a sebességi expozíció, a frissesség és a játékosszintű terhelési eltérések egységes értelmezése.",
-        "A Readiness 0-100 közötti döntéstámogató index. Fő összetevői: terhelési trend, sebességi expozíció, tapering, játékmodell-illeszkedés és edzésrészvétel.",
-        "A heti benchmark korosztály, versenyszint, posztösszetétel, játékmodell és heti típus szerint változik. Nem merev norma, hanem összehasonlítási célzóna.",
-        "A Player Risk Score nem sérülésjóslat. A saját korábbi terheléshez viszonyított kiugrásokat, alulexpozíciót, sprint- és HSR-profilt, gyorsításokat, lassításokat és High Efforts értéket jelzi.",
-        "A sebességi expozíció a dózis mellett az időzítést is figyelembe veszi. A fő sprintinger MD-4/MD-3 környékén, a meccs sprintreferenciájának 25–40%-os operatív célzónájában kap teljes értéket; MD-2-n csökkentett, MD-1-en erősen csökkentett értékelést kap. Az MD+1 regenerációs vagy pótló terhelés nem számít a következő mérkőzés előtti Speed Exposure erősségének.",
-        "A tapering külön vizsgálja az MD-1 és MD-2 összterhelését, valamint az MD-2 sprintterhelését. Operatív célzóna: MD-1 a fő MD-4/MD-3 nap 30–45%-a, MD-2 55–70%-a. Így egy megfelelő MD-2 nem fedheti el a túl magas MD-1-et, és a megfelelő heti sprintmennyiség sem fedheti el a kedvezőtlen időzítést.",
+        "Cél: a rendelkezésre álló GPS-adatmennyiséghez igazodó fizikai döntéstámogatás. Az app nem kezeli ugyanúgy az egyetlen edzést, a csonka hetet, a teljes mikrociklust és a többhetes adatbázist.",
+        "Az elemzési mód választható vagy automatikusan felismerhető: egyetlen edzés/meccs; teljes vagy csonka naptári hét; egyéni dátumtartomány; teljes feltöltött időszak. A kiválasztott időszak minden GPS-alapú PDF-ben azonos, és a rendszer nem vált vissza csendben a legutolsó hétre.",
+        "Egyetlen eseménynél sessionprofil készül: volumen, intenzitás, HSR, sprint, High Efforts, gyorsítások/lassítások, Load és kereten belüli eltérések. Teljes heti Readiness, tapering és heti trend ilyenkor nem készül.",
+        "Csonka hétnél az addig eltelt napokat az előző teljes hetek azonos hétközi pontjához hasonlítjuk. A heti összeseket nem egyszerű lineáris szorzással vetítjük ki, mert az MD-napok terhelése nem egyenletes.",
+        "Két vagy három teljes hét leíró heti összehasonlítást ad, de nem nevezhető trendnek és nem módosítja a Readiness terhelési trend komponensét. Többhetes trendet legalább négy teljes hétből számítunk.",
+        "A GPS-only minta riport több teljes hetet mutat, mert a trendlogika csak így szemléltethető hitelesen. Ettől függetlenül az éles riport egyetlen edzést és csonka hetet is külön logikával kezel.",
+        "A Readiness 0–100 közötti, 75 pontos kiinduló értékre épülő szabályalapú döntéstámogató index. Az edzésrészvétel, a legalább négy teljes hetes terhelési trend, a sebességi expozíció, a tapering és a játékmodell-illeszkedés szakmai küszöbök alapján növeli vagy csökkenti az értéket.",
+        "A benchmark hierarchiája: saját meccsreferencia és saját történeti adat; játékosposzt; korosztály; versenyszint; játékmodell. A liga- és korosztályprofil induló célzóna, nem merev norma. Egy-két saját teljes meccs már használható korlátozott bizonyosságú meccsreferenciaként; három teljes saját meccstől a saját meccsmedián az elsődleges referencia.",
+        "A román SuperLiga induló, előzetes benchmarkja a magyar NB I célzónáit, a román Liga II induló benchmarkja a magyar NB II célzónáit használja. A riport ezt előzetes liga-profilként jelöli, amíg nincs elegendő saját meccsadat; nem állítjuk, hogy a két bajnokság fizikailag azonos.",
+        "A játékmodell egyszer kerül megadásra. Az elsődleges modell 70%, az opcionális másodlagos modell 30% súllyal módosítja a metrikánkénti célzónákat. A védekezési blokk és a támadási út többértékű taktikai kontextus, de nem emeli automatikusan az összes GPS-benchmarkot.",
+        "Minden táblázatnál egyértelműen jelöljük az adatkört, az időszakot, az aggregációt és a referencia forrását. Összeadható például az össztáv, Load, HSR, sprinttáv, sprintdarabszám, High Efforts, gyorsítás és lassítás; a m/percet újraszámítjuk, a Max Speednél pedig az időszak legnagyobb értékét tartjuk meg.",
+        "A sebességi expozíció a dózis mellett az időzítést is figyelembe veszi. A fő sprintinger MD-4/MD-3 környékén, a saját meccs sprintreferenciájának 25–40%-os operatív célzónájában kap teljes értéket; MD-2-n csökkentett, MD-1-en erősen csökkentett értékelést kap.",
+        "A tapering külön vizsgálja az MD-1 és MD-2 összterhelését, valamint az MD-2 sprintterhelését. Operatív célzóna: MD-1 a fő MD-4/MD-3 nap 30–45%-a, MD-2 55–70%-a.",
+        "A Player Risk Score nem sérülésjóslat. A saját korábbi terheléshez viszonyított kiugrásokat, alulexpozíciót, sprint- és HSR-profilt, gyorsításokat, lassításokat és High Efforts értéket jelzi. A mezőnyjátékos-listákból a kapusok kimaradnak.",
     ]),
     ("2. Taktikai-only metodika", [
         "Cél: a saját csapat és az ellenfél taktikai mintáinak szituációhoz kötött, közvetlenül használható edzői döntésekké alakítása GPS-adatok nélkül.",
@@ -19251,6 +19532,19 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
         "Taktikai állapot: 1/5 fejlesztendő; 2/5 figyelendő; 3/5 stabil; 4/5 jó; 5/5 kiemelkedő.",
         "Az alacsony GPS-érték túlterhelést és alulterhelést egyaránt jelezhet; ezért a magyarázó szöveg és az edzői kontextus mindig szükséges.",
         "A rendszer döntéstámogató eszköz. Nem diagnózis, nem garantált sérülés-előrejelzés, és nem helyettesíti az edzői, orvosi, wellness- vagy RPE-információkat.",
+    ]),
+    ("7. Import-, HalfTime-, kapus- és MD-logika", [
+        "Minden PDF-export ugyanazon végső Unicode- és fontkapun fut át. Az ő, Ő, ű és Ű karakterek beágyazott Unicode-fonttal jelennek meg; fontkeresési hiba nem állítja le az alkalmazást.",
+        "Az azonos mérkőzéshez tartozó Half 1 és Half 2 játékosonként egy Match eseménnyé egyesül. Az össztáv, Load, HSR, sprinttáv, sprintdarabszám, High Efforts, gyorsítások, lassítások és játékpercek összeadódnak; a Max Speed a két félidő közül a nagyobb érték.",
+        "A m/perc és per90 mutatók az összevont távolságból és időből újraszámolódnak. A két félidő nem jelenik meg két külön meccsként a readinessben, benchmarkban vagy játékosriportban.",
+        "A Load- és HSR-rangsorok, valamint az alacsony mezőnyjátékos-expozíciós figyelmeztetések kapusok nélkül készülnek. A kapusok saját szerepkörük szerint maradnak az adatbázisban.",
+        "Ha egy fájlnév MD-címkét, egy másik pedig dátumot tartalmaz, az app a dátumkülönbség alapján következteti ki a hiányzó MD-besorolást. A következő mérkőzés dátuma csak egyszer kerül megadásra.",
+    ]),
+    ("8. Platformkonzisztencia és exportlogika", [
+        "A GPS-only, GPS+taktikai és Saját csapat riport ugyanazt a központi GPS-scope-ot, benchmarkprofilt, readiness-motort, kapuskezelést és MD-logikát használja.",
+        "A Tactical-only és a GPS+taktikai riport ugyanazt a taktikai döntési motort használja. Az integrált riport a közös taktikai döntésekhez fizikai dózist és readiness-korlátot tesz hozzá; a GPS-only szerkezetét a taktikai nyelvi módosítás nem változtatja meg.",
+        "A kiválasztott elemzett hét, esemény vagy dátumtartomány kerül az exportba. Ha a scope üres vagy nem található, az app hibát jelez; nem helyettesíti észrevétlenül a legutolsó héttel.",
+        "A metodika egyetlen exportálható dokumentumban tartalmazza az elemzési módokat, benchmarkhierarchiát, bajnoki és korosztályos profilokat, aggregációkat és értelmezési korlátokat.",
     ]),
 ]
 
@@ -19372,6 +19666,421 @@ def render_fpi_methodology_center_v143() -> None:
 
 # Override the older methodology renderer with the shared V143 content.
 render_fpi_methodology_center_v138 = render_fpi_methodology_center_v143
+
+
+
+# =========================================================
+# V411 - Adaptive analysis scope, blended benchmark and trend gate
+# =========================================================
+FPI_ANALYSIS_MODE_OPTIONS_V411 = [
+    "Automatikus felismerés",
+    "Egyetlen esemény",
+    "Teljes vagy csonka naptári hét",
+    "Egyéni dátumtartomány",
+    "Teljes feltöltött időszak",
+]
+FPI_SCOPE_KEY_V411 = "2099-W52-SCOPE"
+
+
+def _fpi_v411_list_value(value, fallback):
+    if isinstance(value, (list, tuple, set)):
+        return [str(x) for x in value if str(x).strip()]
+    if value is None:
+        return list(fallback)
+    s = str(value).strip()
+    if not s:
+        return list(fallback)
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed if str(x).strip()]
+    except Exception:
+        pass
+    return [s]
+
+
+def _fpi_v411_playmodel_label(primary: str, secondary: Optional[str] = None) -> str:
+    primary = str(primary or "Kiegyensúlyozott")
+    secondary = str(secondary or "").strip()
+    if secondary and secondary != "Nincs" and secondary != primary:
+        return f"{primary} 70% + {secondary} 30%"
+    return primary
+
+
+def _fpi_v411_playmodel_factor(metric: str, primary: str, secondary: Optional[str] = None) -> float:
+    primary = primary if primary in FPI_PLAYMODEL_FACTORS_V112 else "Kiegyensúlyozott"
+    p = float(FPI_PLAYMODEL_FACTORS_V112[primary].get(metric, 1.0))
+    secondary = str(secondary or "").strip()
+    if not secondary or secondary == "Nincs" or secondary == primary or secondary not in FPI_PLAYMODEL_FACTORS_V112:
+        return p
+    s = float(FPI_PLAYMODEL_FACTORS_V112[secondary].get(metric, 1.0))
+    return 0.70 * p + 0.30 * s
+
+
+_fpi_v411_base_reference_profile = _fpi_build_reference_profile_v112
+
+def _fpi_build_reference_profile_v112(age: str, level: str, position: str, playmodel: str) -> Dict[str, object]:
+    age = age if age in FPI_AGE_FACTOR_V112 else "Felnőtt"
+    level = level if level in FPI_LEVEL_FACTOR_V112 else "NB II"
+    position = position if position in FPI_POSITION_FACTORS_V112 else "Középpályás"
+    primary = playmodel if playmodel in FPI_PLAYMODEL_FACTORS_V112 else "Kiegyensúlyozott"
+    coach_ctx = _fpi_get_coach_context_v97() or {}
+    secondary = coach_ctx.get("secondary_playmodel") if str(coach_ctx.get("primary_playmodel", primary)) == str(primary) else None
+    ranges = {}
+    for metric, base in FPI_REFERENCE_BASE_RANGES_V112.items():
+        factor = FPI_AGE_FACTOR_V112[age] * FPI_LEVEL_FACTOR_V112[level]
+        factor *= FPI_POSITION_FACTORS_V112[position].get(metric, 1.0)
+        factor *= _fpi_v411_playmodel_factor(metric, primary, secondary)
+        factor = max(0.25, min(1.45, factor))
+        ranges[metric] = _fpi_scale_range_v112(base, factor)
+    model_label = _fpi_v411_playmodel_label(primary, secondary)
+    provisional = str(level).startswith("Román ")
+    source_note = (
+        "előzetes liga-profil; induló faktor a magyar NB I referencia" if level.startswith("Román SuperLiga")
+        else "előzetes liga-profil; induló faktor a magyar NB II referencia" if level.startswith("Román Liga II")
+        else "FPI liga-profil"
+    )
+    label = f"{age} / {level} / {position} / {model_label}"
+    if provisional:
+        label += f" | {source_note}; 3 saját teljes meccstől saját meccsmedián az elsődleges"
+    return {
+        "label": label, "age": age, "level": level, "position": position,
+        "playmodel": primary, "secondary_playmodel": secondary,
+        "playmodel_label": model_label, "ranges": ranges,
+        "provisional": provisional, "source_note": source_note,
+    }
+
+
+def _fpi_v411_event_options(df: pd.DataFrame) -> Tuple[List[str], Dict[str, str]]:
+    if df is None or df.empty:
+        return [], {}
+    data = df.copy()
+    data["_event_v411"] = _fpi_v202_event_key(data)
+    data["_dt_v411"] = pd.to_datetime(data.get("start_time"), errors="coerce")
+    rows = []
+    for key, group in data.groupby("_event_v411", dropna=False):
+        dt = group["_dt_v411"].dropna().min()
+        kind = "Meccs" if group.get("session_type", pd.Series("", index=group.index)).astype(str).eq("Meccs").any() else "Edzés"
+        name = str(group.get("session_name", pd.Series("Session", index=group.index)).dropna().astype(str).iloc[0]) if len(group) else "Session"
+        label = f"{dt.strftime('%Y-%m-%d %H:%M') if pd.notna(dt) else 'ismeretlen dátum'} | {kind} | {name}"
+        rows.append((str(key), label, dt if pd.notna(dt) else pd.Timestamp.min))
+    rows.sort(key=lambda x: x[2])
+    keys = [x[0] for x in rows]
+    return keys, {x[0]: x[1] for x in rows}
+
+
+def _fpi_v411_prepare_scope(
+    df: pd.DataFrame,
+    mode: str,
+    selected_week: Optional[str] = None,
+    selected_event: Optional[str] = None,
+    date_range: Optional[Tuple[object, object]] = None,
+) -> Tuple[pd.DataFrame, str, Dict[str, object]]:
+    data = df.copy()
+    data["_fpi_scope_selected_v411"] = False
+    data["_fpi_scope_code_v411"] = ""
+    dt = pd.to_datetime(data.get("start_time"), errors="coerce")
+    mode = str(mode or "Automatikus felismerés")
+    report_key = str(selected_week or (_fpi_latest_week(data) or ""))
+    label = format_week_label(report_key) if report_key else "Nincs kiválasztott időszak"
+    scope_type = "week"
+
+    if mode == "Egyetlen esemény":
+        event_key = _fpi_v202_event_key(data).astype(str)
+        mask = event_key.eq(str(selected_event))
+        scope_type = "single_session"
+        report_key = FPI_SCOPE_KEY_V411
+        label = "Egyetlen esemény"
+        if mask.any():
+            dmin = dt[mask].dropna().min()
+            name = data.loc[mask, "session_name"].dropna().astype(str).iloc[0] if "session_name" in data.columns and data.loc[mask, "session_name"].notna().any() else "Session"
+            label = f"{dmin.strftime('%Y-%m-%d %H:%M') if pd.notna(dmin) else 'ismeretlen dátum'} | {name}"
+            data.loc[mask, "_fpi_scope_selected_v411"] = True
+            data.loc[mask, "_fpi_scope_code_v411"] = report_key
+    elif mode == "Egyéni dátumtartomány":
+        start = end = None
+        if isinstance(date_range, (tuple, list)) and len(date_range) >= 2:
+            start, end = pd.to_datetime(date_range[0], errors="coerce"), pd.to_datetime(date_range[1], errors="coerce")
+        if pd.notna(start) and pd.notna(end):
+            if end < start:
+                start, end = end, start
+            mask = dt.dt.normalize().between(start.normalize(), end.normalize())
+            data.loc[mask, "_fpi_scope_selected_v411"] = True
+            data.loc[mask, "_fpi_scope_code_v411"] = FPI_SCOPE_KEY_V411
+            report_key = FPI_SCOPE_KEY_V411
+            scope_type = "date_range"
+            label = f"{start.strftime('%Y-%m-%d')} – {end.strftime('%Y-%m-%d')}"
+    elif mode == "Teljes feltöltött időszak":
+        scope_type = "full_period"
+        report_key = str(selected_week or (_fpi_latest_week(data) or ""))
+        dvalid = dt.dropna()
+        label = f"{dvalid.min().strftime('%Y-%m-%d')} – {dvalid.max().strftime('%Y-%m-%d')}" if not dvalid.empty else "Teljes feltöltött időszak"
+    else:
+        scope_type = "week"
+        report_key = str(selected_week or (_fpi_latest_week(data) or ""))
+        label = format_week_label(report_key)
+
+    meta = {
+        "mode_selection": mode,
+        "scope_type": scope_type,
+        "report_key": report_key,
+        "label": label,
+        "selected_week": selected_week,
+        "selected_event": selected_event,
+        "date_range": date_range,
+    }
+    st.session_state["fpi_analysis_scope_v411"] = meta
+    return data, report_key, meta
+
+
+_fpi_v411_base_master_dataset = _fpi_v300_master_dataset
+
+def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    out, report = _fpi_v411_base_master_dataset(data)
+    if out is None or out.empty:
+        return out, report
+    if "_fpi_scope_selected_v411" in out.columns and "_fpi_scope_code_v411" in out.columns:
+        mask = out["_fpi_scope_selected_v411"].fillna(False).astype(bool)
+        codes = out["_fpi_scope_code_v411"].fillna("").astype(str)
+        valid = mask & codes.str.strip().ne("")
+        out.loc[valid, "week"] = codes[valid]
+        report = dict(report or {})
+        report["weeks"] = sorted(out["week"].dropna().astype(str).unique().tolist(), key=_fpi_week_sort_key_v99)
+        report["analysis_scope_rows_v411"] = int(valid.sum())
+    return out, report
+
+
+def _fpi_v411_scope_meta_for_week(week: object) -> Dict[str, object]:
+    meta = st.session_state.get("fpi_analysis_scope_v411", {}) or {}
+    return meta if str(meta.get("report_key", "")) == str(week) else {}
+
+
+_fpi_v411_base_format_week_label = format_week_label
+_fpi_v411_base_week_label_short = week_label_short
+
+def format_week_label(week_code: str) -> str:
+    meta = _fpi_v411_scope_meta_for_week(week_code)
+    if meta:
+        return str(meta.get("label") or week_code)
+    return _fpi_v411_base_format_week_label(week_code)
+
+
+def week_label_short(week_code: str) -> str:
+    meta = _fpi_v411_scope_meta_for_week(week_code)
+    if meta:
+        return str(meta.get("label") or week_code)
+    return _fpi_v411_base_week_label_short(week_code)
+
+
+def _fpi_v411_week_column(df: pd.DataFrame) -> pd.Series:
+    if "_fpi_original_week_v300" in df.columns:
+        original = df["_fpi_original_week_v300"].astype("string")
+        if original.notna().any():
+            return original.astype(str)
+    return df.get("week", pd.Series("", index=df.index)).astype(str)
+
+
+def _fpi_v411_complete_week_codes(df: pd.DataFrame, cutoff: Optional[pd.Timestamp] = None) -> List[str]:
+    if df is None or df.empty or "start_time" not in df.columns:
+        return []
+    data = df.copy()
+    data["_dt_v411"] = pd.to_datetime(data["start_time"], errors="coerce")
+    data = data[data["_dt_v411"].notna()].copy()
+    if cutoff is not None and pd.notna(cutoff):
+        data = data[data["_dt_v411"] <= pd.to_datetime(cutoff)]
+    if data.empty:
+        return []
+    data["_week_real_v411"] = _fpi_v411_week_column(data)
+    data = data[data["_week_real_v411"].str.match(r"^\d{4}-W\d{2}$", na=False)]
+    if data.empty:
+        return []
+    data["_event_v411"] = _fpi_v202_event_key(data)
+    data["_kind_v411"] = data.get("session_type", pd.Series("", index=data.index)).apply(_fpi_v200_session_kind)
+    complete = []
+    for week, group in data.groupby("_week_real_v411"):
+        events = group[["_event_v411", "_kind_v411", "_dt_v411"]].drop_duplicates("_event_v411")
+        training_n = int((events["_kind_v411"] == "training").sum())
+        match_n = int((events["_kind_v411"] == "match").sum())
+        event_n = int(len(events))
+        span = int((events["_dt_v411"].max().normalize() - events["_dt_v411"].min().normalize()).days) if event_n else 0
+        if event_n >= 3 and span >= 3 and (match_n >= 1 or training_n >= 4):
+            complete.append(str(week))
+    return sorted(set(complete), key=_fpi_week_sort_key_v99)
+
+
+def _fpi_v411_trend_status(df: pd.DataFrame, selected_week: Optional[str] = None) -> Dict[str, object]:
+    cutoff = None
+    if df is not None and not df.empty:
+        if selected_week and str(selected_week) in set(df.get("week", pd.Series(dtype=str)).astype(str)):
+            cutoff = pd.to_datetime(df.loc[df["week"].astype(str).eq(str(selected_week)), "start_time"], errors="coerce").max()
+        if cutoff is None or pd.isna(cutoff):
+            cutoff = pd.to_datetime(df.get("start_time"), errors="coerce").max()
+    complete = _fpi_v411_complete_week_codes(df, cutoff)
+    n = len(complete)
+    if n >= 4:
+        return {"available": True, "code": "trend", "complete_weeks": complete, "count": n, "label": f"{n} teljes hét – trend értékelhető"}
+    if n >= 2:
+        return {"available": False, "code": "comparison", "complete_weeks": complete, "count": n, "label": f"{n} teljes hét – összehasonlítás, még nem trend"}
+    return {"available": False, "code": "limited", "complete_weeks": complete, "count": n, "label": "Nincs legalább 4 teljes hét; trend nem készül"}
+
+
+_fpi_v411_base_detect_mode = _fpi_v202_detect_analysis_mode
+
+def _fpi_v202_detect_analysis_mode(df: pd.DataFrame, selected_week: Optional[str] = None) -> Dict[str, object]:
+    mode = dict(_fpi_v411_base_detect_mode(df, selected_week) or {})
+    meta = _fpi_v411_scope_meta_for_week(selected_week)
+    if meta.get("scope_type") == "single_session":
+        mode.update({"code": "single_session", "label": "Egyszeri edzéselemzés", "description": "Egyetlen esemény sessionprofilja. Heti trend és teljes Readiness nem készül.", "is_complete_week": False, "is_provisional": True})
+    elif meta.get("scope_type") == "date_range":
+        total = int(mode.get("total_sessions", 0) or 0)
+        mode.update({"code": "date_range", "label": "Egyéni dátumtartomány", "description": f"{meta.get('label')} közötti {total} esemény elemzése. A rendszer nem kezeli automatikusan teljes hétként.", "is_complete_week": False, "is_provisional": True})
+    trend = _fpi_v411_trend_status(df, selected_week)
+    mode["trend_status_v411"] = trend
+    return mode
+
+
+_fpi_v411_base_pattern_insights = build_pattern_insights
+
+def build_pattern_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
+    status = _fpi_v411_trend_status(df, selected_week)
+    if not status.get("available"):
+        return []
+    return _fpi_v411_base_pattern_insights(df, selected_week)
+
+
+_fpi_v411_base_report_context = _fpi_report_context
+
+def _fpi_report_context(data: pd.DataFrame, selected_week: Optional[str] = None, playstyle: str = "Kiegyensúlyozott", tactical_context: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    ctx = _fpi_v411_base_report_context(data, selected_week, playstyle, tactical_context)
+    if ctx.get("error"):
+        return ctx
+    df = ctx.get("df", pd.DataFrame())
+    week = str(ctx.get("selected_week", selected_week or ""))
+    mode = _fpi_v202_detect_analysis_mode(df, week)
+    trend = _fpi_v411_trend_status(df, week)
+    ctx["analysis_mode_v411"] = mode
+    ctx["trend_status_v411"] = trend
+    ctx["analysis_scope_v411"] = _fpi_v411_scope_meta_for_week(week)
+    code = str(mode.get("code", ""))
+    ctx["readiness_status_v411"] = "full" if code == "full_microcycle" else ("preliminary" if code in {"week_in_progress", "preseason_block", "date_range"} else "not_available")
+
+    breakdown = ctx.get("readiness_breakdown_v302")
+    if isinstance(breakdown, pd.DataFrame) and not breakdown.empty and not trend.get("available"):
+        breakdown = breakdown.copy()
+        breakdown["Pont"] = breakdown["Pont"].astype(object)
+        mask = breakdown["Komponens"].astype(str).str.contains("Terhelési trend", case=False, na=False)
+        breakdown.loc[mask, "Komponens"] = "Terhelési összehasonlítás"
+        breakdown.loc[mask, "Pont"] = "n.a."
+        breakdown.loc[mask, "Státusz"] = "Nem minősített"
+        breakdown.loc[mask, "Magyarázat"] = (
+            "Mit jelent? Az elérhető teljes hetek leíró összevetése. Most: "
+            + str(trend.get("label"))
+            + ". Ez nem trendpont és nem módosítja a Readiness összpontszámát."
+        )
+        ctx["readiness_breakdown_v302"] = breakdown
+
+    if not trend.get("available"):
+        ctx["insights"] = [x for x in (ctx.get("insights") or []) if "trend" not in _norm_mapping_text(getattr(x, "title", ""))]
+        ctx["insights_df"] = build_insight_export_df(ctx["insights"])
+        summary = str(ctx.get("summary", ""))
+        summary = re.sub(r"(?i)többhetes trend", "heti összehasonlítás", summary)
+        ctx["summary"] = summary + f"\n\nIdősoros státusz: {trend.get('label')}."
+
+    if code == "single_session":
+        ctx["risk_df"] = pd.DataFrame()
+        ctx["next_df"] = pd.DataFrame()
+        ctx["microcycle_plan_v300"] = pd.DataFrame()
+        ctx["summary"] = "Egyetlen esemény sessionprofilja készült. A riport az edzés volumenét, intenzitását, sebességi ingerét és a kereten belüli eltéréseket értékeli; heti trendet és teljes Readiness pontot nem közöl."
+    return ctx
+
+
+_fpi_v411_base_aligned_comparison = _fpi_v204_aligned_comparison
+
+def _fpi_v204_aligned_comparison(df: pd.DataFrame, week: str, blocked: set) -> pd.DataFrame:
+    status = _fpi_v411_trend_status(df, week)
+    meta = _fpi_v411_scope_meta_for_week(week)
+    if not status.get("available") and status.get("count", 0) < 2:
+        return pd.DataFrame()
+    if not meta:
+        return _fpi_v411_base_aligned_comparison(df, week, blocked)
+    if df is None or df.empty or "start_time" not in df.columns:
+        return pd.DataFrame()
+    data = df.copy()
+    data["_dt204"] = pd.to_datetime(data["start_time"], errors="coerce")
+    data = data[data["_dt204"].notna()].copy()
+    selected = data[data.get("week", pd.Series("", index=data.index)).astype(str).eq(str(week))].copy()
+    if selected.empty:
+        return pd.DataFrame()
+    cutoff_day = int(selected["_dt204"].dt.weekday.max())
+    selected_max = selected["_dt204"].max()
+    data = data[data["_dt204"] <= selected_max].copy()
+    data["_week_real_v411"] = _fpi_v411_week_column(data)
+    rows = []
+
+    def _row_from_group(group: pd.DataFrame, group_week: str, display_week: str, comparison_text: str) -> Optional[Dict[str, object]]:
+        if group is None or group.empty:
+            return None
+        local = group.copy()
+        local["week"] = str(group_week)
+        player_period = _fpi_v204_player_period(local, str(group_week), blocked)
+        row = {"Hét": display_week, "Összevetés": comparison_text}
+        for c, label in [("total_distance", "Medián össztáv"), ("hsr_distance", "Medián HSR"), ("sprint_distance", "Medián sprint"), ("training_load", "Medián load")]:
+            row[label] = float(pd.to_numeric(player_period.get(c), errors="coerce").median()) if c in player_period.columns else np.nan
+        return row
+
+    # Korábbi teljes hetek ugyaneddig a hétközi pontig.
+    for w in status.get("complete_weeks", [])[-6:]:
+        if str(w) == str(week):
+            continue
+        g = data[(data["_week_real_v411"].astype(str) == str(w)) & (data["_dt204"].dt.weekday <= cutoff_day)].copy()
+        row = _row_from_group(g, str(w), str(w), f"azonos hétközi pontig ({cutoff_day + 1}. nap)")
+        if row:
+            rows.append(row)
+
+    # Az aktuális teljes vagy csonka hét mindig külön sorban szerepel.
+    current_row = _row_from_group(
+        selected,
+        str(week),
+        f"{format_week_label(str(week))} – aktuális",
+        f"tényleges adat eddig ({cutoff_day + 1}. nap)",
+    )
+    if current_row:
+        rows.append(current_row)
+    return pd.DataFrame(rows)
+
+
+# A landing oldalon továbbra is egyetlen GPS-minta marad, de több teljes hetet mutat.
+def build_fpi_gps_only_sample_pdf_bytes() -> Optional[bytes]:
+    """Egyetlen, több teljes hetes GPS-minta; külön session/csonka hét minták nem készülnek."""
+    demo_raw = build_demo_performance_data()
+    demo_df, _, missing = standardize_dataframe(demo_raw)
+    if missing:
+        return None
+    demo_df = add_position_group(demo_df)
+    demo_df, _ = _fpi_v300_master_dataset(demo_df)
+    complete = _fpi_v411_complete_week_codes(demo_df)
+    if len(complete) < 4 and complete:
+        # A beépített demo korábban háromhetes volt. A legkorábbi teljes hetet
+        # egy héttel korábbra másoljuk, enyhén csökkentett fizikai értékekkel,
+        # hogy a minta valódi 4+ hetes trendkaput mutasson.
+        earliest = complete[0]
+        clone = demo_df[demo_df["week"].astype(str).eq(str(earliest))].copy()
+        if not clone.empty:
+            clone["start_time"] = pd.to_datetime(clone["start_time"], errors="coerce") - pd.Timedelta(days=7)
+            for col in ["duration_min", "total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts", "training_load", "acc_count", "dec_count", "acc_high", "dec_high"]:
+                if col in clone.columns:
+                    clone[col] = pd.to_numeric(clone[col], errors="coerce") * 0.94
+            if "session_id" in clone.columns:
+                clone["session_id"] = clone["session_id"].astype(str) + "_SAMPLE_PREV"
+            if "match_event_id" in clone.columns:
+                clone["match_event_id"] = clone["match_event_id"].astype(str) + "_SAMPLE_PREV"
+            demo_df = pd.concat([clone, demo_df], ignore_index=True, sort=False)
+            demo_df, _ = _fpi_v300_master_dataset(demo_df)
+    return build_fpi_gps_only_pdf_bytes(
+        demo_df, "__ALL__", "Magas presszing",
+        demo_label="MINTA RIPORT / TÖBBHETES, TELJES HETEK GPS-ONLY",
+    )
+
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
@@ -19501,18 +20210,23 @@ with st.expander("⚙️ Meccskontextus és edzői beállítások", expanded=Fal
     st.header("Meccskontextus")
     today_v94 = pd.Timestamp.today().date()
     opponent_v94 = st.text_input("Ellenfél neve", value=st.session_state.get("fpi_match_opponent_v94", ""))
-    match_date_v94 = st.date_input("Meccsnap", value=st.session_state.get("fpi_match_date_v94", today_v94))
-    match_week_v94 = _fpi_iso_week_from_date_v94(match_date_v94)
+    next_match_date_v94 = st.date_input(
+        "Következő mérkőzés dátuma",
+        value=st.session_state.get("fpi_manual_match_date_v300", None),
+        help="Az elemzett időszaktól függetlenül a következő ciklus és MD-besorolás tervezési dátuma.",
+    )
+    match_week_v94 = _fpi_iso_week_from_date_v94(next_match_date_v94) if next_match_date_v94 else None
     st.session_state["fpi_match_opponent_v94"] = opponent_v94
-    st.session_state["fpi_match_date_v94"] = match_date_v94
+    st.session_state["fpi_manual_match_date_v300"] = next_match_date_v94
+    st.session_state["fpi_match_date_v94"] = next_match_date_v94
     st.session_state["fpi_match_context_v94"] = {
         "opponent": opponent_v94.strip() if isinstance(opponent_v94, str) else "",
-        "match_date": match_date_v94,
+        "match_date": next_match_date_v94,
         "match_week": match_week_v94,
         "today": today_v94,
         "today_week": _fpi_iso_week_from_date_v94(today_v94),
     }
-    st.caption(f"Mai hét: {_fpi_iso_week_from_date_v94(today_v94)} | Meccshét: {match_week_v94}")
+    st.caption(f"Mai hét: {_fpi_iso_week_from_date_v94(today_v94)} | Következő meccshét: {match_week_v94 or 'nincs megadva'}")
 
     st.header("Edzői kontextus / referencia V2")
     reference_age_v97 = st.selectbox("Korosztály", FPI_REFERENCE_AGE_OPTIONS_V112, index=0, key="app_ref_age_v112")
@@ -19526,8 +20240,18 @@ with st.expander("⚙️ Meccskontextus és edzői beállítások", expanded=Fal
         help="A kézi választás felülírja az automatikus felismerést."
     )
     st.session_state["fpi_season_phase_v205"] = season_phase_v205
-    playmodel_profile_v97 = st.selectbox("Játékmodell profil", FPI_PLAYMODEL_OPTIONS_V112, index=4, key="app_playmodel_profile_v112")
-    ref_profile_v97 = f"{reference_age_v97} / {reference_level_v97} / játékosonkénti poszt / {playmodel_profile_v97}"
+    pm1_v411, pm2_v411 = st.columns(2)
+    with pm1_v411:
+        playmodel_profile_v97 = st.selectbox(
+            "Elsődleges játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=4, key="app_playmodel_profile_v411"
+        )
+    with pm2_v411:
+        secondary_options_app_v411 = ["Nincs"] + [x for x in FPI_PLAYMODEL_OPTIONS_V112 if x != playmodel_profile_v97]
+        secondary_playmodel_v97 = st.selectbox(
+            "Másodlagos játékmodell (30%)", secondary_options_app_v411, index=0, key="app_secondary_playmodel_v411"
+        )
+    playmodel_label_v97 = _fpi_v411_playmodel_label(playmodel_profile_v97, secondary_playmodel_v97)
+    ref_profile_v97 = f"{reference_age_v97} / {reference_level_v97} / játékosonkénti poszt / {playmodel_label_v97}"
     st.caption(f"Aktív referencia: {ref_profile_v97}. Nincs globális referencia poszt; a poszt játékosonként kerül értelmezésre.")
 
     cycle_days_v97 = st.number_input("Hány napos a ciklus?", min_value=3, max_value=10, value=7, step=1, key="app_cycle_days_v112")
@@ -19553,6 +20277,12 @@ with st.expander("⚙️ Meccskontextus és edzői beállítások", expanded=Fal
         "reference_age": reference_age_v97,
         "reference_level": reference_level_v97,
         "playmodel_profile": playmodel_profile_v97,
+        "primary_playmodel": playmodel_profile_v97,
+        "secondary_playmodel": secondary_playmodel_v97,
+        "playmodel_weights": {"primary": 0.70, "secondary": 0.30 if secondary_playmodel_v97 != "Nincs" else 0.0},
+        "playmodel_label": playmodel_label_v97,
+        "selected_playstyle": playmodel_profile_v97,
+        "next_match_date": next_match_date_v94,
         "coach_week_type": coach_week_type_v97,
         "cycle_days": int(cycle_days_v97),
         "training_days": int(n_train_v97),
@@ -19563,9 +20293,12 @@ with st.expander("⚙️ Meccskontextus és edzői beállítások", expanded=Fal
 
     st.header("Szűrők")
     default_week_idx_v94 = weeks.index(match_week_v94) if match_week_v94 in weeks else (len(weeks) - 1 if weeks else 0)
-    selected_week = st.selectbox("Hét", weeks, index=default_week_idx_v94, format_func=week_label_short)
-    selected_playstyle = st.selectbox("Játékmodell", FPI_PLAYMODEL_OPTIONS_V112, index=4)
-    st.caption(PLAYSTYLE_OPTIONS.get(selected_playstyle, "Játékmodell-alapú referencia és következtetés."))
+    selected_week = st.selectbox("Elemzett hét", weeks, index=default_week_idx_v94, format_func=week_label_short)
+    selected_playstyle = playmodel_profile_v97
+    st.caption(
+        f"Riport játékmodell: {playmodel_label_v97}. "
+        + PLAYSTYLE_OPTIONS.get(selected_playstyle, "Játékmodell-alapú referencia és következtetés.")
+    )
     selected_types = st.multiselect("Típus", session_types, default=session_types)
     selected_players = st.multiselect("Játékosok", players, default=players)
 
@@ -22605,26 +23338,10 @@ def build_fpi_own_team_tactical_only_pdf_bytes_v156(tactical_context: Optional[D
     return _fpi_v404_render_own_team(tactical_context or {}, None, (0, 0), "GPS-adat nélkül", demo_label, "Tactical-only", None)
 
 
-FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
-    ("7. V407 – PDF-karakterkezelés, HalfTime merge, kapuskezelés és MD-következtetés", [
-        "Minden PDF-export ugyanazon végső sanitize kapun fut át, és beágyazott Unicode-betűtípust használ. Az ő és ű karakterek változatlanul, helyesen maradnak a PDF-ben.",
-        "Az azonos mérkőzéshez tartozó HalfTime 1 és HalfTime 2 automatikusan egy Match eseménnyé egyesül. Az össztáv, Load, sprint, HSR, High Efforts, gyorsítások és lassítások összeadódnak; a Max Speed a két félidő átlaga.",
-        "A játékperc, per90, readiness, benchmark és játékosszintű kockázat az összevont teljes mérkőzésből újraszámolódik; a két félidő nem jelenik meg két külön sessionként.",
-        "A Load- és HSR-rangsorok alsó és felső mezőnye mezőnyjátékosokra készül. A beavatkozást igénylő játékosok részben a kapusok alacsony mezőnyjátékos-terhelése nem generál Load-, HSR- vagy sprintlemaradás-jelzést.",
-        "Ha egy GPS-fájl neve MD-napot, egy másik pedig dátumot tartalmaz, az app a dátumkülönbségből következteti ki a másik fájl MD-címkéjét. Például egy dátumozott, az MD-3 fájl utáni napi session MD-2 besorolást kap.",
-    ]),
-]
 
 
-FPI_METHODOLOGY_SECTIONS_V143 = list(FPI_METHODOLOGY_SECTIONS_V143) + [
-    ("14. V407 – Platformkonzisztencia és Own Team Intelligence", [
-        "A saját csapat riport ugyanazt az 1–5 állapot- és prioritásskálát használja, mint a Tactical-only és a GPS+taktikai riport.",
-        "A saját csapat elemzés automatikusan GPS-only, Tactical-only vagy GPS+taktikai módba kerül az elérhető inputok alapján.",
-        "A riport külön jelöli az erősséget, a stabil állapotot, a figyelendő és a fejlesztendő területeket.",
-        "A négy termék közös fejlécet, táblázati ritmust, státusznyelvet, oldallogikát és vezetői kulcsüzenetet használ.",
-        "A GPS-only és a GPS+taktikai riport ugyanazt a readiness-magyarázatot, kapuskizárást, MD-következtetést és adaptív ciklustervet használja."
-    ])
-]
+
+
 
 
 def render_tactical_pro_module(gps_context: Dict[str, object]) -> None:
