@@ -1492,8 +1492,8 @@ STANDARD_COLUMNS = {
     "avg_speed": ["Átlagsebesség [km/h]", "Average Speed", "Avg Speed", "Mean Speed"],
     "sprints": ["Sprintek", "Sprints", "Sprint Count", "Number of Sprints", "Sprint #", "Sprint efforts", "Sprint Efforts", "Sprints count  ()", "Sprints count"],
     "speed_zone_3": ["Táv a sebesség célzónában 3 [m] (14.40 - 19.79 km/h)"],
-    "speed_zone_4": ["Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)", "Distance(4+5)  (m)", "Distance(4+5)", "Distance 4+5", "HSR Distance", "High Speed Distance (>19,8 km/h)", "High Speed Distance", "velocity2_band3_total_distance"],
-    "speed_zone_5": ["Táv a sebesség célzónában 5 [m] (25.00- km/h)", "Total sprints distance  (m)", "Total sprints distance", "Sprint distance", "Sprint Distance", "Sprint Distance (m)", "Sprint Distance (>25 km/h)", "velocity2_band4_total_distance"],
+    "speed_zone_4": ["Distance in Speed Zone 4  (km)", "Distance in Speed Zone 4 (km)", "Táv a sebesség célzónában 4 [m] (19.80 - 24.99 km/h)", "Distance(4+5)  (m)", "Distance(4+5)", "Distance 4+5", "HSR Distance", "High Speed Distance (>19,8 km/h)", "High Speed Distance", "velocity2_band3_total_distance"],
+    "speed_zone_5": ["Distance in Speed Zone 5  (km)", "Distance in Speed Zone 5 (km)", "Táv a sebesség célzónában 5 [m] (25.00- km/h)", "Total sprints distance  (m)", "Total sprints distance", "Sprint distance", "Sprint Distance", "Sprint Distance (m)", "Sprint Distance (>25 km/h)", "velocity2_band4_total_distance"],
     "training_load": ["Edzési terhelési pontérték", "Terhelési pont", "Player Load", "Total Player Load", "Load", "Training Load", "Total Load", "Workload", "Load Score", "total_player_load", "HMLD"],
     "cardio_load": ["Kardióterhelés", "Cardio Load"],
     "recovery_hours": ["Regenerálódási idő [h]", "Recovery Time", "Recovery"],
@@ -1715,6 +1715,58 @@ def normalize_combined_fields(out: pd.DataFrame, mapping: Dict[str, Optional[str
         out["hsr_distance"] = out[["speed_zone_4", "speed_zone_5"]].sum(axis=1, min_count=1)
     out["sprint_distance"] = out["speed_zone_5"]
     return out
+
+
+def _fpi_mapped_distance_units_to_metres(out: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> pd.DataFrame:
+    """A kézi/általános mapper km-ben érkező távolságait méterre váltja."""
+    data = out.copy()
+    for target in ["total_distance", "speed_zone_3", "speed_zone_4", "speed_zone_5"]:
+        if target not in data.columns:
+            continue
+        raw_source = str(mapping.get(target) or "").lower()
+        source = _norm_mapping_text(raw_source)
+        values = pd.to_numeric(data[target], errors="coerce")
+        finite = values.dropna().abs()
+        km_header = "(km" in raw_source or " km" in raw_source or "kilomet" in source
+        km_scale = not finite.empty and float(finite.median()) < 100.0
+        data[target] = values * 1000.0 if km_header and km_scale else values
+    return data
+
+
+def _fpi_enforce_distance_hierarchy(df: pd.DataFrame, recovery_log: Optional[List[str]] = None) -> pd.DataFrame:
+    """Fizikai ellenőrzés: sprinttáv <= HSR <= teljes táv."""
+    data = df.copy()
+    total = pd.to_numeric(data["total_distance"], errors="coerce") if "total_distance" in data.columns else pd.Series(np.nan, index=data.index)
+    z4 = pd.to_numeric(data["speed_zone_4"], errors="coerce") if "speed_zone_4" in data.columns else pd.Series(np.nan, index=data.index)
+    z5 = pd.to_numeric(data["speed_zone_5"], errors="coerce") if "speed_zone_5" in data.columns else pd.Series(np.nan, index=data.index)
+    hsr = pd.to_numeric(data["hsr_distance"], errors="coerce") if "hsr_distance" in data.columns else z4.fillna(0) + z5.fillna(0)
+    sprint = pd.to_numeric(data["sprint_distance"], errors="coerce") if "sprint_distance" in data.columns else z5
+    issue = pd.Series(False, index=data.index)
+    tol = total.abs() * 0.01 + 1.0
+    z4_is_total = total.notna() & z4.notna() & ((z4-total).abs() <= tol) & z5.notna()
+    if z4_is_total.any():
+        z4 = z4.mask(z4_is_total, np.nan)
+        hsr = hsr.mask(z4_is_total, z5)
+        issue |= z4_is_total
+        if recovery_log is not None: recovery_log.append(f"{int(z4_is_total.sum())} sorban a teljes táv téves Zone 4 mappingje javítva")
+    sprint_bad = total.notna() & sprint.notna() & (sprint > total + tol)
+    if sprint_bad.any():
+        sprint = sprint.mask(sprint_bad, np.nan)
+        issue |= sprint_bad
+        if recovery_log is not None: recovery_log.append(f"{int(sprint_bad.sum())} fizikailag lehetetlen sprinttáv érvénytelenítve")
+    hsr = hsr.where(~(hsr.isna() & sprint.notna()), sprint)
+    hsr = hsr.where(~(hsr.notna() & sprint.notna() & (hsr < sprint)), sprint)
+    hsr_bad = total.notna() & hsr.notna() & (hsr > total + tol)
+    if hsr_bad.any():
+        hsr = hsr.mask(hsr_bad, np.nan)
+        issue |= hsr_bad
+        if recovery_log is not None: recovery_log.append(f"{int(hsr_bad.sum())} fizikailag lehetetlen HSR érték érvénytelenítve")
+    if "speed_zone_4" in data.columns: data["speed_zone_4"] = z4
+    if "speed_zone_5" in data.columns: data["speed_zone_5"] = z5
+    data["hsr_distance"] = hsr
+    data["sprint_distance"] = sprint
+    data["distance_hierarchy_issue"] = issue
+    return data
 
 # =============================================================================
 # FPI V200 – Universal GPS Engine
@@ -2100,6 +2152,10 @@ def _fpi_v200_quality_report(
     for col in ["total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts"]:
         if coverage(col) < 0.50:
             warnings.append(f"Hiányos mutató: {col} ({coverage(col):.0%})")
+    if "distance_hierarchy_issue" in data.columns:
+        hierarchy_issues = int(data["distance_hierarchy_issue"].fillna(False).astype(bool).sum())
+        if hierarchy_issues:
+            warnings.append(f"Távolság-hierarchia javítás történt {hierarchy_issues} sorban (sprint ≤ HSR ≤ össztáv)")
 
     if score >= 90:
         label = "Kiváló"
@@ -2527,6 +2583,7 @@ def _fpi_v200_universal_postprocess(
     data = _fpi_v200_normalize_session_type(data, recovery_log)
     data = _fpi_v200_normalize_dates(data, recovery_log)
     data = _fpi_v200_recover_metrics(data, recovery_log)
+    data = _fpi_enforce_distance_hierarchy(data, recovery_log)
     data = _fpi_v200_filter_non_player_rows(data, recovery_log)
 
     if "player_name" in data.columns:
@@ -3414,6 +3471,8 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
         if col in out.columns:
             out[col] = to_numeric(out[col])
 
+    out = _fpi_mapped_distance_units_to_metres(out, mapping)
+
     for col in ["speed_zone_3", "speed_zone_4", "speed_zone_5", "acc_low", "acc_mid", "acc_high", "dec_low", "dec_mid", "dec_high"]:
         if col not in out.columns:
             out[col] = 0
@@ -3454,6 +3513,7 @@ def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Op
         )
 
     out = normalize_combined_fields(out, mapping)
+    out = _fpi_enforce_distance_hierarchy(out)
 
     if "distance_per_min" not in out.columns or out["distance_per_min"].isna().all():
         if "total_distance" in out.columns:
@@ -3506,6 +3566,8 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
     for col in numeric_cols:
         if col in out.columns:
             out[col] = to_numeric(out[col])
+
+    out = _fpi_mapped_distance_units_to_metres(out, mapping)
     for col in ["speed_zone_3", "speed_zone_4", "speed_zone_5", "acc_low", "acc_mid", "acc_high", "dec_low", "dec_mid", "dec_high"]:
         if col not in out.columns:
             out[col] = 0
@@ -3545,6 +3607,7 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
             derived_high_efforts,
         )
     out = normalize_combined_fields(out, mapping)
+    out = _fpi_enforce_distance_hierarchy(out)
 
     if "distance_per_min" not in out.columns or out["distance_per_min"].isna().all():
         if "total_distance" in out.columns:
@@ -3561,6 +3624,14 @@ def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -
     return out, fixed_mapping, []
 
 
+
+
+def apply_manual_mapping(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> pd.DataFrame:
+    """Kompatibilitási wrapper a Clean Workspace gyors mapperéhez."""
+    mapped, _fixed_mapping, missing = apply_mapping_to_raw(raw, mapping)
+    if missing:
+        raise ValueError("Hiányzó kötelező mapping: " + ", ".join(missing))
+    return mapped
 
 
 def render_emergency_mapper(raw_df: pd.DataFrame, current_mapping: Dict[str, Optional[str]], missing_core: List[str]) -> None:
@@ -3874,7 +3945,8 @@ def aggregate_weekly(df: pd.DataFrame) -> pd.DataFrame:
     # Per90 / per participant normalizált csapatmutatók: különösen meccs-edzés arányhoz.
     for metric in ["total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts", "training_load"]:
         if metric in res.columns and "field_team_minutes" in res.columns:
-            res[f"{metric}_per90_team"] = np.where(res["field_team_minutes"] > 0, res[metric] / res["field_team_minutes"] * 90, np.nan)
+            res[f"{metric}_per90_player_avg"] = np.where(res["field_team_minutes"] > 0, res[metric] / res["field_team_minutes"] * 90, np.nan)
+            res[f"{metric}_per90_team"] = np.where(res["field_team_minutes"] > 0, res[metric] / res["field_team_minutes"] * 990, np.nan)
         if metric in res.columns and "field_player_count" in res.columns:
             res[f"{metric}_per_field_player"] = np.where(res["field_player_count"] > 0, res[metric] / res["field_player_count"], np.nan)
     return res
@@ -8385,41 +8457,48 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 
 
 def _fpi_v300_match_reference(master: pd.DataFrame) -> Dict[str, object]:
+    """Tényleges játékperces, cseréket és 11 fős csapatot kezelő meccsreferencia."""
     if master is None or master.empty:
-        return {"available": False}
-    matches = master[master["session_type"].eq("Meccs")].copy()
+        return {"available":False}
+    matches=master[master["session_type"].eq("Meccs")].copy()
     if matches.empty:
-        return {"available": False}
-
-    sum_metrics = [
-        c for c in [
-            "duration_min", "player_minutes", "total_distance", "hsr_distance",
-            "sprint_distance", "sprints", "high_efforts", "training_load",
-            "acc_count", "dec_count", "acc_high", "dec_high"
-        ] if c in matches.columns
-    ]
-    max_metrics = [c for c in ["max_speed"] if c in matches.columns]
-    metrics = sum_metrics + max_metrics
-    for c in metrics:
-        matches[c] = pd.to_numeric(matches[c], errors="coerce")
-
-    agg = {c: "sum" for c in sum_metrics}
-    agg.update({c: "max" for c in max_metrics})
-    player_match = matches.groupby(
-        ["match_event_id", "player_name"], dropna=False
-    ).agg(agg).reset_index()
-
-    med = {}
-    for c in metrics:
-        vals = player_match[c].dropna()
-        med[c] = float(vals.median()) if not vals.empty else None
-
-    return {
-        "available": True,
-        "match_events": int(matches["match_event_id"].dropna().nunique()),
-        "player_match_rows": int(len(player_match)),
-        "metrics": med,
-    }
+        return {"available":False}
+    matches=finalize_exposure_columns(matches)
+    sum_metrics=[c for c in ["total_distance","hsr_distance","sprint_distance","sprints","high_efforts","training_load","acc_count","dec_count","acc_high","dec_high"] if c in matches.columns]
+    max_metrics=[c for c in ["max_speed"] if c in matches.columns]
+    for c in ["player_minutes"]+sum_metrics+max_metrics:
+        if c in matches.columns: matches[c]=pd.to_numeric(matches[c],errors="coerce")
+    agg={c:"sum" for c in ["player_minutes"]+sum_metrics}; agg.update({c:"max" for c in max_metrics})
+    if "is_goalkeeper" in matches.columns: agg["is_goalkeeper"]="max"
+    pm=matches.groupby(["match_event_id","player_name"],dropna=False).agg(agg).reset_index()
+    eligible=pm[pm["player_minutes"].ge(10)].copy()
+    field=eligible
+    if "is_goalkeeper" in eligible.columns and (~eligible["is_goalkeeper"].fillna(False)).any():
+        field=eligible[~eligible["is_goalkeeper"].fillna(False)].copy()
+    per90={}; raw_med={}
+    for c in sum_metrics:
+        raw=pd.to_numeric(field[c],errors="coerce"); mins=pd.to_numeric(field["player_minutes"],errors="coerce")
+        vals=raw/mins.where(mins>0)*90.0
+        per90[c]=float(vals.dropna().median()) if vals.notna().any() else None
+        raw_med[c]=float(raw.dropna().median()) if raw.notna().any() else None
+    for c in max_metrics:
+        vals=pd.to_numeric(field[c],errors="coerce").dropna(); per90[c]=float(vals.median()) if not vals.empty else None; raw_med[c]=per90[c]
+    team_rows=[]
+    for event_id,event in pm.groupby("match_event_id",dropna=False):
+        mins=pd.to_numeric(event["player_minutes"],errors="coerce").sum(min_count=1)
+        row={"match_event_id":event_id,"team_player_minutes":mins}
+        for c in sum_metrics:
+            v=pd.to_numeric(event[c],errors="coerce").sum(min_count=1)
+            row[c]=v/mins*990.0 if pd.notna(mins) and mins>0 else np.nan
+        for c in max_metrics: row[c]=pd.to_numeric(event[c],errors="coerce").max()
+        team_rows.append(row)
+    team_df=pd.DataFrame(team_rows); team_metrics={}
+    for c in sum_metrics+max_metrics:
+        vals=pd.to_numeric(team_df[c],errors="coerce").dropna() if c in team_df.columns else pd.Series(dtype=float)
+        team_metrics[c]=float(vals.median()) if not vals.empty else None
+    minute_vals=pd.to_numeric(pm["player_minutes"],errors="coerce").dropna()
+    team_minute_vals=pd.to_numeric(team_df["team_player_minutes"],errors="coerce").dropna() if not team_df.empty else pd.Series(dtype=float)
+    return {"available":True,"match_events":int(matches["match_event_id"].dropna().nunique()),"player_match_rows":len(pm),"eligible_player_match_rows":len(field),"metrics":per90,"metrics_per90":per90,"metrics_actual_median":raw_med,"team_metrics_per90_11":team_metrics,"player_minutes_median":float(minute_vals.median()) if not minute_vals.empty else None,"team_player_minutes_median":float(team_minute_vals.median()) if not team_minute_vals.empty else None,"reference_note":"Játékos per90 medián (min. 10 perc); csapatprofil 11×90 percre normalizálva."}
 
 
 
@@ -11045,10 +11124,10 @@ def _build_fpi_product_pdf_bytes_v402_base(
 
         meth_rows = [
             [P("Terület", head), P("Football Performance Intelligence metodika", head)],
-            [P("Adatimport", small), P("A Data/Adat lap elsődleges. A segédlapokat az app igyekszik kizárni. A Smart Mapper magyar és angol GPS oszlopneveket is kezel.", small)],
+            [P("Adatimport", small), P("A Data/Adat lap elsődleges. A segédlapokat az app igyekszik kizárni. A Smart Mapper magyar és angol GPS oszlopneveket is kezel. PlayerTeknél az all összesítő split az elsődleges; HSR = Zone 4+5, sprinttáv = Zone 5, a km-es zónák méterre váltódnak.", small)],
             [P("Dátum és hét", small), P("A Week Rescue Engine a dátumot időponttal vagy extra szöveggel együtt is értelmezi, majd ISO hétre csoportosít. Rövid dátumtartományból képződő irreálisan sok hét esetén védelmi újraértelmezést alkalmaz.", small)],
             [P("Kapusok", small), P("Ha van Poszt/Position oszlop, a kapusok automatikusan felismerhetők. Ha nincs, az app kézi kapusválasztást kér. A kapusok sprint/HSR értelmezése csökkentett súlyú.", small)],
-            [P("Játékpercek", small), P("A meccsterhelésnél az app figyelembe veszi, hogy nem minden játékos játszik 90 percet. Ahol elérhető, per90 és csapatperc alapú normalizálást alkalmaz.", small)],
+            [P("Játékpercek", small), P("A meccsterhelésnél az app a tényleges játékospercet használja. A játékosreferencia per90 medián, a csapatreferencia 11×90 percre normalizált; a 10 percnél rövidebb szereplés nem torzítja a fő benchmarkot.", small)],
             [P("Edzés-meccs normalizálás", small), P("Az összevetés nem csak nyers csapatösszeg alapján történik, mert edzésen és meccsen eltérhet a játékosszám és a játékidő. A résztvevők száma és az időtartam is számít.", small)],
             [P("Sebességzónák", small), P("A 4-es és 5-ös zóna külön vagy összevont 4+5 exportként is kezelhető. Összevont oszlopnál az app HSR-ként használja az értéket.", small)],
             [P("High Efforts", small), P("Ha külön High Efforts oszlop van, azt használja. Ha nincs, gyorsulás/lassítás jellegű mutatókból becsült nagy intenzitású akciót képez.", small)],
@@ -14724,7 +14803,7 @@ def render_fpi_clean_workspace_v101() -> None:
         if st.button("✅ Gyors mapping alkalmazása", use_container_width=True, key="clean_apply_mapping_v137"):
             try:
                 mapped_clean = apply_manual_mapping(raw_df_clean, manual_clean)
-                mapped_clean = normalize_combined_fields(mapped_clean, manual_clean)
+                mapped_clean = _fpi_enforce_distance_hierarchy(mapped_clean)
                 mapped_clean = derive_missing_columns(mapped_clean)
                 st.session_state["clean_mapped_df_override_v105"] = mapped_clean
                 st.session_state["clean_manual_mapping_v105"] = manual_clean
@@ -16183,6 +16262,7 @@ def _fpi_prepare_playertek_v143(
     forced_type: Optional[str],
     file_name: str,
 ) -> pd.DataFrame:
+    """PlayerTek CSV mapping: km->m, HSR=Z4+Z5, sprint=Z5, all split elsődleges."""
     header_idx = _fpi_find_header_row_v143(raw, ["player name", "distance", "player load"])
     if header_idx is None:
         return pd.DataFrame()
@@ -16202,48 +16282,67 @@ def _fpi_prepare_playertek_v143(
                 return c
         return None
 
-    out = pd.DataFrame()
-    c_name = pick("Player Name")
-    c_date = pick("Date")
-    c_title = pick("Session Title")
-    c_tags = pick("Tags")
-    c_duration = pick("Duration")
-    c_dist = pick("Distance (km)")
-    c_sprints = pick("Sprints")
-    c_sprint_dist = pick("Sprint Distance (m)")
-    c_acc = pick("Accelerations")
-    c_dec = pick("Decelerations")
-    c_load = pick("Player Load")
-    c_speed = pick("Top Speed (km/h)")
-    c_dpm = pick("Distance Per Min (m/min)")
+    c_name=pick("Player Name"); c_date=pick("Date"); c_title=pick("Session Title")
+    c_split=pick("Split Name"); c_tags=pick("Tags"); c_start=pick("Split Start Time")
+    c_duration=pick("Duration"); c_dist=pick("Distance (km)"); c_sprints=pick("Sprints")
+    c_provider_sprint=pick("Sprint Distance (m)")
+    c_z3=pick("Distance in Speed Zone 3  (km)","Distance in Speed Zone 3 (km)")
+    c_z4=pick("Distance in Speed Zone 4  (km)","Distance in Speed Zone 4 (km)")
+    c_z5=pick("Distance in Speed Zone 5  (km)","Distance in Speed Zone 5 (km)")
+    c_acc=pick("Accelerations"); c_dec=pick("Decelerations"); c_load=pick("Player Load")
+    c_speed=pick("Top Speed (km/h)"); c_dpm=pick("Distance Per Min (m/min)")
     if c_name is None or c_date is None:
         return pd.DataFrame()
 
-    out["Player Name"] = table[c_name]
-    hint_series = table[c_tags] if c_tags else pd.Series([""] * len(table))
-    out["Session Type"] = _fpi_session_type_from_hint_v143(hint_series, forced_type, file_name)
-    out["Session Name"] = table[c_title] if c_title else Path(file_name).stem
-    out["Start Time"] = table[c_date].apply(_fpi_excel_serial_to_datetime_v143)
+    work=table.copy()
+    if c_split:
+        work["_fpi_split_norm"]=work[c_split].astype(str).map(_norm_mapping_text)
+        keys=[c_name,c_date]+([c_title] if c_title else [])
+        has_all=work.groupby(keys,dropna=False)["_fpi_split_norm"].transform(lambda s:s.isin({"all","overall","total"}).any())
+        work=work.loc[(has_all & work["_fpi_split_norm"].isin({"all","overall","total"})) | ~has_all].copy()
+        # all hiányában a game összesítő elsődleges, ha félidők is vannak
+        has_game=work.groupby(keys,dropna=False)["_fpi_split_norm"].transform(lambda s:s.eq("game").any())
+        has_half=work.groupby(keys,dropna=False)["_fpi_split_norm"].transform(lambda s:s.str.contains(r"half|felido|félidő",regex=True,na=False).any())
+        work=work.loc[(has_game & has_half & work["_fpi_split_norm"].eq("game")) | ~(has_game & has_half)].copy()
+
+    out=pd.DataFrame(index=work.index)
+    out["Player Name"]=work[c_name]
+    hints=work[c_tags] if c_tags else pd.Series("",index=work.index)
+    out["Session Type"]=_fpi_session_type_from_hint_v143(hints,forced_type,file_name)
+    title=work[c_title].astype(str) if c_title else pd.Series(Path(file_name).stem,index=work.index)
+    if c_split and "_fpi_split_norm" in work.columns:
+        summary=work["_fpi_split_norm"].isin({"all","overall","total","game"})
+        out["Session Name"]=title.where(summary,title+" | "+work[c_split].astype(str))
+    else:
+        out["Session Name"]=title
+    out["Start Time"]=(work[c_start] if c_start else work[c_date]).apply(_fpi_excel_serial_to_datetime_v143)
     if c_duration:
-        # PlayerTek duration is seconds in the supplied export.
-        out["Duration"] = pd.to_numeric(table[c_duration], errors="coerce") / 60.0
-    if c_dist:
-        out["Total Distance"] = pd.to_numeric(table[c_dist], errors="coerce") * 1000.0
-    if c_sprints:
-        out["Sprints"] = table[c_sprints]
-    if c_sprint_dist:
-        out["Sprint Distance"] = table[c_sprint_dist]
-    if c_acc:
-        out["Total Accelerations"] = table[c_acc]
-    if c_dec:
-        out["Total Decelerations"] = table[c_dec]
-    if c_load:
-        out["Player Load"] = table[c_load]
-    if c_speed:
-        out["Top Speed"] = table[c_speed]
-    if c_dpm:
-        out["Distance Per Min"] = table[c_dpm]
-    return out.dropna(how="all").reset_index(drop=True)
+        out["Duration"]=pd.to_numeric(work[c_duration],errors="coerce")/60.0
+        out["Match Minutes"]=out["Duration"]
+    if c_dist: out["Total Distance"]=pd.to_numeric(work[c_dist],errors="coerce")*1000.0
+    if c_sprints: out["Sprints"]=pd.to_numeric(work[c_sprints],errors="coerce")
+    if c_z3: out["Speed Zone 3"]=pd.to_numeric(work[c_z3],errors="coerce")*1000.0
+    if c_z4: out["Speed Zone 4"]=pd.to_numeric(work[c_z4],errors="coerce")*1000.0
+    if c_z5: out["Speed Zone 5"]=pd.to_numeric(work[c_z5],errors="coerce")*1000.0
+    if c_z4 or c_z5:
+        z4=pd.to_numeric(out["Speed Zone 4"],errors="coerce") if "Speed Zone 4" in out.columns else pd.Series(0.0,index=out.index)
+        z5=pd.to_numeric(out["Speed Zone 5"],errors="coerce") if "Speed Zone 5" in out.columns else pd.Series(0.0,index=out.index)
+        out["HSR Distance"]=z4.fillna(0)+z5.fillna(0)
+        out["Sprint Distance"]=z5
+    elif c_provider_sprint:
+        out["HSR Distance"]=pd.to_numeric(work[c_provider_sprint],errors="coerce")
+        out["Sprint Distance"]=np.nan
+    if c_provider_sprint: out["PlayerTek Provider Sprint Distance"]=pd.to_numeric(work[c_provider_sprint],errors="coerce")
+    if c_acc: out["Total Accelerations"]=pd.to_numeric(work[c_acc],errors="coerce")
+    if c_dec: out["Total Decelerations"]=pd.to_numeric(work[c_dec],errors="coerce")
+    if c_load: out["Player Load"]=pd.to_numeric(work[c_load],errors="coerce")
+    if c_speed: out["Top Speed"]=pd.to_numeric(work[c_speed],errors="coerce")
+    if c_dpm: out["Distance Per Min"]=pd.to_numeric(work[c_dpm],errors="coerce")
+    elif "Total Distance" in out.columns and "Duration" in out.columns:
+        out["Distance Per Min"]=out["Total Distance"]/out["Duration"].where(out["Duration"]>0)
+    out=out.dropna(how="all").reset_index(drop=True)
+    out.attrs["fpi_playertek_import"]={"source_rows":len(table),"kept_rows":len(out),"hsr":"Zone 4 + Zone 5","sprint":"Zone 5"}
+    return out
 
 
 def _fpi_prepare_polar_v143(
