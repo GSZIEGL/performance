@@ -11124,7 +11124,7 @@ def _build_fpi_product_pdf_bytes_v402_base(
 
         meth_rows = [
             [P("Terület", head), P("Football Performance Intelligence metodika", head)],
-            [P("Adatimport", small), P("A Data/Adat lap elsődleges. A segédlapokat az app igyekszik kizárni. A Smart Mapper magyar és angol GPS oszlopneveket is kezel. PlayerTeknél az all összesítő split az elsődleges; HSR = Zone 4+5, sprinttáv = Zone 5, a km-es zónák méterre váltódnak.", small)],
+            [P("Adatimport", small), P("A Data/Adat lap elsődleges. A segédlapokat az app igyekszik kizárni. A Smart Mapper magyar és angol GPS oszlopneveket is kezel. Minden feltöltött forrásfájl alapértelmezetten egy csapatesemény; az egyes játékosok eltérő eszközindítási ideje nem hoz létre külön sessiont. Ugyanazon fájlon belül csak legalább 120 perces időrés választ szét két valódi eseményt. PlayerTeknél az all összesítő split az elsődleges; HSR = Zone 4+5, sprinttáv = Zone 5, a km-es zónák méterre váltódnak.", small)],
             [P("Dátum és hét", small), P("A Week Rescue Engine a dátumot időponttal vagy extra szöveggel együtt is értelmezi, majd ISO hétre csoportosít. Rövid dátumtartományból képződő irreálisan sok hét esetén védelmi újraértelmezést alkalmaz.", small)],
             [P("Kapusok", small), P("Ha van Poszt/Position oszlop, a kapusok automatikusan felismerhetők. Ha nincs, az app kézi kapusválasztást kér. A kapusok sprint/HSR értelmezése csökkentett súlyú.", small)],
             [P("Játékpercek", small), P("A meccsterhelésnél az app a tényleges játékospercet használja. A játékosreferencia per90 medián, a csapatreferencia 11×90 percre normalizált; a 10 percnél rövidebb szereplés nem torzítja a fő benchmarkot.", small)],
@@ -12359,7 +12359,7 @@ def build_fpi_gps_only_pdf_bytes(
                 P(str(r.get('Tervezési alap','')),small)
             ])
         story.append(tbl(md_rows,[1.7*cm,3.6*cm,4.2*cm,3.7*cm,7.2*cm,7.3*cm],'#312E81'))
-        story += [Spacer(1,.10*cm),P('A terv a mezőnyjátékosok előző legfeljebb négy hetes mediánját, közvetlenül előző hetét, az aktuális load/HSR/sprint arányokat, a taperinget és a játékoskockázatot használja. Előzmény hiányában ezt a Tervezési alap oszlop külön jelzi.',small)]
+        story += [Spacer(1,.10*cm),P('A terv legalább két lezárt előzmény esetén saját heti mediánt is használ; négy lezárt héttől stabil négyhetes referencia készül. Rövidebb előzménynél a meccs-/liga-referencia, az aktuális eseménystruktúra, a tapering és a játékoskockázat az elsődleges. A Tervezési alap oszlop mindig jelzi a tényleges referenciaforrást.',small)]
 
     trend_title_v411 = ('5. Időarányos trend – legalább 4 teljes hét' if trend_status_v411.get('available') else ('5. Időarányos összehasonlítás – még nem trend' if int(trend_status_v411.get('count',0) or 0) >= 2 else '5. Idősoros értékelés'))
     story += [PageBreak(),section(trend_title_v411,'#ECFDF5')]
@@ -14631,7 +14631,7 @@ def render_fpi_clean_workspace_v101() -> None:
     # 1. GPS import
     _fpi_section_header_v113(
         "1. GPS import",
-        "Brainsports, PlayerTek, Polar Team Pro, Catapult és egyéb Excel/CSV exportok. Egy fájl, több fájl vagy ZIP is használható.",
+        "Brainsports, PlayerTek, Polar Team Pro, Catapult és egyéb Excel/CSV exportok. Egy fájl alapértelmezetten egy edzés vagy meccs; a játékosonként eltérő GPS-indítási időket a rendszer egy csapateseménybe vonja össze. Egy fájl, több fájl vagy ZIP is használható.",
         "gps",
     )
 
@@ -20180,6 +20180,468 @@ def build_fpi_gps_only_sample_pdf_bytes() -> Optional[bytes]:
         demo_label="MINTA RIPORT / TÖBBHETES, TELJES HETEK GPS-ONLY",
     )
 
+
+
+
+# =============================================================================
+# V413 – Providerfüggetlen forrásfájl-eseménymotor
+# =============================================================================
+# Alapelv:
+# - egy feltöltött forrásfájl alapértelmezetten egy csapatedzés vagy egy meccs;
+# - a játékosok eltérő eszközindítási ideje nem hoz létre új sessiont;
+# - ugyanazon fájl/dátum/típus csoportot csak legalább 120 perces időrés választja szét;
+# - forrásmeta nélkül dátum + típus + sessionnév + időklaszter a fallback;
+# - a logika minden providerre és a Smart Mapper útvonalra is érvényes.
+
+FPI_IMPORT_ENGINE_VERSION = "FPI_V413_SOURCE_EVENT_ENGINE_2026_08_05"
+FPI_EVENT_SPLIT_GAP_MIN_V413 = 120
+
+
+def _fpi_v413_nonempty_text_series(df: pd.DataFrame, col: str) -> pd.Series:
+    if col not in df.columns:
+        return pd.Series("", index=df.index, dtype="object")
+    out = df[col].astype("string").fillna("").astype(str).str.strip()
+    return out.replace({"nan": "", "None": "", "<NA>": ""})
+
+
+def _fpi_v413_source_token(df: pd.DataFrame) -> pd.Series:
+    """Stabil, providerfüggetlen feltöltési egység azonosító.
+
+    A fájlnév az elsődleges, mert a terméklogika szerint egy feltöltött fájl
+    egy esemény. A source_key csak akkor fallback, ha nincs fájlnév.
+    """
+    token = pd.Series("", index=df.index, dtype="object")
+    for col in ["_fpi_source_upload_id", "_fpi_source_file", "_source_file", "_fpi_source_key"]:
+        candidate = _fpi_v413_nonempty_text_series(df, col)
+        token = token.where(token.astype(str).str.strip().ne(""), candidate)
+    return token.astype(str).str.strip()
+
+
+def _fpi_v413_clean_event_name(df: pd.DataFrame) -> pd.Series:
+    name = _fpi_v413_nonempty_text_series(df, "session_name").map(_fpi_v200_norm)
+    generic = name.str.contains(
+        r"^period\b|^split\b|^drill\b|^quarter\b|^half\b|"
+        r"első félidő|elso felido|második félidő|masodik felido|"
+        r"warm.?up|bemelegítés|bemelegites|cool.?down|levezetés|levezetes|"
+        r"^all$|^game$|^session$",
+        regex=True,
+        na=False,
+    )
+    return name.mask(generic, "session").replace({"": "session"})
+
+
+def _fpi_v413_time_clusters(start: pd.Series, group_keys: pd.DataFrame, gap_min: int = FPI_EVENT_SPLIT_GAP_MIN_V413) -> pd.Series:
+    """Időklaszter: a játékosok néhány perces eltérése egy esemény marad."""
+    clusters = pd.Series(0, index=start.index, dtype="int64")
+    work = group_keys.copy()
+    work["_start_v413"] = pd.to_datetime(start, errors="coerce")
+    work["_idx_v413"] = work.index
+    key_cols = [c for c in group_keys.columns]
+    for _, group in work.groupby(key_cols, dropna=False, sort=False):
+        valid = group[group["_start_v413"].notna()].sort_values("_start_v413")
+        if valid.empty:
+            continue
+        unique_times = valid["_start_v413"].drop_duplicates().sort_values()
+        cluster_by_time = {}
+        cluster = 0
+        previous = None
+        for ts in unique_times:
+            if previous is not None and (ts - previous).total_seconds() / 60.0 >= float(gap_min):
+                cluster += 1
+            cluster_by_time[ts] = cluster
+            previous = ts
+        clusters.loc[valid.index] = valid["_start_v413"].map(cluster_by_time).fillna(0).astype(int)
+    return clusters
+
+
+def _fpi_v413_assign_source_events(df: pd.DataFrame) -> pd.DataFrame:
+    """Minden sort egy valódi csapateseményhez rendel.
+
+    Forrásfájl esetén az ugyanazon fájlban, ugyanazon napon és azonos típusban
+    lévő játékossorok egy sessiont alkotnak. A pontos kezdési idő nem játékos-
+    session azonosító, csak az esemény reprezentatív kezdésének forrása.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+
+    out = df.copy()
+    start = pd.to_datetime(out.get("start_time", pd.Series(pd.NaT, index=out.index)), errors="coerce")
+    day = start.dt.strftime("%Y-%m-%d").fillna("")
+    kind = out.get("session_type", pd.Series("", index=out.index)).apply(_fpi_v200_session_kind).replace({"other": "training"})
+    source = _fpi_v413_source_token(out)
+    name = _fpi_v413_clean_event_name(out)
+
+    has_source = source.ne("")
+    source_group = pd.DataFrame({
+        "source": source.where(has_source, "__NO_SOURCE__"),
+        "day": day,
+        "kind": kind.astype(str),
+        # Forrás nélkül a sessionnév szükséges a szétválasztáshoz.
+        "fallback_name": name.where(~has_source, "file_event"),
+    }, index=out.index)
+    cluster = _fpi_v413_time_clusters(start, source_group, FPI_EVENT_SPLIT_GAP_MIN_V413)
+
+    source_id = source.where(has_source, "fallback")
+    event_id = (
+        source_id.astype(str)
+        + "|" + day.astype(str)
+        + "|" + kind.astype(str)
+        + "|" + name.where(~has_source, "file_event").astype(str)
+        + "|c" + cluster.astype(str)
+    )
+    missing_day = day.eq("")
+    if missing_day.any():
+        event_id.loc[missing_day] = (
+            source_id.loc[missing_day].astype(str)
+            + "|nodate|" + kind.loc[missing_day].astype(str)
+            + "|" + name.loc[missing_day].astype(str)
+            + "|c" + cluster.loc[missing_day].astype(str)
+        )
+
+    out["_fpi_event_id"] = event_id.astype(str)
+    out["_fpi_event_cluster"] = cluster.astype(int)
+    out["_fpi_event_source"] = source.astype(str)
+
+    event_start = out.groupby("_fpi_event_id", dropna=False)["start_time"].transform(
+        lambda s: pd.to_datetime(s, errors="coerce").min()
+    )
+    out["_fpi_event_start"] = pd.to_datetime(event_start, errors="coerce")
+
+    # Reprezentatív név: a csoport leggyakoribb, nem üres sessionneve.
+    def _mode_name(s: pd.Series) -> str:
+        clean = s.astype("string").fillna("").astype(str).str.strip()
+        clean = clean[~clean.isin(["", "nan", "None"])]
+        if clean.empty:
+            return "Session"
+        modes = clean.mode()
+        return str(modes.iloc[0] if not modes.empty else clean.iloc[0])
+
+    out["_fpi_event_name"] = out.groupby("_fpi_event_id", dropna=False)["session_name"].transform(_mode_name)
+    return out
+
+
+def _fpi_v413_event_key(df: pd.DataFrame) -> pd.Series:
+    if df is None or df.empty:
+        return pd.Series(dtype="object")
+    for col in ["session_id", "_fpi_event_id"]:
+        if col in df.columns:
+            key = df[col].astype("string").fillna("").astype(str).str.strip()
+            if key.ne("").any():
+                fallback = _fpi_v413_assign_source_events(df)["_fpi_event_id"].astype(str)
+                return key.where(key.ne(""), fallback)
+    return _fpi_v413_assign_source_events(df)["_fpi_event_id"].astype(str)
+
+
+# Minden későbbi session-, attendance- és scope-számítás ugyanazt a kulcsot használja.
+def _fpi_v201_training_session_key(df: pd.DataFrame) -> pd.Series:
+    return _fpi_v413_event_key(df)
+
+
+def _fpi_v202_event_key(df: pd.DataFrame) -> pd.Series:
+    if df is None or df.empty:
+        return pd.Series(dtype="object")
+    data = df.copy()
+    kind = data.get("session_type", pd.Series("", index=data.index)).apply(_fpi_v200_session_kind)
+    key = _fpi_v413_event_key(data)
+    if "match_event_id" in data.columns:
+        match_event = data["match_event_id"].astype("string").fillna("").astype(str).str.strip()
+        use_match = kind.eq("match") & match_event.ne("")
+        key = key.where(~use_match, "match|" + match_event)
+    return key.astype(str)
+
+
+# A V411 scope-wrapper marad, a kimenetet esemény- és attendance-szinten újraszámoljuk.
+_fpi_v413_base_master_dataset = _fpi_v300_master_dataset
+
+def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    out, report = _fpi_v413_base_master_dataset(data)
+    if out is None or out.empty:
+        return out, report
+
+    out = _fpi_v413_assign_source_events(out)
+    out["session_id"] = out["_fpi_event_id"].astype(str)
+    if "match_event_id" in out.columns:
+        match_id = out["match_event_id"].astype("string").fillna("").astype(str).str.strip()
+        match_mask = out.get("session_type", pd.Series("", index=out.index)).astype(str).eq("Meccs") & match_id.ne("")
+        out.loc[match_mask, "session_id"] = "match|" + match_id.loc[match_mask]
+
+    # A korábbi importlépésben számolt attendance-et mindig felülírja a valódi
+    # fájl-esemény kulccsal újraszámolt érték.
+    out = _fpi_v201_add_training_attendance(out, recovery_log=[])
+
+    report = dict(report or {})
+    event_key = _fpi_v202_event_key(out)
+    kinds = out.get("session_type", pd.Series("", index=out.index)).apply(_fpi_v200_session_kind)
+    report["sessions"] = int(event_key.dropna().astype(str).nunique())
+    report["training_sessions"] = int(event_key[kinds.eq("training")].dropna().astype(str).nunique())
+    report["analysis_match_sessions"] = int(event_key[kinds.eq("match")].dropna().astype(str).nunique())
+    report["event_engine_v413"] = "source-file/date/type + 120-minute split gap"
+    _source_tokens_v413 = _fpi_v413_source_token(out)
+    report["event_source_files_v413"] = int(_source_tokens_v413[_source_tokens_v413.astype(str).str.strip().ne("")].nunique())
+    out.attrs["fpi_v300_master_report"] = report
+    return out, report
+
+
+# -----------------------------------------------------------------------------
+# V413 – játékosrisk: játékosonként egy heti/scope-sor, minimum 2 lezárt előzmény
+# -----------------------------------------------------------------------------
+def _fpi_v413_player_weekly_risk(df: pd.DataFrame) -> pd.DataFrame:
+    work = finalize_exposure_columns(df) if df is not None and not df.empty else pd.DataFrame()
+    if work.empty or not {"player_name", "week"}.issubset(work.columns):
+        return pd.DataFrame()
+
+    work = work.copy()
+    sum_cols = [
+        "total_distance", "training_load", "muscle_load", "hsr_distance",
+        "sprint_distance", "sprints", "acc_count", "dec_count", "high_efforts",
+        "duration_min", "player_minutes",
+    ]
+    mean_cols = ["distance_per_min", "hr_avg", "hrv"]
+    max_cols = [
+        "max_speed", "is_goalkeeper", "team_training_sessions",
+        "player_training_sessions", "training_availability_pct",
+    ]
+    agg = {c: "sum" for c in sum_cols if c in work.columns}
+    agg.update({c: "mean" for c in mean_cols if c in work.columns})
+    agg.update({c: "max" for c in max_cols if c in work.columns})
+    if not agg:
+        return pd.DataFrame()
+
+    res = work.groupby(["player_name", "week"], as_index=False, dropna=False).agg(agg)
+    if "session_type" in work.columns:
+        type_map = (
+            work.groupby(["player_name", "week"], dropna=False)["session_type"]
+            .agg(lambda s: "Vegyes" if len(set(s.dropna().astype(str))) > 1 else (str(s.dropna().astype(str).iloc[0]) if not s.dropna().empty else ""))
+            .reset_index(name="session_type")
+        )
+        res = res.merge(type_map, on=["player_name", "week"], how="left")
+    return res
+
+
+def calculate_player_risk(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
+    pw = _fpi_v413_player_weekly_risk(df)
+    if pw.empty or str(selected_week) not in set(pw["week"].astype(str)):
+        return pd.DataFrame()
+
+    cur = pw[pw["week"].astype(str).eq(str(selected_week))].copy()
+    # A baseline csak lezárt korábbi hetekből készül. Két előzmény alatt nincs
+    # százalékos "saját átlag" minősítés, mert az félrevezető lenne.
+    try:
+        complete_weeks = [w for w in _fpi_v411_complete_week_codes(df) if str(w) != str(selected_week)]
+    except Exception:
+        complete_weeks = []
+    selected_sort = _fpi_week_sort_key_v99(selected_week)
+    prior_complete = [w for w in complete_weeks if _fpi_week_sort_key_v99(w) < selected_sort][-4:]
+    baseline_ready = len(prior_complete) >= 2
+    hist = pw[pw["week"].astype(str).isin(prior_complete)].copy() if baseline_ready else pd.DataFrame()
+
+    rows = []
+    for _, row in cur.iterrows():
+        player = row["player_name"]
+        hp = hist[hist["player_name"].astype(str).eq(str(player))] if baseline_ready else pd.DataFrame()
+        score = 20
+        reasons = []
+        is_gk = bool(row.get("is_goalkeeper", False))
+        team_sessions = int(pd.to_numeric(pd.Series([row.get("team_training_sessions", 0)]), errors="coerce").fillna(0).iloc[0])
+        player_sessions = int(pd.to_numeric(pd.Series([row.get("player_training_sessions", 0)]), errors="coerce").fillna(0).iloc[0])
+        availability = pd.to_numeric(pd.Series([row.get("training_availability_pct", np.nan)]), errors="coerce").iloc[0]
+        low_attendance = team_sessions >= 2 and pd.notna(availability) and availability < 75
+        if low_attendance:
+            score += 20 if availability < 50 else 12
+            reasons.append(f"Edzésrészvétel: {player_sessions}/{team_sessions} ({availability:.0f}%)")
+
+        metric_pack = [
+            ("training_load", .35 if is_gk else .30, -0.40 if is_gk else -0.35, "Terhelési pont"),
+            ("high_efforts", .45 if is_gk else .35, -0.45 if is_gk else -0.40, "High Efforts"),
+            ("dec_count", .45 if is_gk else .35, -0.45 if is_gk else -0.40, "Lassítás"),
+        ]
+        if not is_gk:
+            metric_pack.append(("sprint_distance", .45, -0.45, "Sprinttáv"))
+
+        if baseline_ready and len(hp) >= 2:
+            for metric, hi, lo, label in metric_pack:
+                if metric not in row.index or metric not in hp.columns:
+                    continue
+                value = pd.to_numeric(pd.Series([row.get(metric, np.nan)]), errors="coerce").iloc[0]
+                base = pd.to_numeric(hp[metric], errors="coerce").median()
+                if pd.isna(value) or pd.isna(base) or base == 0:
+                    continue
+                delta = (value - base) / base
+                if delta > hi:
+                    score += 18
+                    reasons.append(f"{label}: +{delta:.0%} a saját {len(hp)} hetes mediánhoz képest")
+                elif delta < lo:
+                    if low_attendance:
+                        if not any("hiányos edzésrészvétel" in x for x in reasons):
+                            reasons.append("Az alacsony heti érték fő oka valószínűleg a hiányos edzésrészvétel.")
+                    else:
+                        score += 8
+                        reasons.append(f"{label}: {delta:.0%} a saját {len(hp)} hetes mediánhoz képest")
+
+            if "player_minutes" in row.index and "player_minutes" in hp.columns:
+                value = pd.to_numeric(pd.Series([row.get("player_minutes", np.nan)]), errors="coerce").iloc[0]
+                base = pd.to_numeric(hp["player_minutes"], errors="coerce").median()
+                if pd.notna(value) and pd.notna(base) and base > 0 and abs((value - base) / base) > .35:
+                    delta = (value - base) / base
+                    score += 8
+                    reasons.append(f"Játékperc/exposure: {delta:+.0%} a saját mediánhoz képest")
+
+            if (not is_gk) and "max_speed" in row.index and "max_speed" in hp.columns:
+                value = pd.to_numeric(pd.Series([row.get("max_speed", np.nan)]), errors="coerce").iloc[0]
+                base = pd.to_numeric(hp["max_speed"], errors="coerce").max()
+                if pd.notna(value) and pd.notna(base) and base > 0 and (value - base) / base < -.06:
+                    score += 14
+                    reasons.append(f"Max sebesség: {(value-base)/base:.0%} a saját csúcshoz képest")
+
+        score = int(max(0, min(100, score)))
+        level = "Magas" if score >= 70 else ("Közepes" if score >= 45 else "Alacsony")
+        attendance_text = f"{player_sessions}/{team_sessions} ({availability:.0f}%)" if team_sessions > 0 and pd.notna(availability) else "n.a."
+        if not reasons and not baseline_ready:
+            reasons.append("Nincs legalább 2 lezárt korábbi hét; csak a részvételi és aktuális abszolút jelzések értékelhetők.")
+        rows.append({
+            "Játékos": player,
+            "Szerep": "Kapus" if is_gk else "Mezőny",
+            "Típus": row.get("session_type", ""),
+            "Játékperc": round(float(row.get("player_minutes", 0) or 0), 1),
+            "Edzésrészvétel": attendance_text,
+            "Edzések": player_sessions,
+            "Csapatedzések": team_sessions,
+            "Részvétel %": round(float(availability), 1) if pd.notna(availability) else np.nan,
+            "Kockázati pontszám": score,
+            "Kockázati szint": level,
+            "Fő okok": "; ".join(reasons[:3]),
+        })
+
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return result
+    # Védőháló: játékosonként kizárólag a legmagasabb kockázatú sor maradhat.
+    result["_player_v413"] = result["Játékos"].astype(str).str.strip().str.casefold()
+    result = result.sort_values("Kockázati pontszám", ascending=False).drop_duplicates("_player_v413", keep="first")
+    return result.drop(columns=["_player_v413"]).sort_values("Kockázati pontszám", ascending=False).reset_index(drop=True)
+
+
+# -----------------------------------------------------------------------------
+# V413 – mikrociklus referencia: egy hétből nincs "saját medián"
+# -----------------------------------------------------------------------------
+def _fpi_v407_plan_context(df: pd.DataFrame, selected_week: str) -> Dict[str, object]:
+    weeks = sorted(df["week"].dropna().astype(str).unique().tolist(), key=_fpi_week_sort_key_v99) if df is not None and not df.empty and "week" in df.columns else []
+    current = _fpi_v407_week_field_profile(df, selected_week)
+    selected_key = _fpi_week_sort_key_v99(selected_week)
+    try:
+        complete = _fpi_v411_complete_week_codes(df)
+    except Exception:
+        complete = []
+    previous_weeks = [w for w in complete if _fpi_week_sort_key_v99(w) < selected_key][-4:]
+    history = [_fpi_v407_week_field_profile(df, w) for w in previous_weeks]
+    history = [x for x in history if x]
+    comparison_ready = len(history) >= 2
+    previous = history[-1] if history else {}
+    baseline = {}
+    metrics = ["training_load", "total_distance", "hsr_distance", "sprint_distance", "distance_per_min", "max_speed", "dec_count", "high_efforts"]
+    for metric in metrics:
+        vals = [x.get(metric) for x in history if pd.notna(x.get(metric, np.nan))]
+        baseline[metric] = float(np.median(vals)) if comparison_ready and vals else np.nan
+    ratios = {}
+    for metric in metrics:
+        cur = current.get(metric, np.nan)
+        base = baseline.get(metric, np.nan)
+        ratios[metric] = float(cur / base) if comparison_ready and pd.notna(cur) and pd.notna(base) and base > 0 else np.nan
+
+    daily = build_microcycle_table(df, selected_week)
+    early = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).isin(["MD-4", "MD-3"])] if not daily.empty else pd.DataFrame()
+    md2 = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).eq("MD-2")] if not daily.empty else pd.DataFrame()
+    md1 = daily[daily.get("md_label", pd.Series("", index=daily.index)).astype(str).eq("MD-1")] if not daily.empty else pd.DataFrame()
+    peak_early = pd.to_numeric(early.get("load_index"), errors="coerce").max() if not early.empty else np.nan
+    md2_ratio = pd.to_numeric(md2.get("load_index"), errors="coerce").sum() / peak_early if not md2.empty and pd.notna(peak_early) and peak_early > 0 else np.nan
+    md1_ratio = pd.to_numeric(md1.get("load_index"), errors="coerce").sum() / peak_early if not md1.empty and pd.notna(peak_early) and peak_early > 0 else np.nan
+    peak_sprint_md = ""
+    train_daily = daily[daily.get("session_type", pd.Series("", index=daily.index)).astype(str).eq("Edzés")] if not daily.empty else pd.DataFrame()
+    if not train_daily.empty and "sprint_distance" in train_daily.columns and pd.to_numeric(train_daily["sprint_distance"], errors="coerce").notna().any():
+        peak_sprint_md = str(train_daily.loc[pd.to_numeric(train_daily["sprint_distance"], errors="coerce").idxmax()].get("md_label", ""))
+    label = (
+        "saját 4 lezárt hét mediánja" if len(history) >= 4
+        else f"saját {len(history)} lezárt hét mediánja" if comparison_ready
+        else "nincs stabil saját heti referencia"
+    )
+    return {
+        "current": current, "previous": previous, "baseline": baseline,
+        "ratios": ratios, "previous_weeks": previous_weeks,
+        "history_count": len(history), "comparison_ready": comparison_ready,
+        "history_label": label, "md2_ratio": md2_ratio, "md1_ratio": md1_ratio,
+        "peak_sprint_md": peak_sprint_md,
+    }
+
+
+_fpi_v413_base_next_microcycle_plan = build_next_microcycle_plan
+
+def build_next_microcycle_plan(
+    df: pd.DataFrame,
+    selected_week: str,
+    playstyle: str,
+    readiness_score: int,
+    periodization_type: str,
+    player_risk_df: pd.DataFrame,
+) -> pd.DataFrame:
+    plan = _fpi_v413_base_next_microcycle_plan(
+        df, selected_week, playstyle, readiness_score, periodization_type, player_risk_df
+    )
+    if plan is None or plan.empty:
+        return plan
+    ctx = _fpi_v407_plan_context(df, selected_week)
+    n = int(ctx.get("history_count", 0) or 0)
+    ready = bool(ctx.get("comparison_ready", False))
+    out = plan.copy()
+
+    if not ready:
+        out["Tervezési alap"] = out["Tervezési alap"].astype(str).map(
+            lambda x: re.sub(r"Aktuális mezőnyjátékos-load / saját \d+ hetes medián: n\.a\.;?\s*", "", x)
+        )
+        md4 = out["Nap"].astype(str).eq("MD-4")
+        md3 = out["Nap"].astype(str).eq("MD-3")
+        out.loc[md4, "Ajánlott terhelés"] = "meccs-/liga-referencia és aktuális játékosállapot alapján"
+        out.loc[md4, "Tervezési alap"] = (
+            "Nincs legalább 2 lezárt korábbi hét, ezért saját heti medián és százalékos terhelési eltérés nem készül. "
+            f"Readiness: {readiness_score}/100; az aktuális eseménystruktúra és a meccsreferencia használható."
+        )
+        out.loc[md3, "Ajánlott terhelés"] = "meccsreferenciához és az aktuális ciklushoz igazítva"
+        out.loc[md3, "Tervezési alap"] = (
+            "Nincs stabil saját többhetes sebességi referencia; a HSR/sprint dózist a rendelkezésre álló meccsprofilhoz, "
+            "a következő mérkőzés időzítéséhez és a játékosok aktuális állapotához kell igazítani."
+        )
+    else:
+        label = f"saját {n} lezárt hét mediánja"
+        out["Ajánlott terhelés"] = out["Ajánlott terhelés"].astype(str).str.replace("a saját 4 hetes medián", label, regex=False)
+        out["Ajánlott terhelés"] = out["Ajánlott terhelés"].astype(str).str.replace("saját 4 hetes medián", label, regex=False)
+    return out
+
+
+# Sessiontábla: reprezentatív fájl-eseménynév és kezdés.
+def _fpi_v204_session_summary(df: pd.DataFrame, week: str, blocked: set) -> pd.DataFrame:
+    data = df[df.get("week", pd.Series("", index=df.index)).astype(str).eq(str(week))].copy()
+    if data.empty:
+        return pd.DataFrame()
+    data["_event204"] = _fpi_v202_event_key(data)
+    data["_date204"] = pd.to_datetime(data.get("_fpi_event_start", data.get("start_time", pd.Series(pd.NaT, index=data.index))), errors="coerce")
+    rows = []
+    for _, group in data.groupby("_event204", dropna=False):
+        kind = _fpi_v200_session_kind(group.get("session_type", pd.Series("", index=group.index)).iloc[0])
+        if "_fpi_event_name" in group.columns and group["_fpi_event_name"].notna().any():
+            name = str(group["_fpi_event_name"].dropna().iloc[0])
+        else:
+            name = str(group.get("session_name", pd.Series("Session", index=group.index)).iloc[0])
+        start = group["_date204"].dropna().min()
+        row = {
+            "Dátum": start.strftime("%Y-%m-%d %H:%M") if pd.notna(start) else "—",
+            "Típus": "Meccs" if kind == "match" else "Edzés",
+            "Session": name,
+            "Létszám": int(group.get("player_name", pd.Series(index=group.index, dtype=object)).nunique()),
+        }
+        for col, label in [("duration_min", "Perc"), ("total_distance", "Össztáv"), ("distance_per_min", "m/perc"), ("hsr_distance", "HSR"), ("sprint_distance", "Sprint"), ("training_load", "Load")]:
+            values = _fpi_v204_numeric(group, col)
+            row[label] = np.nan if col in blocked else (float(values.median()) if values.notna().any() else np.nan)
+        rows.append(row)
+    return pd.DataFrame(rows).sort_values("Dátum").reset_index(drop=True)
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
