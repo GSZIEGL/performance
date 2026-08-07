@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V411_ADAPTIVE_SCOPE_BENCHMARKS_2026_08_05"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V416_MATCH90_HALFTIME_METHODOLOGY_2026_08_07"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -3946,7 +3946,7 @@ def aggregate_weekly(df: pd.DataFrame) -> pd.DataFrame:
     for metric in ["total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts", "training_load"]:
         if metric in res.columns and "field_team_minutes" in res.columns:
             res[f"{metric}_per90_player_avg"] = np.where(res["field_team_minutes"] > 0, res[metric] / res["field_team_minutes"] * 90, np.nan)
-            res[f"{metric}_per90_team"] = np.where(res["field_team_minutes"] > 0, res[metric] / res["field_team_minutes"] * 990, np.nan)
+            res[f"{metric}_per90_team"] = np.where(res["field_team_minutes"] > 0, res[metric] / res["field_team_minutes"] * 900, np.nan)
         if metric in res.columns and "field_player_count" in res.columns:
             res[f"{metric}_per_field_player"] = np.where(res["field_player_count"] > 0, res[metric] / res["field_player_count"], np.nan)
     return res
@@ -8171,8 +8171,9 @@ def _fpi_v301_repair_start_time(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[st
 def _fpi_v301_assign_match_events(df: pd.DataFrame) -> pd.DataFrame:
     """Első és második félidők párosítása teljes meccseseménnyé.
 
-    Egy napon több edzőmeccs is lehet. Új esemény indul minden 1. félidőnél;
-    az azt követő 2. félidő ugyanahhoz az eseményhez kerül.
+    V416: a félidőjel nemcsak a session_name mezőből, hanem a forrás munkalap
+    nevéből is felismerhető. Egy napon több mérkőzés is lehet: minden 1. félidő
+    új eseményt indít, az azt követő 2. félidő ugyanahhoz az eseményhez kerül.
     """
     out = df.copy()
     out["match_event_id"] = pd.NA
@@ -8180,8 +8181,11 @@ def _fpi_v301_assign_match_events(df: pd.DataFrame) -> pd.DataFrame:
     if matches.empty:
         return out
 
+    cols = ["session_id", "start_time", "session_name", "session_date"]
+    if "_fpi_source_sheet" in matches.columns:
+        cols.append("_fpi_source_sheet")
     session_meta = (
-        matches[["session_id", "start_time", "session_name", "session_date"]]
+        matches[cols]
         .drop_duplicates("session_id")
         .sort_values(["session_date", "start_time", "session_id"])
     )
@@ -8190,9 +8194,11 @@ def _fpi_v301_assign_match_events(df: pd.DataFrame) -> pd.DataFrame:
         event_no = 0
         active_event = None
         for _, row in group.iterrows():
-            name = str(row.get("session_name", ""))
-            norm = _norm_mapping_text(name)
-            half_no_v406 = _fpi_v406_half_number(name) if "_fpi_v406_half_number" in globals() else None
+            name = str(row.get("session_name", "") or "")
+            sheet = str(row.get("_fpi_source_sheet", "") or "")
+            half_context = (name + " " + sheet).strip()
+            norm = _norm_mapping_text(half_context)
+            half_no_v406 = _fpi_v406_half_number(half_context) if "_fpi_v406_half_number" in globals() else None
             first = half_no_v406 == 1 or bool(re.search(r"(?:first|1st|\b1\b)\s*[-_. ]*(?:half|felido)|(?:half|felido)\s*[-_. ]*1\b", norm))
             second = half_no_v406 == 2 or bool(re.search(r"(?:second|2nd|\b2\b)\s*[-_. ]*(?:half|felido)|(?:half|felido)\s*[-_. ]*2\b", norm))
             if first or active_event is None:
@@ -8241,9 +8247,10 @@ def _fpi_v406_drop_exposure_derivatives(df: pd.DataFrame) -> pd.DataFrame:
 def _fpi_v406_merge_halftime_matches(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int]]:
     """Half 1 + Half 2 sorokból játékosonként egyetlen Match-sort készít.
 
-    Összegzi a volumen- és akciómutatókat, a Max Speed értékét átlagolja,
-    majd az exposure/per90 mezőket a teljes mérkőzésre újraszámolja.
-    A nem félidős edzések és teljes meccsexportok változatlanok maradnak.
+    Összegzi a volumen- és akciómutatókat, a Max Speed értékénél a nagyobbik
+    félidős értéket tartja meg, majd az exposure/per90 mezőket a teljes
+    mérkőzésre újraszámolja. A félidőjel a session- vagy munkalapnévből is
+    felismerhető. A nem félidős edzések és teljes meccsexportok változatlanok.
     """
     empty_report = {
         "halftime_source_sessions": 0,
@@ -8254,13 +8261,19 @@ def _fpi_v406_merge_halftime_matches(df: pd.DataFrame) -> Tuple[pd.DataFrame, Di
         return df, empty_report
 
     out = df.copy()
-    half_mask = out.get("session_name", pd.Series("", index=out.index)).map(_fpi_v300_is_half)
+    session_half_context = out.get("session_name", pd.Series("", index=out.index)).astype(str)
+    if "_fpi_source_sheet" in out.columns:
+        session_half_context = session_half_context + " " + out["_fpi_source_sheet"].fillna("").astype(str)
+    half_mask = session_half_context.map(_fpi_v300_is_half)
     match_mask = out.get("session_type", pd.Series("", index=out.index)).astype(str).eq("Meccs")
     half_rows = out[half_mask & match_mask & out["match_event_id"].notna()].copy()
     if half_rows.empty:
         return out, empty_report
 
-    half_rows["_fpi_v406_half_no"] = half_rows["session_name"].map(_fpi_v406_half_number)
+    half_context_rows = half_rows["session_name"].fillna("").astype(str)
+    if "_fpi_source_sheet" in half_rows.columns:
+        half_context_rows = half_context_rows + " " + half_rows["_fpi_source_sheet"].fillna("").astype(str)
+    half_rows["_fpi_v406_half_no"] = half_context_rows.map(_fpi_v406_half_number)
     session_coverage = (
         half_rows.groupby("match_event_id", dropna=False)
         .agg(
@@ -8457,48 +8470,89 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 
 
 def _fpi_v300_match_reference(master: pd.DataFrame) -> Dict[str, object]:
-    """Tényleges játékperces, cseréket és 11 fős csapatot kezelő meccsreferencia."""
+    """Tényleges játékperces meccsreferencia.
+
+    Játékosszint: mezőnyjátékos /90 medián, minimum 10 játékperc.
+    Csapatszint: kizárólag mezőnyjátékosok eseményösszege, 10×90 = 900 mezőnyjátékos-percre
+    normalizálva, majd a mérkőzések mediánja. A kapus külön szerepkörként megmarad az adatbázisban,
+    de nem torzítja a mezőnyjátékos fizikai csapatbenchmarkot.
+    """
     if master is None or master.empty:
-        return {"available":False}
-    matches=master[master["session_type"].eq("Meccs")].copy()
+        return {"available": False}
+    matches = master[master["session_type"].eq("Meccs")].copy()
     if matches.empty:
-        return {"available":False}
-    matches=finalize_exposure_columns(matches)
-    sum_metrics=[c for c in ["total_distance","hsr_distance","sprint_distance","sprints","high_efforts","training_load","acc_count","dec_count","acc_high","dec_high"] if c in matches.columns]
-    max_metrics=[c for c in ["max_speed"] if c in matches.columns]
-    for c in ["player_minutes"]+sum_metrics+max_metrics:
-        if c in matches.columns: matches[c]=pd.to_numeric(matches[c],errors="coerce")
-    agg={c:"sum" for c in ["player_minutes"]+sum_metrics}; agg.update({c:"max" for c in max_metrics})
-    if "is_goalkeeper" in matches.columns: agg["is_goalkeeper"]="max"
-    pm=matches.groupby(["match_event_id","player_name"],dropna=False).agg(agg).reset_index()
-    eligible=pm[pm["player_minutes"].ge(10)].copy()
-    field=eligible
-    if "is_goalkeeper" in eligible.columns and (~eligible["is_goalkeeper"].fillna(False)).any():
-        field=eligible[~eligible["is_goalkeeper"].fillna(False)].copy()
-    per90={}; raw_med={}
+        return {"available": False}
+    matches = finalize_exposure_columns(matches)
+    sum_metrics = [c for c in [
+        "total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts",
+        "training_load", "acc_count", "dec_count", "acc_high", "dec_high"
+    ] if c in matches.columns]
+    max_metrics = [c for c in ["max_speed"] if c in matches.columns]
+    for c in ["player_minutes"] + sum_metrics + max_metrics:
+        if c in matches.columns:
+            matches[c] = pd.to_numeric(matches[c], errors="coerce")
+
+    agg = {c: "sum" for c in ["player_minutes"] + sum_metrics}
+    agg.update({c: "max" for c in max_metrics})
+    if "is_goalkeeper" in matches.columns:
+        agg["is_goalkeeper"] = "max"
+    pm = matches.groupby(["match_event_id", "player_name"], dropna=False).agg(agg).reset_index()
+
+    # Mezőnyjátékosok: a csapatreferenciában is ugyanaz a populáció legyen, mint a fizikai benchmarkban.
+    field_all = pm.copy()
+    if "is_goalkeeper" in pm.columns and (~pm["is_goalkeeper"].fillna(False)).any():
+        field_all = pm[~pm["is_goalkeeper"].fillna(False)].copy()
+
+    # A néhány perces csere ne adjon irreális egyéni /90 értéket.
+    field_eligible = field_all[field_all["player_minutes"].ge(10)].copy()
+    per90, raw_med = {}, {}
     for c in sum_metrics:
-        raw=pd.to_numeric(field[c],errors="coerce"); mins=pd.to_numeric(field["player_minutes"],errors="coerce")
-        vals=raw/mins.where(mins>0)*90.0
-        per90[c]=float(vals.dropna().median()) if vals.notna().any() else None
-        raw_med[c]=float(raw.dropna().median()) if raw.notna().any() else None
+        raw = pd.to_numeric(field_eligible[c], errors="coerce")
+        mins = pd.to_numeric(field_eligible["player_minutes"], errors="coerce")
+        vals = raw / mins.where(mins > 0) * 90.0
+        per90[c] = float(vals.dropna().median()) if vals.notna().any() else None
+        raw_med[c] = float(raw.dropna().median()) if raw.notna().any() else None
     for c in max_metrics:
-        vals=pd.to_numeric(field[c],errors="coerce").dropna(); per90[c]=float(vals.median()) if not vals.empty else None; raw_med[c]=per90[c]
-    team_rows=[]
-    for event_id,event in pm.groupby("match_event_id",dropna=False):
-        mins=pd.to_numeric(event["player_minutes"],errors="coerce").sum(min_count=1)
-        row={"match_event_id":event_id,"team_player_minutes":mins}
+        vals = pd.to_numeric(field_eligible[c], errors="coerce").dropna()
+        per90[c] = float(vals.median()) if not vals.empty else None
+        raw_med[c] = per90[c]
+
+    # A teljes csapat-mezőnyprofil minden meccsen az összes mezőnyjátékos tényleges perceiből készül.
+    # 10 mezőnyjátékos × 90 perc = 900. A cserék ettől nem növelik a csapatbenchmarkot.
+    team_rows = []
+    for event_id, event in field_all.groupby("match_event_id", dropna=False):
+        mins = pd.to_numeric(event["player_minutes"], errors="coerce").sum(min_count=1)
+        row = {"match_event_id": event_id, "field_team_minutes": mins}
         for c in sum_metrics:
-            v=pd.to_numeric(event[c],errors="coerce").sum(min_count=1)
-            row[c]=v/mins*990.0 if pd.notna(mins) and mins>0 else np.nan
-        for c in max_metrics: row[c]=pd.to_numeric(event[c],errors="coerce").max()
+            v = pd.to_numeric(event[c], errors="coerce").sum(min_count=1)
+            row[c] = v / mins * 900.0 if pd.notna(mins) and mins > 0 else np.nan
+        for c in max_metrics:
+            row[c] = pd.to_numeric(event[c], errors="coerce").max()
         team_rows.append(row)
-    team_df=pd.DataFrame(team_rows); team_metrics={}
-    for c in sum_metrics+max_metrics:
-        vals=pd.to_numeric(team_df[c],errors="coerce").dropna() if c in team_df.columns else pd.Series(dtype=float)
-        team_metrics[c]=float(vals.median()) if not vals.empty else None
-    minute_vals=pd.to_numeric(pm["player_minutes"],errors="coerce").dropna()
-    team_minute_vals=pd.to_numeric(team_df["team_player_minutes"],errors="coerce").dropna() if not team_df.empty else pd.Series(dtype=float)
-    return {"available":True,"match_events":int(matches["match_event_id"].dropna().nunique()),"player_match_rows":len(pm),"eligible_player_match_rows":len(field),"metrics":per90,"metrics_per90":per90,"metrics_actual_median":raw_med,"team_metrics_per90_11":team_metrics,"player_minutes_median":float(minute_vals.median()) if not minute_vals.empty else None,"team_player_minutes_median":float(team_minute_vals.median()) if not team_minute_vals.empty else None,"reference_note":"Játékos per90 medián (min. 10 perc); csapatprofil 11×90 percre normalizálva."}
+    team_df = pd.DataFrame(team_rows)
+    team_metrics = {}
+    for c in sum_metrics + max_metrics:
+        vals = pd.to_numeric(team_df[c], errors="coerce").dropna() if c in team_df.columns else pd.Series(dtype=float)
+        team_metrics[c] = float(vals.median()) if not vals.empty else None
+
+    minute_vals = pd.to_numeric(field_eligible["player_minutes"], errors="coerce").dropna()
+    team_minute_vals = pd.to_numeric(team_df["field_team_minutes"], errors="coerce").dropna() if not team_df.empty else pd.Series(dtype=float)
+    return {
+        "available": True,
+        "match_events": int(matches["match_event_id"].dropna().nunique()),
+        "player_match_rows": len(pm),
+        "eligible_player_match_rows": len(field_eligible),
+        "metrics": per90,
+        "metrics_per90": per90,
+        "metrics_actual_median": raw_med,
+        "team_metrics_per90_10": team_metrics,
+        # kompatibilitási alias régebbi kódrészeknek; tartalma már 10×90 mezőnyprofil
+        "team_metrics_per90_11": team_metrics,
+        "player_minutes_median": float(minute_vals.median()) if not minute_vals.empty else None,
+        "field_team_minutes_median": float(team_minute_vals.median()) if not team_minute_vals.empty else None,
+        "team_player_minutes_median": float(team_minute_vals.median()) if not team_minute_vals.empty else None,
+        "reference_note": "Játékos: mezőnyjátékos /90 medián (min. 10 perc); csapat: mezőnyjátékos 10×90, azaz 900 percre normalizált meccsenkénti profil, majd meccsmedián.",
+    }
 
 
 
@@ -11127,11 +11181,11 @@ def _build_fpi_product_pdf_bytes_v402_base(
             [P("Adatimport", small), P("A Data/Adat lap elsődleges. A segédlapokat az app igyekszik kizárni. A Smart Mapper magyar és angol GPS oszlopneveket is kezel. Minden feltöltött forrásfájl alapértelmezetten egy csapatesemény; az egyes játékosok eltérő eszközindítási ideje nem hoz létre külön sessiont. Ugyanazon fájlon belül csak legalább 120 perces időrés választ szét két valódi eseményt. PlayerTeknél az all összesítő split az elsődleges; HSR = Zone 4+5, sprinttáv = Zone 5, a km-es zónák méterre váltódnak.", small)],
             [P("Dátum és hét", small), P("A Week Rescue Engine a dátumot időponttal vagy extra szöveggel együtt is értelmezi, majd ISO hétre csoportosít. Rövid dátumtartományból képződő irreálisan sok hét esetén védelmi újraértelmezést alkalmaz.", small)],
             [P("Kapusok", small), P("Ha van Poszt/Position oszlop, a kapusok automatikusan felismerhetők. Ha nincs, az app kézi kapusválasztást kér. A kapusok sprint/HSR értelmezése csökkentett súlyú.", small)],
-            [P("Játékpercek", small), P("A meccsterhelésnél az app a tényleges játékospercet használja. A játékosreferencia per90 medián, a csapatreferencia 11×90 percre normalizált; a 10 percnél rövidebb szereplés nem torzítja a fő benchmarkot.", small)],
+            [P("Játékpercek", small), P("A meccsterhelésnél az app a tényleges játékospercet használja. A játékosreferencia per90 medián, a csapatreferencia 10×90 mezőnyjátékos-percre normalizált; a 10 percnél rövidebb szereplés nem torzítja a fő benchmarkot.", small)],
             [P("Edzés-meccs normalizálás", small), P("Az összevetés nem csak nyers csapatösszeg alapján történik, mert edzésen és meccsen eltérhet a játékosszám és a játékidő. A résztvevők száma és az időtartam is számít.", small)],
             [P("Sebességzónák", small), P("A 4-es és 5-ös zóna külön vagy összevont 4+5 exportként is kezelhető. Összevont oszlopnál az app HSR-ként használja az értéket.", small)],
             [P("High Efforts", small), P("Ha külön High Efforts oszlop van, azt használja. Ha nincs, gyorsulás/lassítás jellegű mutatókból becsült nagy intenzitású akciót képez.", small)],
-            [P("Benchmark", small), P("A jelenlegi benchmark általános referencia. Későbbi verzióban korosztály, szint, poszt és játékmodell szerint finomíthető.", small)],
+            [P("Benchmark", small), P("A benchmark hierarchikus: saját meccs- és történeti adat, majd poszt, korosztály, versenyszint és 70/30 játékmodell-korrekció. Nemzetközi és szakirodalmi profilok induló célzónát adnak, amelyet a saját klub azonos eszközzel gyűjtött adata fokozatosan felülír.", small)],
             [P("Mikrociklus", small), P("A múlt hét, aktuális hét és következő hét javaslatai a volumen, HSR, sprint, High Efforts, readiness és játékosszintű risk jelzések alapján készülnek.", small)],
             [P("Korlátok", small), P("Az eredmények a GPS-export, az oszlopfelismerés és a rendelkezésre álló időszak helyességétől függenek. Hiányos input esetén szakmai ellenőrzés szükséges.", small)],
         ]
@@ -11980,6 +12034,7 @@ def _fpi_v204_session_summary(df: pd.DataFrame, week: str, blocked: set) -> pd.D
     data["_date204"] = pd.to_datetime(data.get("start_time", pd.Series(pd.NaT,index=data.index)), errors="coerce")
     rows=[]
     for key,g in data.groupby("_event204", dropna=False):
+        metric_g = field_players_only(g) if "is_goalkeeper" in g.columns and (~g["is_goalkeeper"].fillna(False)).any() else g
         kind = _fpi_v200_session_kind(g.get("session_type", pd.Series("",index=g.index)).iloc[0])
         name = str(g.get("session_name", pd.Series("Session",index=g.index)).iloc[0])
         start = g["_date204"].dropna().min()
@@ -11987,7 +12042,7 @@ def _fpi_v204_session_summary(df: pd.DataFrame, week: str, blocked: set) -> pd.D
              "Típus": "Meccs" if kind=="match" else "Edzés", "Session": name,
              "Létszám": int(g.get("player_name",pd.Series(index=g.index,dtype=object)).nunique())}
         for col,label in [("duration_min","Perc"),("total_distance","Össztáv"),("distance_per_min","m/perc"),("hsr_distance","HSR"),("sprint_distance","Sprint"),("training_load","Load")]:
-            vals=_fpi_v204_numeric(g,col)
+            vals=_fpi_v204_numeric(metric_g,col)
             row[label]=np.nan if col in blocked else (float(vals.median()) if vals.notna().any() else np.nan)
         rows.append(row)
     return pd.DataFrame(rows).sort_values("Dátum").reset_index(drop=True)
@@ -12084,7 +12139,7 @@ def _fpi_v204_conclusions(mode, quality, sessions, player_period, readiness):
             valid=valid[pd.to_numeric(valid['Össztáv'],errors='coerce')>0].copy()
         if not valid.empty:
             hi=valid.loc[valid['Össztáv'].idxmax()]; lo=valid.loc[valid['Össztáv'].idxmin()]
-            out.append(f"Sessionterhelés: a legnagyobb medián össztáv {hi['Session']} ({hi['Össztáv']:.0f} m), a legalacsonyabb {lo['Session']} ({lo['Össztáv']:.0f} m).")
+            out.append(f"Sessionterhelés: a legnagyobb játékosmedián táv {hi['Session']} ({hi['Össztáv']:.0f} m), a legalacsonyabb {lo['Session']} ({lo['Össztáv']:.0f} m).")
     if not player_period.empty and 'total_distance' in player_period:
         vals=pd.to_numeric(player_period['total_distance'],errors='coerce').dropna()
         if len(vals): out.append(f"Játékosonkénti kumulált össztáv mediánja {vals.median():.0f} m; a referencia középmezőnye: {vals.quantile(.25):.0f}–{vals.quantile(.75):.0f} m.")
@@ -12143,7 +12198,7 @@ def _fpi_v304_session_chart(sessions: pd.DataFrame):
         return Spacer(1, 0)
     charts = []
     labels = [str(x)[:18] for x in sessions.get('Session', pd.Series(range(len(sessions)))).tolist()]
-    for col, title, suffix in [('Össztáv', 'Sessionprofil – medián össztáv', ' m'), ('HSR', 'Sessionprofil – medián HSR', ' m')]:
+    for col, title, suffix in [('Össztáv', 'Sessionprofil – medián táv / játékos', ' m'), ('HSR', 'Sessionprofil – medián HSR', ' m')]:
         if col in sessions.columns:
             charts.append(_fpi_v401_compact_bar_chart(list(zip(labels, pd.to_numeric(sessions[col], errors='coerce'))), title, 13.4, 4.0, suffix, max_items=8))
     return Table([charts[:2]], colWidths=[13.7 * cm] * len(charts[:2])) if charts else Spacer(1, 0)
@@ -12328,13 +12383,13 @@ def build_fpi_gps_only_pdf_bytes(
     story += [PageBreak(),section('2. Sessionönkénti terhelési profil','#FEF3C7')]
     if sessions.empty: story.append(P('Nincs sessionönként értelmezhető adat.'))
     else:
-        rows=[[P(x,head) for x in ['Dátum','Típus','Session','Létszám','Perc','Össztáv','m/perc','HSR','Sprint','Load']]]
+        rows=[[P(x,head) for x in ['Dátum','Típus','Session','Létszám','Perc','Medián táv','m/perc','HSR','Sprint','Load']]]
         for _,r in sessions.iterrows():
             def f(v,d=0): return _fpi_v414_number(v, decimals=d)
             rows.append([P(str(r['Dátum']),small),P(str(r['Típus']),small),P(str(r['Session']),small),P(_fpi_v414_number(r['Létszám']),small),P(f(r['Perc'],1),small),P(f(r['Össztáv']),small),P(f(r['m/perc'],1),small),P(f(r['HSR']),small),P(f(r['Sprint']),small),P(f(r['Load']),small)])
         story.append(tbl(rows,[3.4*cm,2.0*cm,6.0*cm,1.8*cm,2.0*cm,2.6*cm,2.2*cm,2.2*cm,2.2*cm,2.3*cm],'#92400E'))
         story += [Spacer(1,.12*cm), _fpi_v304_session_chart(sessions), Spacer(1,.08*cm)]
-        story.append(P('Az értékek sessionönként a játékosok mediánját mutatják, nem a teljes keret összeadott távolságát. Így különböző létszámú edzések is összevethetők.',small))
+        story.append(P('Edzésnél a táblázat a tényleges session mezőnyjátékos-mediánját mutatja. Meccsnél a Half 1 + Half 2 játékosonként előbb összeadódik, majd a legalább 10 percet játszó mezőnyjátékosok /90 mediánja jelenik meg; ezért a Típus mező „Meccs (/90)”, a Perc pedig 90. A cserejátékosok így nem húzzák le mesterségesen a meccs össztáv-, HSR-, sprint- és Load profilját. A Létszám továbbra is a teljes esemény résztvevőszámát mutatja.',small))
     if ratios_v300 is not None and not ratios_v300.empty:
         story += [PageBreak(),section('3. Edzés–meccs referencia','#FEF3C7')]
         ratio_target_header_v411 = 'Session célérték' if mode.get('code') == 'single_session' else 'Heti célérték'
@@ -13099,19 +13154,19 @@ def _fpi_ref_eval_value_v134(metric_key: str, value: object, level: str = "playe
     refs = {
         # csapat
         "possession_pct": (45, 55, "45–55%", "alacsony labdabirtoklás", "domináns labdabirtoklás"),
-        "shots": (8, 14, "8–14", "alacsony lövésvolumen", "magas lövésvolumen"),
-        "xg": (1.0, 1.8, "1.0–1.8", "kevés / alacsony minőségű helyzet", "erős helyzetminőség"),
-        "entries_box": (12, 20, "12–20", "kevés boxjelenlét", "erős boxjelenlét"),
-        "final_third_entries": (35, 55, "35–55", "kevés támadóharmad-belépés", "sok támadóharmad-belépés"),
-        "key_passes": (5, 10, "5–10", "kevés kulcspassz", "magas kreatív volumen"),
-        "corners": (3, 6, "3–6", "kevés pontrúgásnyomás", "pontrúgásveszély magas"),
+        "shots": (8, 14, "8–14 / meccs", "alacsony lövésvolumen", "magas lövésvolumen"),
+        "xg": (1.0, 1.8, "1.0–1.8 / meccs", "kevés / alacsony minőségű helyzet", "erős helyzetminőség"),
+        "entries_box": (12, 20, "12–20 / meccs", "kevés boxjelenlét", "erős boxjelenlét"),
+        "final_third_entries": (35, 55, "35–55 / meccs", "kevés támadóharmad-belépés", "sok támadóharmad-belépés"),
+        "key_passes": (5, 10, "5–10 / meccs", "kevés kulcspassz", "magas kreatív volumen"),
+        "corners": (3, 6, "3–6 / meccs", "kevés pontrúgásnyomás", "pontrúgásveszély magas"),
         "ppda": (8, 12, "8–12", "nagyon agresszív presszing", "passzívabb védekezési aktivitás"),
         "pressing_success_pct": (50, 65, "50–65%", "gyengébb presszinghatékonyság", "erős presszinghatékonyság"),
         "passes_accurate_pct": (78, 86, "78–86%", "labdabiztonsági kockázat", "stabil passzminőség"),
-        "crosses": (10, 18, "10–18", "kevés szélső/beadási volumen", "magas szélső/beadási volumen"),
-        "recoveries": (45, 65, "45–65", "kevés labdaszerzés", "magas labdaszerzési aktivitás"),
-        "lost_balls": (25, 40, "25–40", "kevés labdavesztés", "sok labdavesztés / támadható"),
-        "counterattacks": (3, 7, "3–7", "kevés átmeneti veszély", "magas kontraveszély"),
+        "crosses": (10, 18, "10–18 / meccs", "kevés szélső/beadási volumen", "magas szélső/beadási volumen"),
+        "recoveries": (45, 65, "45–65 / meccs", "kevés labdaszerzés", "magas labdaszerzési aktivitás"),
+        "lost_balls": (25, 40, "25–40 / meccs", "kevés labdavesztés", "sok labdavesztés / támadható"),
+        "counterattacks": (3, 7, "3–7 / meccs", "kevés átmeneti veszély", "magas kontraveszély"),
         # játékos
         "player_shots": (1, 3, "1–3", "kevés lövés", "sok lövés"),
         "player_xg": (0.20, 0.50, "0.20–0.50", "alacsony helyzetminőség", "magas helyzetminőség"),
@@ -13418,34 +13473,94 @@ def _fpi_team_metric_reading_v133(label: str, value: str, metric_key: str, own_c
     return prefix + "A saját játékmodell, felállás és heti terhelhetőség alapján értelmezendő."
 
 
+def _fpi_shot_profile_score_v415(shots: object, xg: object) -> Tuple[Optional[float], str]:
+    """0-10 coach-friendly lövésprofil: 50% volumen, 50% xG. xG/lövés magyarázó adat."""
+    s=_fpi_num_v133(shots,None); x=_fpi_num_v133(xg,None)
+    if s is None and x is None: return None,""
+    def band(v,lo,hi):
+        if v is None: return None
+        if v <= 0: return 0.0
+        if v < lo: return max(0.0,5.0*v/lo)
+        if v <= hi: return 5.0+3.0*(v-lo)/max(hi-lo,1e-9)
+        return min(10.0,8.0+2.0*(v-hi)/max(hi,1e-9))
+    ss=band(s,8,14); xs=band(x,1.0,1.8)
+    parts=[z for z in [ss,xs] if z is not None]
+    score=float(sum(parts)/len(parts)) if parts else None
+    xps=(x/s) if s and x is not None and s>0 else None
+    detail=[]
+    if s is not None: detail.append(f"{s:.1f} lövés")
+    if x is not None: detail.append(f"xG {x:.2f}")
+    if xps is not None: detail.append(f"xG/lövés {xps:.2f}")
+    return score,"; ".join(detail)
+
+def _fpi_shot_profile_reading_v415(shots: object, xg: object) -> str:
+    s=_fpi_num_v133(shots,None); x=_fpi_num_v133(xg,None)
+    if s is None and x is None: return "Nincs értékelhető lövésadat."
+    xps=(x/s) if s and x is not None and s>0 else None
+    if s is not None and x is not None:
+        if s >= 14 and x < 1.0: return "Sok befejezés, de az összes xG alacsony: inkább volumen, mint jó helyzetminőség. A lövőhelyek minőségét kell javítani."
+        if s < 8 and x >= 1.8: return "Kevés lövésből magas xG: a helyzetkiválasztás jó, de a támadások számát lehet növelni."
+        if s >= 14 and x >= 1.8: return "A lövésvolumen és a helyzetminőség együtt erős; a támadó folyamat fenntartható."
+        if s < 8 and x < 1.0: return "Kevés lövés és alacsony xG: a támadóharmadba jutás és a boxon belüli helyzetkialakítás egyaránt fejlesztendő."
+        return f"A lövésszám és az xG együtt közepes/stabil profilt ad" + (f"; átlagos helyzetminőség: {xps:.2f} xG/lövés." if xps is not None else ".")
+    return "A lövésprofil csak részben értékelhető, mert a lövésszám vagy az xG hiányzik."
+
+def _fpi_lost_ball_location_reading_v415(metrics: Dict[str,object]) -> str:
+    total=_fpi_num_v133(metrics.get("lost_balls"),None)
+    d=_fpi_num_v133(metrics.get("lost_balls_defensive_third"),None)
+    m=_fpi_num_v133(metrics.get("lost_balls_middle_third"),None)
+    a=_fpi_num_v133(metrics.get("lost_balls_final_third"),None)
+    zones=[("saját harmad",d),("középső harmad",m),("támadóharmad",a)]
+    present=[(n,v) for n,v in zones if v is not None]
+    if not present:
+        return "A teljes labdavesztésszám értékelhető, de a forrás nem ad zónabontást; az FPI nem becsüli meg a helyet."
+    top=max(present,key=lambda x:x[1])
+    if top[0]=="saját harmad": return "A legtöbb azonosított labdavesztés a saját harmadban történik; ez közvetlenebb átmeneti és kapu-kockázat, ezért a kihozatal és az első biztosító passz prioritás."
+    if top[0]=="középső harmad": return "A labdavesztések főleg a középső harmadban jelennek meg; a második labdák, visszatámadás és labda mögötti szerkezet kulcsfontosságú."
+    return "A labdavesztések nagyobb része a támadóharmadban történik; ez önmagában kevésbé kritikus, a visszatámadás és rest defence minőségével együtt kell olvasni."
+
 def _fpi_team_metric_rows_v132(metrics: object) -> List[Tuple[str, str, str, str, str]]:
-    """Csapatszintű KPI-k: minden releváns rendelkezésre álló mező + referencia/értékelés."""
-    if not isinstance(metrics, dict) or not metrics:
-        return []
-    label_map = {
-        "possession_pct": "Labdabirtoklás", "shots": "Lövések", "xg": "xG", "entries_box": "Box belépések",
-        "final_third_entries": "Támadóharmad belépések", "key_passes": "Kulcspasszok", "corners": "Szögletek",
-        "ppda": "PPDA", "pressing_success_pct": "Presszing sikeresség", "passes_accurate_pct": "Passzpontosság",
-        "crosses": "Beadások", "recoveries": "Labdaszerzések", "lost_balls": "Labdavesztések", "counterattacks": "Kontrák",
+    """V415: csapatszintű KPI-k azonos meccs-/90 nevezővel, kombinált lövés+xG profillal."""
+    if not isinstance(metrics,dict) or not metrics: return []
+    own_ctx=_fpi_own_context_from_session_v132() if "_fpi_own_context_from_session_v132" in globals() else {}
+    rows=[]
+    # Első sorban mindig jelezzük, mi az adat nevezője.
+    agg=metrics.get("_aggregation_label")
+    mc=metrics.get("_match_count")
+    if agg:
+        rows.append(("Adatkör / aggregáció",f"{mc or '—'} meccs",str(agg),str(metrics.get("_normalization_note",'')),"_scope"))
+    shots=metrics.get("shots"); xg=metrics.get("xg")
+    if shots not in [None,""] or xg not in [None,""]:
+        score,detail=_fpi_shot_profile_score_v415(shots,xg)
+        score_txt=f"Lövésprofil {score:.1f}/10" if score is not None else "Lövésprofil"
+        ref_txt="Lövések ref. 8–14 / meccs; xG ref. 1.0–1.8 / meccs. A pont 50% lövésvolumen + 50% xG."
+        rows.append(("Lövések + xG",detail,ref_txt,score_txt+" – "+_fpi_shot_profile_reading_v415(shots,xg),"shot_profile"))
+    label_map={
+        "possession_pct":"Labdabirtoklás","entries_box":"Box belépések","final_third_entries":"Támadóharmad belépések","key_passes":"Kulcspasszok","corners":"Szögletek",
+        "ppda":"PPDA","pressing_success_pct":"Presszing sikeresség","passes_accurate_pct":"Passzpontosság","crosses":"Beadások","recoveries":"Labdaszerzések","lost_balls":"Labdavesztések","counterattacks":"Kontrák",
     }
-    own_ctx = _fpi_own_context_from_session_v132() if "_fpi_own_context_from_session_v132" in globals() else {}
-    rows = []
-    for k, lab in label_map.items():
-        v = metrics.get(k)
-        if v in [None, "", 0, 0.0]:
-            continue
+    for k,lab in label_map.items():
+        v=metrics.get(k)
+        if v in [None,""]: continue
         try:
-            fv = float(v)
-            if k in ["possession_pct", "pressing_success_pct", "passes_accurate_pct"] and fv <= 1:
-                fv *= 100
-            suffix = "%" if k in ["possession_pct", "pressing_success_pct", "passes_accurate_pct"] else ""
-            val_txt = f"{fv:.1f}{suffix}"
-        except Exception:
-            val_txt = str(v)
-        ref_label, eval_txt = _fpi_ref_eval_value_v134(k, v, "team")
-        ref_txt = f"{ref_label}; {eval_txt}" if ref_label else eval_txt
-        rows.append((lab, val_txt, ref_txt, _fpi_team_metric_reading_v133(lab, val_txt, k, own_ctx), k))
-    return rows[:14]
+            fv=float(v); suffix="%" if k in ["possession_pct","pressing_success_pct","passes_accurate_pct"] else ""
+            if suffix and fv<=1: fv*=100
+            val_txt=f"{fv:.1f}{suffix}"
+        except Exception: val_txt=str(v)
+        ref_label,eval_txt=_fpi_ref_eval_value_v134(k,v,"team")
+        ref_txt=f"{ref_label}; {eval_txt}" if ref_label else eval_txt
+        reading=_fpi_team_metric_reading_v133(lab,val_txt,k,own_ctx)
+        if k=="lost_balls":
+            d=_fpi_num_v133(metrics.get("lost_balls_defensive_third"),None); m=_fpi_num_v133(metrics.get("lost_balls_middle_third"),None); a=_fpi_num_v133(metrics.get("lost_balls_final_third"),None)
+            zone_parts=[]
+            if d is not None: zone_parts.append(f"saját harmad {d:.1f}")
+            if m is not None: zone_parts.append(f"középső {m:.1f}")
+            if a is not None: zone_parts.append(f"támadóharmad {a:.1f}")
+            if zone_parts: val_txt += " | " + ", ".join(zone_parts)
+            reading=_fpi_lost_ball_location_reading_v415(metrics)
+        rows.append((lab,val_txt,ref_txt,reading,k))
+    return rows[:16]
+
 
 def _fpi_own_context_from_session_v132() -> Dict[str, str]:
     return {
@@ -14253,20 +14368,134 @@ def _fpi_safe_build_adaptive_plan_v104(gps_context: Dict[str, object], tactical_
         }
 
 
-def _fpi_safe_tactical_parse_team_excel_v107(df2, mapping=None) -> Dict[str, float]:
-    """Korai fallback: ha van taktikai Excel, legalább a numerikus oszlopátlagokat adja vissza."""
-    try:
-        if not isinstance(df2, pd.DataFrame) or df2.empty:
-            return {}
-        out = {}
-        for c in df2.columns:
-            vals = pd.to_numeric(df2[c], errors="coerce").dropna()
-            if len(vals):
-                key = str(c).strip().lower().replace(" ", "_")[:40]
-                out[key] = float(vals.mean())
-        return out
-    except Exception:
+FPI_TEAM_TACTICAL_ALIASES_V415 = {
+    "possession_pct": ["ball possession","possession","possession %","labdabirtoklás","labdabirtoklás %","birtoklás"],
+    "shots": ["shots","total shots","attempts","lövés","lövések","összes lövés"],
+    "xg": ["xg","expected goals","várható gól","várható gólok"],
+    "entries_box": ["box entries","entries into box","penalty box entries","tizenhatosba belépés","büntetőterület","16-osba belépés"],
+    "final_third_entries": ["final third entries","entries to final third","támadóharmad belépések","utolsó harmad"],
+    "key_passes": ["key passes","shot assists","chances created","kulcspassz","helyzetkialakítás","lövést előkészítő"],
+    "corners": ["corners","corner kicks","szögletek","szöglet"],
+    "ppda": ["ppda","passes allowed per defensive action","passz engedett védekező akciónként"],
+    "pressing_success_pct": ["pressing success","successful pressing","team pressing successful","letámadás sikeresség","presszing sikeresség"],
+    "passes_accurate_pct": ["pass accuracy","passes accurate","passing accuracy","passzpontosság","átadáspontosság"],
+    "crosses": ["crosses","successful crosses","beadások","beadás"],
+    "recoveries": ["recoveries","ball recoveries","regains","labdaszerzések","visszaszerzések"],
+    "lost_balls": ["lost balls","losses","turnovers","labdavesztések","elvesztett labdák"],
+    "lost_balls_defensive_third": ["lost balls defensive third","turnovers defensive third","losses own third","defensive third losses","labdavesztés saját harmad","labdavesztések saját harmad","védőharmad labdavesztés","védőharmadban elvesztett"],
+    "lost_balls_middle_third": ["lost balls middle third","turnovers middle third","losses middle third","middle third losses","labdavesztés középső harmad","labdavesztések középső harmad","középső harmadban elvesztett"],
+    "lost_balls_final_third": ["lost balls final third","turnovers final third","losses attacking third","attacking third losses","final third losses","labdavesztés támadóharmad","labdavesztések támadóharmad","támadóharmadban elvesztett"],
+    "counterattacks": ["counterattacks","counter attacks","fast attacks","kontrák","kontratámadások","gyors támadások"],
+    "matches_count": ["matches","matches played","games","games played","meccsek","mérkőzések","meccsszám"],
+    "match_minutes": ["match minutes","minutes","minutes played","játékperc","meccsperc","mérkőzés perc"],
+}
+FPI_TEAM_TACTICAL_VOLUME_METRICS_V415 = {
+    "shots","xg","entries_box","final_third_entries","key_passes","corners","crosses","recoveries","lost_balls",
+    "lost_balls_defensive_third","lost_balls_middle_third","lost_balls_final_third","counterattacks"
+}
+FPI_TEAM_TACTICAL_RATE_METRICS_V415 = {"possession_pct","pressing_success_pct","passes_accurate_pct","ppda"}
+
+def _fpi_team_col_norm_v415(value: object) -> str:
+    s=str(value or "").strip().lower()
+    s=s.replace("%"," pct ").replace("/"," ").replace("-"," ").replace("_"," ")
+    s=unicodedata.normalize("NFKD",s)
+    s="".join(ch for ch in s if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+"," ",s).strip()
+
+def _fpi_team_column_map_v415(df: pd.DataFrame) -> Dict[str,str]:
+    if not isinstance(df,pd.DataFrame) or df.empty:
         return {}
+    norm_cols={_fpi_team_col_norm_v415(c):c for c in df.columns}
+    out={}
+    for key,aliases in FPI_TEAM_TACTICAL_ALIASES_V415.items():
+        opts=[key.replace("_"," ")]+list(aliases)
+        for alias in opts:
+            n=_fpi_team_col_norm_v415(alias)
+            if n in norm_cols:
+                out[key]=norm_cols[n]; break
+        if key in out: continue
+        # Conservative contains fallback only for sufficiently specific aliases.
+        for alias in opts:
+            n=_fpi_team_col_norm_v415(alias)
+            if len(n)<5: continue
+            hits=[orig for nc,orig in norm_cols.items() if n==nc or (n in nc and len(n)/max(len(nc),1)>.55)]
+            if len(hits)==1:
+                out[key]=hits[0]; break
+    return out
+
+def _fpi_team_metrics_from_frame_v415(df2: pd.DataFrame) -> Dict[str, object]:
+    if not isinstance(df2,pd.DataFrame) or df2.empty:
+        return {}
+    df=df2.copy()
+    cmap=_fpi_team_column_map_v415(df)
+    metric_keys=[k for k in FPI_TEAM_TACTICAL_ALIASES_V415 if k not in {"matches_count","match_minutes"} and k in cmap]
+    if not metric_keys:
+        return {"_normalization_status":"unmapped","_normalization_note":"Nem azonosítható megbízható csapatszintű taktikai mező."}
+    work=pd.DataFrame(index=df.index)
+    for k in metric_keys:
+        work[k]=pd.to_numeric(df[cmap[k]].astype(str).str.replace(",",".",regex=False).str.replace("%","",regex=False),errors="coerce")
+    matches_series=pd.to_numeric(df[cmap["matches_count"]],errors="coerce") if "matches_count" in cmap else pd.Series(np.nan,index=df.index)
+    minutes_series=pd.to_numeric(df[cmap["match_minutes"]],errors="coerce") if "match_minutes" in cmap else pd.Series(np.nan,index=df.index)
+    valid=work.notna().sum(axis=1).ge(max(1,min(2,len(metric_keys))))
+    work=work.loc[valid].copy(); matches_series=matches_series.loc[valid]; minutes_series=minutes_series.loc[valid]
+    if work.empty:
+        return {"_normalization_status":"empty","_normalization_note":"A felismert oszlopokban nincs numerikus csapatérték."}
+
+    # Ha több érdemi sor van, minden sor egy meccsrekordként kezelhető; ha egy összesítő sor több meccset jelez,
+    # a volumenmutatókat először meccsenkéntire bontjuk. Játékperc esetén /90 normalizálunk.
+    normalized_rows=[]
+    source_match_equivalents=0.0
+    uncertain_aggregate=False
+    for idx,row in work.iterrows():
+        rec={}
+        mc=float(matches_series.loc[idx]) if pd.notna(matches_series.loc[idx]) and float(matches_series.loc[idx])>0 else 1.0
+        mins=float(minutes_series.loc[idx]) if pd.notna(minutes_series.loc[idx]) and float(minutes_series.loc[idx])>0 else None
+        source_match_equivalents += mc
+        for k in metric_keys:
+            v=row.get(k)
+            if pd.isna(v): continue
+            fv=float(v)
+            if k in {"possession_pct","pressing_success_pct","passes_accurate_pct"} and 0 <= fv <= 1.2:
+                fv*=100.0
+            if k in FPI_TEAM_TACTICAL_VOLUME_METRICS_V415:
+                if mc>1:
+                    fv/=mc
+                # Match-minute normalization only when minutes represent a single/average match row.
+                # Multi-match aggregate with total minutes is first converted per match, then to /90.
+                if mins and mins>0:
+                    per_match_mins=mins/mc if mc>1 else mins
+                    if 10 <= per_match_mins <= 130 and abs(per_match_mins-90)>1:
+                        fv=fv/per_match_mins*90.0
+            rec[k]=fv
+        normalized_rows.append(rec)
+    ndf=pd.DataFrame(normalized_rows)
+    result={}
+    for k in metric_keys:
+        vals=pd.to_numeric(ndf.get(k),errors="coerce").dropna() if k in ndf.columns else pd.Series(dtype=float)
+        if not vals.empty:
+            result[k]=float(vals.median())
+    result["_match_count"]=int(round(source_match_equivalents)) if source_match_equivalents else int(len(ndf))
+    result["_record_count"]=int(len(ndf))
+    explicit_count = "matches_count" in cmap
+    explicit_minutes = "match_minutes" in cmap
+    result["_aggregation_label"]="meccsenkénti medián (/90, ahol játékperc elérhető)"
+    result["_normalization_status"]="ok" if (len(ndf)>1 or explicit_count or explicit_minutes) else "assumed_single_match"
+    base_note="A volumenmutatók meccsenkénti, szükség esetén /90-re normalizált értékek; több meccsnél a meccsértékek mediánja. Százalékos/arány mutatókat nem összegezzük."
+    if len(ndf)==1 and not explicit_count and not explicit_minutes:
+        base_note += " A fájl egyetlen meccsrekordnak van értelmezve; ha ez valójában több meccs összege, meccsszám vagy játékperc szükséges a biztos normalizáláshoz."
+    result["_normalization_note"]=base_note
+    result["_mapped_columns"]={k:str(v) for k,v in cmap.items()}
+    return result
+
+def _fpi_safe_tactical_parse_team_excel_v107(df2, mapping=None) -> Dict[str, float]:
+    """V415: csapatszintű taktikai Excel normalizálása azonos nevezőre.
+    Nem készít nyers többmeccses összeget egy per-meccs referencia mellé.
+    """
+    try:
+        out=_fpi_team_metrics_from_frame_v415(df2)
+        return out or {}
+    except Exception as exc:
+        return {"_normalization_status":"error","_normalization_note":f"Taktikai csapatmapping hiba: {str(exc)[:120]}"}
 
 
 def _fpi_safe_tactical_parse_player_excel_v107(df2, mapping=None) -> Dict[str, pd.DataFrame]:
@@ -14369,23 +14598,35 @@ def _fpi_clean_read_table_file_v142(uploaded_file) -> Tuple[pd.DataFrame, str]:
 
 
 def _fpi_clean_merge_team_excels_v142(files: List[object]) -> Tuple[Dict[str, float], List[Dict[str, object]]]:
-    """Több csapat Excel/CSV összeolvasása. A numerikus oszlopok átlagát adja vissza.
-    A riportlogika később ezekből tud csapatszintű profilt építeni.
+    """V415: több csapat Excel/CSV meccsenkénti, /90-kompatibilis összeolvasása.
+
+    Minden fájl először önállóan normalizálódik. Ezután a források normalizált mutatóinak mediánja készül,
+    így két feltöltött meccs nem kétmeccses összegként kerül egy per-meccs referencia mellé.
     """
-    frames, diag = [], []
+    parsed,diag=[],[]
     for f in files or []:
-        df, src = _fpi_clean_read_table_file_v142(f)
-        ok = isinstance(df, pd.DataFrame) and not df.empty
-        diag.append({"Fájl": str(getattr(f, "name", src)), "Forrás/lap": src, "Státusz": "OK" if ok else "nem olvasható", "Sor": int(len(df)) if ok else 0, "Oszlop": int(len(df.columns)) if ok else 0})
+        df,src=_fpi_clean_read_table_file_v142(f)
+        ok=isinstance(df,pd.DataFrame) and not df.empty
+        item={"Fájl":str(getattr(f,"name",src)),"Forrás/lap":src,"Státusz":"OK" if ok else "nem olvasható","Sor":int(len(df)) if ok else 0,"Oszlop":int(len(df.columns)) if ok else 0}
         if ok:
-            df = df.copy()
-            df["_source_file"] = str(getattr(f, "name", src))
-            frames.append(df)
-    if not frames:
-        return {}, diag
-    merged = pd.concat(frames, ignore_index=True, sort=False)
-    metrics = _fpi_safe_tactical_parse_team_excel_v107(merged, None) or {}
-    return metrics, diag
+            m=_fpi_safe_tactical_parse_team_excel_v107(df,None) or {}
+            item["Normalizálás"]=m.get("_aggregation_label",m.get("_normalization_status",""))
+            item["Meccs"]=m.get("_match_count",0)
+            if any(not str(k).startswith("_") for k in m): parsed.append(m)
+        diag.append(item)
+    if not parsed:
+        return {},diag
+    metric_keys=sorted({k for m in parsed for k in m if not str(k).startswith("_")})
+    out={}
+    for k in metric_keys:
+        vals=pd.to_numeric(pd.Series([m.get(k) for m in parsed]),errors="coerce").dropna()
+        if not vals.empty: out[k]=float(vals.median())
+    out["_match_count"]=int(sum(int(m.get("_match_count",1) or 1) for m in parsed))
+    out["_source_count"]=len(parsed)
+    out["_aggregation_label"]="meccsenkénti medián (/90, ahol szükséges)"
+    out["_normalization_status"]="ok"
+    out["_normalization_note"]="Minden taktikai fájl először meccsenkénti nevezőre kerül; több forrás esetén a normalizált meccsértékek mediánja szerepel."
+    return out,diag
 
 
 def _fpi_clean_merge_player_excels_v142(files: List[object]) -> Tuple[Dict[str, pd.DataFrame], List[Dict[str, object]]]:
@@ -19592,6 +19833,508 @@ def build_fpi_own_team_tactical_only_pdf_bytes_v156(
 # =========================================================
 # V143 - Methodology content + PDF export
 # =========================================================
+# =========================================================
+# V415 - Kibővített GPS-only szakmai metodika
+# A korábbi, kódon kívül elkészített részletes metodika beépített változata.
+# =========================================================
+FPI_EXTENDED_METHODOLOGY_BLOCKS_V415 = [{'title': '1. A riport eredményeinek olvasási kulcsa',
+  'blocks': [{'type': 'paragraph',
+              'text': 'Minden FPI-állítás öt kérdésre bontható. Ha ezek közül bármelyik nem egyértelmű, az eredményt nem szabad automatikus edzői utasításként '
+                      'kezelni.'},
+             {'type': 'table',
+              'rows': [['Kérdés', 'Példa a riportban', 'Miért fontos?'],
+                       ['1. Mi az adatkör?',
+                        'Csak edzés / csak meccs / teljes hét / csonka hét.',
+                        'Egyetlen edzés nem értelmezhető alacsony heti terhelésként.'],
+                       ['2. Mi az aggregáció?',
+                        'Játékosösszeg, játékosmedián, sessionmedián, /90 vagy 10×90.',
+                        'Ugyanaz a 6 000 m mást jelent egy játékosnál és a csapat összesítésében.'],
+                       ['3. Mi a referencia?',
+                        'Saját 3 meccses medián, előző 4 hét vagy profilbenchmark.',
+                        'A referencia minősége meghatározza a következtetés erejét.'],
+                       ['4. Milyen időszakra szól?',
+                        'Egy esemény, naptári hét, gördülő dátumtartomány.',
+                        'A hétfő-keddi csonka hét nem hasonlítható közvetlenül teljes héthez.'],
+                       ['5. Mekkora a bizonyosság?',
+                        'Előzetes / összehasonlító / trendértékű.',
+                        'Kevés adat mellett a pontszám irányjelző, nem stabil minősítés.']]},
+             {'type': 'subheading', 'text': '1.1. Mit jelent a „célzónában” megjelölés?'},
+             {'type': 'paragraph',
+              'text': 'A „célzónában” nem azt jelenti, hogy az edzés biztosan optimális volt. Azt jelenti, hogy a kiválasztott mutató az adott referencia '
+                      'alapján számított operatív tartományban helyezkedett el. A taktikai tartalom, a játékos aktuális állapota, a pályaméret, a feladat '
+                      'célja és a következő mérkőzés távolsága ettől még külön szakmai értékelést igényel.'},
+             {'type': 'table',
+              'rows': [['',
+                        'Példa / A heti HSR lehet célzónában, miközben az összes HSR egyetlen késői MD-1 edzésre koncentrálódik. A heti mennyiség megfelelő, '
+                        'az időzítés mégis kedvezőtlen. Ezért az FPI külön kezeli a heti benchmarkot és a Speed Exposure/tapering struktúrát.']]},
+             {'type': 'subheading', 'text': '1.2. Mit nem jelent a Readiness?'},
+             {'type': 'bullet', 'text': 'Nem sérülési valószínűség.'},
+             {'type': 'bullet', 'text': 'Nem laboratóriumi frissességmérés.'},
+             {'type': 'bullet', 'text': 'Nem garantált mérkőzésteljesítmény.'},
+             {'type': 'bullet', 'text': 'Nem helyettesíti a wellness, fájdalom, orvosi, erőnléti és edzői információt.'},
+             {'type': 'paragraph',
+              'text': 'A Readiness egy 0-100-as, szabályalapú terhelési szerkezetmutató. Azt jelzi, hogy a rendelkezésre álló GPS-adatok alapján mennyire '
+                      'rendezett a részvétel, a terhelésváltozás, a sebességi expozíció, a meccs előtti frissítés és a játékmodellhez illeszkedő fizikai '
+                      'profil.'}]},
+ {'title': '2. Adatimport, mapping és eseményazonosítás',
+  'blocks': [{'type': 'subheading', 'text': '2.1. Mit fogad az alkalmazás?'},
+             {'type': 'paragraph',
+              'text': 'Az FPI hardverfüggetlen: különböző szolgáltatók CSV- és Excel-exportjait standard oszlopokra képezi. A rendszer nem a fájl vizuális '
+                      'formáját, hanem a mezők jelentését próbálja egységesíteni.'},
+             {'type': 'table',
+              'rows': [['Standard mező', 'Tipikus forrásnevek', 'FPI-értelmezés'],
+                       ['total_distance', 'Total Distance, Distance, Össztáv', 'Teljes megtett távolság, méter.'],
+                       ['hsr_distance', 'HSR Distance, Zone 4+5', 'Nagysebességű futás, a forrás küszöbe szerint.'],
+                       ['sprint_distance', 'Sprint Distance, Zone 5', 'Sprintküszöb feletti távolság, méter.'],
+                       ['sprints', 'Sprint Count, Number of Sprints', 'Sprintakciók darabszáma.'],
+                       ['training_load', 'PlayerLoad, Training Load, HMLD', 'Szolgáltatóspecifikus összterhelési pont.'],
+                       ['duration / match_minutes', 'Duration, Minutes Played', 'Edzésidő vagy tényleges mérkőzésperc.'],
+                       ['acc / dec / high_efforts', 'Accelerations, Decelerations, HIE', 'Robbanékony, mechanikai vagy intenzív akciók.']]},
+             {'type': 'subheading', 'text': '2.2. Eseményazonosítás'},
+             {'type': 'paragraph',
+              'text': 'Az eseményazonosítás célja, hogy egy csapatedzés ne essen szét játékosonként külön sessionökre, ugyanakkor egy több munkalapos vagy '
+                      'több eseményt tartalmazó export se olvadjon össze egyetlen edzéssé.'},
+             {'type': 'bullet', 'text': 'Minden feltöltött fizikai fájl külön forrásazonosítót kap, még azonos fájlnév esetén is.'},
+             {'type': 'bullet', 'text': 'Egy Excel-fájl külön adatlapjai külön eseményként kezelhetők; a Summary/Benchmark/segédlapokat a rendszer kiszűri.'},
+             {'type': 'bullet', 'text': 'Egy lapon belül a dátum, sessionnév és nagy időrés alapján választható szét több esemény.'},
+             {'type': 'bullet', 'text': 'A játékosok néhány perccel eltérő GPS-indítása nem hoz létre külön csapatedzést.'},
+             {'type': 'bullet',
+              'text': 'Meccsnél a Half 1 és Half 2 játékosonként összevonódik; az összeadható mutatók összeadódnak, a Max Speed maximumként marad meg. Ha egy Barin/Brainsports munkafüzetben több mérkőzés félidőlapjai szerepelnek, az FPI a félidőpárokat külön meccseseményekké rendezi; az Overall lapot nem adja hozzá újra, mert az több eseményt is összesíthet.'},
+             {'type': 'subheading', 'text': '2.3. Fizikai és logikai minőségkapuk'},
+             {'type': 'table',
+              'rows': [['Sprinttáv ≤ HSR ≤ Össztáv / Ha a sorrend sérül, mapping- vagy mértékegységhiba valószínű; az FPI az értéket érvényteleníti vagy '
+                        'figyelmeztetést ad.']]},
+             {'type': 'bullet', 'text': 'Kilométerben érkező távolságok méterre konvertálódnak.'},
+             {'type': 'bullet', 'text': 'Duplikált sorok és összesítő „all” sorok nem számolhatók együtt a félidőkkel.'},
+             {'type': 'bullet', 'text': 'A Sprint Distance méter és a Sprint Count darab nem cserélhető fel.'},
+             {'type': 'bullet', 'text': 'Load csak azonos szolgáltatón és azonos definícióval hasonlítható közvetlenül.'},
+             {'type': 'table',
+              'rows': [['',
+                        'Miért fontos a szolgáltatóazonosság? / A GNSS-rendszerek távolság- és sebességmutatói általában megbízhatóbbak, de a küszöbalapú '
+                        'gyorsulási/lassítási mutatók és a gyártók közötti egyezés gyengébb lehet. Ezért az FPI a saját, azonos rendszerrel gyűjtött történeti '
+                        'adatot előnyben részesíti a különböző gyártók nyers számainak közvetlen összevetésével szemben. [10]']]}]},
+ {'title': '3. Elemzési módok és adatminimumok',
+  'blocks': [{'type': 'table',
+              'rows': [['Elemzési mód', 'Mit számol?', 'Mit nem minősít?'],
+                       ['Egyetlen esemény',
+                        'Sessionvolumen, intenzitás, kereteloszlás, meccsarány ha van referencia.',
+                        'Heti trend, teljes heti readiness, heti deficit.'],
+                       ['Meccs-only', 'Játékos /90, csapat 10×90, poszt- és keretprofil.', 'Edzésstruktúra és tapering.'],
+                       ['Edzésblokk meccs nélkül',
+                        'Edzésenkénti és kumulált terhelés, saját előzmény, profilbenchmark.',
+                        'Biztos meccsrelatív cél, ha nincs korábbi meccs.'],
+                       ['Csonka hét',
+                        'Tényleges érték eddig; azonos hétközi pontig történő összevetés.',
+                        'Lineáris teljes heti kivetítés és végleges readiness.'],
+                       ['Teljes mikrociklus', 'Heti benchmark, readiness, tapering, játékoskockázat.', 'Sérülés vagy teljesítmény biztos előrejelzése.'],
+                       ['2-3 teljes hét', 'Leíró heti összehasonlítás.', 'Trendpont és stabil trendkövetkeztetés.'],
+                       ['Legalább 4 teljes hét', 'Trend, saját heti medián, periodizációs minták.', 'Ok-okozati következtetés önmagában.']]},
+             {'type': 'table',
+              'rows': [['',
+                        'Trendminimum / Az FPI csak legalább 4 teljes hétből nevez valamit trendnek. Két-három hét fontos összehasonlítás lehet, de könnyen '
+                        'torzulhat a meccsprogram, a felkészülési fázis, a hiányzások vagy egyetlen kiugró hét miatt.']]},
+             {'type': 'subheading', 'text': '3.1. Csonka hét kezelése'},
+             {'type': 'paragraph',
+              'text': 'A hétfő-keddi terhelést nem szabad egy teljes előző héthez viszonyítani, és nem szabad egyszerűen a napok számával felszorozni. Az FPI '
+                      'célja az, hogy a csonka hetet az előző hetek azonos pontjához hasonlítsa, valamint külön jelezze, hogy a heti összeg még nem végleges.'},
+             {'type': 'table', 'rows': [['Aktuális hétfő-kedd  ↔  korábbi hetek hétfő-kedd / Nem: aktuális hétfő-kedd ↔ előző teljes hét.']]}]},
+ {'title': '4. Mutatók, mértékegységek és aggregáció',
+  'blocks': [{'type': 'table',
+              'rows': [['Mutató', 'Mértékegység', 'Eseményen belüli szabály', 'Fő jelentés'],
+                       ['Össztáv', 'm', 'Összeadódik.', 'Volumen.'],
+                       ['HSR', 'm', 'Összeadódik; küszöb a szolgáltatótól függ.', 'Nagysebességű futóinger.'],
+                       ['Sprinttáv', 'm', 'Összeadódik.', 'Sprintküszöb feletti expozíció.'],
+                       ['Sprint db', 'db', 'Összeadódik.', 'Sprintismétlések száma.'],
+                       ['Load', 'pont', 'Összeadódik; szolgáltatóspecifikus.', 'Külső összterhelés.'],
+                       ['Táv/perc', 'm/perc', 'Össztáv / teljes idő; nem egyszerű részátlag.', 'Relatív intenzitás.'],
+                       ['Max Speed', 'km/h', 'A maximum marad meg.', 'Legmagasabb elért sebesség.'],
+                       ['Gyorsítás/lassítás', 'db', 'Összeadódik, küszöbfüggő.', 'Mechanikai/neuromuszkuláris inger.'],
+                       ['High Efforts', 'db vagy pont', 'Forrásfüggő összesített mutató.', 'Robbanékony/intenzív akcióprofil.']]},
+             {'type': 'subheading', 'text': '4.1. Miért medián és nem mindig átlag?'},
+             {'type': 'paragraph',
+              'text': 'A csapatszintű „tipikus játékos” értéket az FPI több helyen mediánnal írja le. Ez kevésbé érzékeny a rövid cserejátékra, a részleges '
+                      'edzésre, a rehabilitációs sorra és az extrém kiugró értékre. Az átlag ettől még hasznos ellenőrző adat, de a benchmarkdöntésben '
+                      'könnyebben elmozdul néhány szélsőséges megfigyelés miatt.'},
+             {'type': 'table',
+              'rows': [['Szint', 'Aggregáció', 'Példa'],
+                       ['Játékos - esemény', 'összeg; Max Speed maximum', 'Egy játékos félidőinek összevonása.'],
+                       ['Session csapatérték - edzés', 'mezőnyjátékos-medián', 'Az edzés tipikus mezőnyjátékosának tényleges sessionterhelése.'],
+                       ['Session csapatérték - meccs', 'mezőnyjátékos /90 medián, min. 10 perc', 'A félidők összevonása után a cserehatástól megtisztított tipikus meccsprofil.'],
+                       ['Játékos - hét', 'események összege', 'A játékos teljes heti exposure-ja.'],
+                       ['Csapat heti érték', 'játékosheti összegek mediánja', 'A tipikus játékos heti terhelése.'],
+                       ['Több meccs referencia', 'meccsenkénti /90 értékek mediánja', 'A kiugró mérkőzés kevésbé dominál.']]},
+             {'type': 'table',
+              'rows': [['',
+                        'Fontos megkülönböztetés / Edzésnél a sessiontábla nyers mezőnyjátékos-mediánt mutat. Meccsnél viszont /90 mezőnyjátékos-mediánt, mert a nyers mediánt a cserék erősen lehúzhatják. ''Például egy 70,8 perces medián játékidő mellett a 6 668 m nyers medián játékosonkénti /90 normalizálás után kb. 8 927 m /90 tipikus meccsprofilt adhat. A játékostáblában szereplő 35 000 m ezzel szemben az adott játékos eseményeinek időszakos összege.']]}]},
+ {'title': '5. Meccsreferencia, játékpercek és /90 normalizálás',
+  'blocks': [{'type': 'subheading', 'text': '5.1. Cserejátékosok és tényleges játékperc'},
+             {'type': 'paragraph',
+              'text': 'Az FPI nem feltételezi, hogy mindenki 90 percet játszott. A meccsmutatók a tényleges játékpercből készülnek; külön játékpercmező '
+                      'hiányában a meccshez tartozó időtartam a fallback.'},
+             {'type': 'table', 'rows': [['Játékos /90 = játékos tényleges mutatója ÷ játékperc × 90']]},
+             {'type': 'paragraph',
+              'text': 'A fő játékos-meccsreferenciába legalább 10 percet játszó játékos kerül, hogy a néhány perces csere ne adjon szélsőséges /90 értéket. Ugyanez a minimumperces kapu érvényes a meccs sessionprofil /90 mediánjára. A Half 1 és Half 2 előbb játékosonként összeadódik; csak ezután történik a /90 normalizálás.'},
+             {'type': 'subheading', 'text': '5.2. Miért lehet alacsony a nyers meccsmedián?'},
+             {'type': 'paragraph',
+              'text': 'A nyers meccsmedián az összes szereplő tényleges távolságának középső értéke. Ha sok cserejátékos 20-60 percet játszik, ez 5-7 km körülire eshet akkor is, ha a teljes meccset játszók 9-10 km-t teljesítenek. Ez nem félidő-összeadási hiba, hanem eltérő játékpercek hatása. A sessiontábla ezért V1.2-től meccsnél /90 mediánt mutat.'},
+             {'type': 'table', 'rows': [['Példa: nyers medián 6 668 m; medián játékperc 70,8; játékosonkénti /90 normalizálás után a tipikus meccsprofil kb. 8 927 m /90. A számítás játékosonként történik, nem a két medián egyszerű osztásával.']]},
+             {'type': 'subheading', 'text': '5.3. Csapatszintű 10×90 normalizálás'},
+             {'type': 'table', 'rows': [['Csapat 10×90 = mezőnyjátékosok eseményösszege ÷ összes mezőnyjátékos-perc × 900. A 900 = 10 mezőnyjátékos × 90 perc.']]},
+             {'type': 'paragraph',
+              'text': 'Ez megakadályozza, hogy a több csere vagy a fájlban szereplő több játékos mesterségesen megnövelje a csapatterhelést. A mezőnyjátékos-'
+                      'csapatprofil meccsenként készül, majd a mérkőzések mediánja lesz a csapatreferencia.'},
+             {'type': 'subheading', 'text': '5.4. Saját meccsreferencia bizonyossága'},
+             {'type': 'table',
+              'rows': [['Meccsszám', 'Használat', 'Értelmezés'],
+                       ['0', 'Profilbenchmark és saját edzéselőzmény.', 'Nincs stabil abszolút meccsrelatív cél.'],
+                       ['1', 'Előzetes saját referencia.', 'Erősen függ az ellenféltől, eredménytől, posztoktól és játékpercektől.'],
+                       ['2', 'Javuló saját referencia.', 'Még mindig korlátozott bizonyosság.'],
+                       ['3-5', 'Elsődleges saját meccsmedián.', 'Már kevésbé függ egyetlen mérkőzéstől.'],
+                       ['6+', 'Stabilabb klubprofil; érdemes szezonfázis szerint is bontani.', 'A játékmodell és keretváltozás továbbra is számít.']]},
+             {'type': 'paragraph',
+              'text': 'A játékhelyzet, ellenfélminőség, meccsállás és poszt befolyásolhatja a fizikai igényt; ezért a saját meccsmedián sem „örök '
+                      'normálérték”, hanem a klub aktuális kontextusának legjobb belső referenciája. A posztspecifikus eltéréseket több nemzetközi vizsgálat '
+                      'is igazolja. [8, 9]'},
+             {'type': 'paragraph', 'text': '2. ábra. Az FPI referenciahierarchiája.'}]},
+ {'title': '6. Benchmark Engine: referenciahierarchia és képlet',
+  'blocks': [{'type': 'paragraph',
+              'text': 'A profilbenchmark célja nem az, hogy univerzális futómennyiséget írjon elő. A saját meccsreferencia százalékában határozza meg az '
+                      'operatív heti és sessioncélzónát, majd ezt a kiválasztott kontextus szerint módosítja.'},
+             {'type': 'table',
+              'rows': [['Módosított célzóna = alapcél × korosztályfaktor × szintfaktor × posztfaktor × játékmodellfaktor / A teljes szorzó 0,25 és 1,45 között '
+                        'van korlátozva.']]},
+             {'type': 'subheading', 'text': '6.1. FPI alapcélzónák'},
+             {'type': 'paragraph',
+              'text': 'Az alábbi tartományok az FPI jelenlegi operatív alapértékei. A heti edzésösszeg és az egy edzésre jutó medián a saját meccsreferencia '
+                      'százalékában jelenik meg.'},
+             {'type': 'table',
+              'rows': [['Mutató', 'Heti edzésösszeg / meccsref.', 'Egy edzés mediánja / meccsref.'],
+                       ['Össztáv', '280-420%', '60-100%'],
+                       ['Load', '260-410%', '55-95%'],
+                       ['HSR', '150-250%', '35-70%'],
+                       ['Sprinttáv', '100-200%', '25-55%'],
+                       ['Sprint db', '100-220%', '25-60%'],
+                       ['High Efforts', '150-280%', '35-75%']]},
+             {'type': 'table',
+              'rows': [['',
+                        'Módszertani státusz / A fenti sávok FPI-operatív célzónák. A nemzetközi kutatások alátámasztják a meccshez viszonyított terhelés, a '
+                        'napi periodizáció és a sebességi expozíció vizsgálatát, de nincs egyetlen nemzetközi konszenzus, amely minden klubra ugyanezeket a '
+                        'pontos százalékokat írná elő. [1, 4, 6, 7]']]},
+             {'type': 'subheading', 'text': '6.2. Mi történik, ha nincs saját meccs?'},
+             {'type': 'paragraph',
+              'text': 'Saját meccs nélkül az FPI továbbra is képes sessionprofilra, kereteloszlásra, saját edzéselőzményre, részvételre és profilbenchmarkra '
+                      'épülő relatív értelmezésre. Az abszolút, meccshez viszonyított célérték azonban csak előzetes lehet, ezért a riportban a '
+                      'referenciaforrást és a bizonytalanságot egyértelműen jelezni kell.'}]},
+ {'title': '7. Korosztály-, szint-, poszt- és játékmodell-faktorok',
+  'blocks': [{'type': 'subheading', 'text': '7.1. Korosztályfaktor'},
+             {'type': 'table',
+              'rows': [['Korosztály', 'FPI-faktor'],
+                       ['Felnőtt', '1,00'],
+                       ['U21', '0,97'],
+                       ['U19', '0,93'],
+                       ['U17', '0,86'],
+                       ['U16', '0,80'],
+                       ['U15', '0,73'],
+                       ['U14', '0,66'],
+                       ['U13', '0,58']]},
+             {'type': 'paragraph',
+              'text': 'A csökkenő faktor azt fejezi ki, hogy fiatalabb korosztályoknál az abszolút futó- és terhelési elvárás általában alacsonyabb. A '
+                      'biológiai érettség azonban azonos kronológiai kor mellett is jelentős különbséget okozhat; ezért az akadémiai benchmarkot nem szabad '
+                      'pusztán születési év alapján végleges normának tekinteni. [2, 3]'},
+             {'type': 'subheading', 'text': '7.2. Versenyszintfaktor'},
+             {'type': 'table',
+              'rows': [['Szint', 'Faktor', 'Megjegyzés'],
+                       ['NB I', '1,08', 'FPI felnőtt felsőszintű profil'],
+                       ['NB II', '1,00', 'alap referencia'],
+                       ['NB III', '0,92', 'alacsonyabb abszolút profil'],
+                       ['Román SuperLiga - előzetes', '1,08', 'induláskor NB I faktor'],
+                       ['Román Liga II - előzetes', '1,00', 'induláskor NB II faktor'],
+                       ['Akadémia', '0,94', 'akadémiai környezet'],
+                       ['Regionális', '0,84', 'regionális szint'],
+                       ['Megye I', '0,78', 'megyei felnőtt szint'],
+                       ['Egyéb', '0,82', 'fallback']]},
+             {'type': 'table',
+              'rows': [['',
+                        'Román profilok / A román SuperLiga és Liga II jelenleg külön választható, de a faktoruk előzetes: induláskor a magyar NB I, illetve '
+                        'NB II faktorát öröklik. Ez nem állítás a két liga azonosságáról. A profil célja a külön címkézés és a későbbi román saját adatbázis '
+                        'felépítése; 3 teljes saját meccstől a klub saját meccsmediánja az elsődleges.']]},
+             {'type': 'subheading', 'text': '7.3. Posztfaktorok'},
+             {'type': 'paragraph',
+              'text': 'A posztfaktor mutatónként eltér. A középpályás például össztávban magasabb, a szélső HSR-ben és sprintben magasabb referenciazónát kap. '
+                      'A kapus nem tűnik el az adatbázisból és külön kapusprofilban továbbra is értékelhető, de a mezőnyjátékos csapatbenchmarkból és a 10×90 '
+                      'csapatnormalizálásból kimarad.'},
+             {'type': 'table',
+              'rows': [['Poszt', 'Össztáv', 'Load', 'HSR', 'Sprinttáv', 'Sprint db', 'High Eff.'],
+                       ['Kapus', '0,62', '0,65', '0,35', '0,25', '0,35', '0,55'],
+                       ['Középhátvéd', '0,92', '0,92', '0,78', '0,70', '0,75', '0,82'],
+                       ['Szélső hátvéd', '1,05', '1,04', '1,16', '1,12', '1,10', '1,08'],
+                       ['Védekező kp.', '1,08', '1,06', '0,96', '0,82', '0,88', '0,98'],
+                       ['Középpályás', '1,10', '1,08', '1,02', '0,92', '0,96', '1,02'],
+                       ['Támadó kp.', '1,00', '1,00', '1,04', '1,02', '1,00', '1,04'],
+                       ['Szélső', '1,02', '1,02', '1,22', '1,25', '1,22', '1,12'],
+                       ['Csatár', '0,96', '0,98', '1,08', '1,18', '1,15', '1,05']]},
+             {'type': 'subheading', 'text': '7.4. Játékmodell-faktorok és 70/30 súlyozás'},
+             {'type': 'table',
+              'rows': [['Játékmodell', 'Össztáv', 'Load', 'HSR', 'Sprinttáv', 'Sprint db', 'High Eff.'],
+                       ['Dominancia', '1,02', '0,98', '0,96', '0,94', '0,95', '0,97'],
+                       ['Magas presszing', '1,03', '1,05', '1,07', '1,06', '1,08', '1,10'],
+                       ['Átmeneti játék', '1,00', '1,03', '1,08', '1,10', '1,08', '1,06'],
+                       ['Direkt játék', '0,99', '1,02', '1,07', '1,08', '1,06', '1,03'],
+                       ['Kiegyensúlyozott', '1,00', '1,00', '1,00', '1,00', '1,00', '1,00']]},
+             {'type': 'table',
+              'rows': [['Játékmodellfaktor = 0,70 × elsődleges modell + 0,30 × másodlagos modell / Másodlagos modell nélkül az elsődleges faktor 100%-ban '
+                        'érvényes.']]},
+             {'type': 'paragraph',
+              'text': 'A játékmodell-korrekció szándékosan mérsékelt: nem írhatja felül a saját meccsreferenciát és a posztkülönbséget. A modell azt jelzi, '
+                      'milyen fizikai hangsúlyt várunk el a csapat játékelveitől, nem azt, hogy minden edzésnek ugyanazt a profilt kell teljesítenie.'}]},
+ {'title': '8. Readiness Score: mitől változik a pontszám?',
+  'blocks': [{'type': 'table',
+              'rows': [['',
+                        'Alaplogika / A Readiness 75 pontról induló, szabályalapú index. Az egyes komponensek bónuszokat vagy levonásokat adnak. Ezért nem '
+                        'egyszerű súlyozott átlag, és egy 80/100-as komponens nem jelent automatikusan 80-as végpontszámot.']]},
+             {'type': 'table',
+              'rows': [['Komponens', 'Mit vizsgál?', 'Fő szabály'],
+                       ['Edzésrészvétel', 'A keret tényleges részvétele a csapatedzéseken.', '≥90%: +3; 75-89%: -3; 60-74%: -8; <60%: -14.'],
+                       ['Load trend', 'Aktuális heti Load változása.', 'Csak ≥4 teljes hétnél minősít; >+25%: -12; <-30%: -6; kontrollált: +4.'],
+                       ['Speed Exposure', 'A legerősebb meccs előtti sprintdózis és időzítés.', 'Fő cél MD-4/MD-3, meccssprint 25-40%-a.'],
+                       ['Tapering', 'MD-2 és MD-1 Load a fő naphoz képest.', 'MD-1 cél 30-45%; MD-2 cél 55-70%.'],
+                       ['Játékmodell-illeszkedés', 'A heti edzésprofil intenzitás/sprint/High Efforts aránya.', '<60: -8; >80: +3; köztes érték semleges.']]},
+             {'type': 'subheading', 'text': '8.1. Speed Exposure részletesen'},
+             {'type': 'paragraph',
+              'text': 'A rendszer csak a következő mérkőzés előtti MD-5 és MD-1 közötti edzéseket értékeli. Az MD+1 regeneráció vagy pótló terhelés, ezért nem '
+                      'számít a következő mérkőzés előtti erősségnek.'},
+             {'type': 'table',
+              'rows': [['Fő sprintdózis / meccsref.', 'Dózispont az időzítés előtt'],
+                       ['<10%', '20 pont'],
+                       ['10-20%', '40-60 pont, lineárisan'],
+                       ['20-25%', '60-80 pont, lineárisan'],
+                       ['25-40%', '90 pont'],
+                       ['40-50%', '80 pont'],
+                       ['>50%', 'fokozatosan csökken, minimum 55 pont']]},
+             {'type': 'table', 'rows': [['Időzítés', 'Szorzó'], ['MD-5', '0,90'], ['MD-4', '1,00'], ['MD-3', '1,00'], ['MD-2', '0,70'], ['MD-1', '0,40']]},
+             {'type': 'table', 'rows': [['Speed Exposure pont = dózispont × időzítési szorzó']]},
+             {'type': 'subheading', 'text': '8.2. Tapering részletesen'},
+             {'type': 'table',
+              'rows': [['Nap és arány', 'Értelmezés'],
+                       ['MD-1 <20%', 'nagyon alacsony aktivációs inger'],
+                       ['MD-1 20-30%', 'kissé a célzóna alatt'],
+                       ['MD-1 30-45%', 'célzóna'],
+                       ['MD-1 45-55%', 'magasabb, még kontrollálható'],
+                       ['MD-1 55-65%', 'frissességi kockázat'],
+                       ['MD-1 >65%', 'egyértelműen túl magas'],
+                       ['MD-2 55-70%', 'célzóna'],
+                       ['MD-2 45-55% vagy 70-80%', 'kontrollálandó'],
+                       ['MD-2 >80%', 'túl közel a fő naphoz'],
+                       ['MD-2 sprint >90% a fő sebességi naphoz képest', 'külön frissességi kockázat']]},
+             {'type': 'subheading', 'text': '8.3. Mikor nem számolható teljes readiness?'},
+             {'type': 'bullet', 'text': 'Egyetlen edzésnél.'},
+             {'type': 'bullet', 'text': 'Meccs nélküli, rövid edzésblokknál.'},
+             {'type': 'bullet', 'text': 'Folyamatban lévő csonka hétnél csak előzetesen.'},
+             {'type': 'bullet', 'text': 'Ha a session- vagy meccsazonosítás, a játékperc vagy a kulcsmutatók nem megbízhatók.'},
+             {'type': 'paragraph',
+              'text': 'A nem számolható vagy előzetes readiness nem adatvesztés: azt jelzi, hogy a rendszer nem akar teljes heti állítást tenni nem megfelelő '
+                      'adatkörből.'}]},
+ {'title': '9. Player Risk Score: hogyan készül a játékosjelzés?',
+  'blocks': [{'type': 'paragraph',
+              'text': 'A Player Risk Score az aktuális hét szokatlan terhelési mintáit keresi a játékos saját korábbi lezárt heteinek mediánjához képest. Nem '
+                      'sérülést jósol, hanem azt jelzi, hogy mely játékosokat érdemes a stábnak külön ellenőriznie.'},
+             {'type': 'table',
+              'rows': [['',
+                        'Adatminimum / Saját százalékos eltérés csak legalább 2 korábbi teljes hétből készül. A baseline legfeljebb az előző 4 lezárt hét '
+                        'mediánja. Kevesebb adatnál csak a részvétel és az aktuális abszolút jelzések értékelhetők.']]},
+             {'type': 'table',
+              'rows': [['Jelzés', 'Küszöb', 'Pontváltozás'],
+                       ['Alacsony részvétel', '50-74%', '+12'],
+                       ['Nagyon alacsony részvétel', '<50%', '+20'],
+                       ['Mezőny Load', '>+30% / <-35% a saját mediánhoz képest', '+18 / +8'],
+                       ['Kapus Load', '>+35% / <-40%', '+18 / +8'],
+                       ['High Efforts és lassítás - mezőny', '>+35% / <-40%', '+18 / +8'],
+                       ['High Efforts és lassítás - kapus', '>+45% / <-45%', '+18 / +8'],
+                       ['Sprinttáv - mezőny', '>+45% / <-45%', '+18 / +8'],
+                       ['Játékperc/exposure', '±35%-nál nagyobb változás', '+8'],
+                       ['Max Speed', '>6%-kal a saját korábbi csúcs alatt', '+14']]},
+             {'type': 'table', 'rows': [['Kockázati pont = 20 alapérték + releváns jelzések összege / 0-44: alacsony | 45-69: közepes | 70-100: magas']]},
+             {'type': 'paragraph',
+              'text': 'Ha az alacsony heti értéket egyértelműen hiányos edzésrészvétel magyarázza, az FPI nem ugyanúgy kezeli, mintha a játékos teljes '
+                      'részvétel mellett lett volna alulexponált. Játékosonként csak a legmagasabb kockázati sor marad a riportban.'}]},
+ {'title': '10. Trend, csonka hét és többhetes értékelés',
+  'blocks': [{'type': 'table',
+              'rows': [['Elérhető teljes hetek', 'FPI-minősítés', 'Mit lehet mondani?'],
+                       ['1', 'alapállapot', 'Az adott hét leírható, trend nem.'],
+                       ['2-3', 'összehasonlítás', 'Irányok láthatók, de nincs trendpont.'],
+                       ['4', 'trendminimum', 'A terhelési trend és saját heti medián értékelhető.'],
+                       ['5+', 'stabilabb idősor', 'A szezonfázis és meccssűrűség szerinti bontás is indokolt.']]},
+             {'type': 'paragraph',
+              'text': 'A trend nem pusztán az első és utolsó hét különbsége. A szakmai értelmezésnek figyelembe kell vennie a lezárt hetek számát, a meccsek '
+                      'számát, a felkészülési vagy versenyfázist, a részvételt és a csonka heteket.'},
+             {'type': 'subheading', 'text': '10.1. Miért nem használunk két hétből trendet?'},
+             {'type': 'paragraph',
+              'text': 'Két hét eltérése lehet valódi programváltás, de lehet egy plusz mérkőzés, rossz időjárás, rövidebb edzéshét, hiányzó adat vagy '
+                      'keretrotáció következménye is. Négy teljes hét sem „tudományos bizonyítás”, de minimálisabb stabilitást ad a saját medián és az '
+                      'ismétlődő struktúra felismeréséhez.'}]},
+ {'title': '11. Mikrociklus-javaslat és edzői beavatkozás',
+  'blocks': [{'type': 'paragraph', 'text': 'A mikrociklusmotor nem sablonmondatból, hanem a következő információk összevetéséből készít javaslatot:'},
+             {'type': 'bullet', 'text': 'aktuális heti vagy eseményszintű terhelés'},
+             {'type': 'bullet', 'text': 'saját előző teljes hetek mediánja, ha legalább 2 van'},
+             {'type': 'bullet', 'text': 'saját meccsreferencia vagy profilbenchmark'},
+             {'type': 'bullet', 'text': 'Speed Exposure és tapering'},
+             {'type': 'bullet', 'text': 'játékoskockázati jelzések'},
+             {'type': 'bullet', 'text': 'következő mérkőzés dátuma'},
+             {'type': 'bullet', 'text': 'elsődleges és másodlagos játékmodell'},
+             {'type': 'bullet', 'text': 'edző által megadott hét típusa'},
+             {'type': 'paragraph',
+              'text': 'A javaslat nem azt mondja meg, hogy pontosan milyen gyakorlatot kell levezetni, hanem a terhelési célt, az időzítést és a korlátozó '
+                      'feltételeket adja meg. Például: „a fő sebességi inger MD-3-on maradjon, a mennyiséget ne növeld; MD-1-en csak rövid aktiváció legyen”.'},
+             {'type': 'table',
+              'rows': [['',
+                        'Leállítási feltétel / Ha a referencia vagy az eseménystruktúra nem megbízható, a helyes eredmény nem egy részletes edzésterv, hanem a '
+                        'bizonytalanság jelzése és a hiányzó adat megnevezése.']]}]},
+ {'title': '12. Bizonyosság, korlátok és felelős használat',
+  'blocks': [{'type': 'subheading', 'text': '12.1. Javasolt bizonyossági címkék'},
+             {'type': 'table',
+              'rows': [['Címke', 'Feltétel', 'Használat'],
+                       ['Magas', '≥3 saját meccs, ≥4 teljes hét, jó mapping és azonos eszköz.', 'Heti döntéstámogatás és saját benchmark.'],
+                       ['Közepes', '1-2 saját meccs vagy 2-3 teljes hét.', 'Összehasonlítás, fokozott edzői kontroll.'],
+                       ['Korlátozott', 'Profilbenchmark, egyetlen esemény vagy csonka hét.', 'Irányjelzés, nem végleges minősítés.'],
+                       ['Nem értékelhető', 'Kulcsmező hiányzik vagy fizikailag hibás.', 'Adatjavítás szükséges.']]},
+             {'type': 'subheading', 'text': '12.2. Tudományos és technikai korlátok'},
+             {'type': 'bullet',
+              'text': 'Nincs nemzetközi konszenzus egyetlen HSR- és sprintküszöbre; az abszolút és individualizált zónák eltérő eredményt adhatnak. [1, 11, '
+                      '12]'},
+             {'type': 'bullet', 'text': 'Különböző gyártók threshold-alapú gyorsulási/lassítási mutatói nem feltétlenül csereszabatosak. [10]'},
+             {'type': 'bullet', 'text': 'A poszt, életkor/érési állapot, meccskontextus és ellenfél befolyásolja a fizikai igényt. [2, 3, 8, 9]'},
+             {'type': 'bullet', 'text': 'A heti terhelés és a meccsteljesítmény kapcsolata nem egyszerű lineáris ok-okozat. [4, 6, 7]'},
+             {'type': 'bullet', 'text': 'A Player Risk nem klinikai sérüléskockázat; a readiness nem orvosi státusz.'},
+             {'type': 'subheading', 'text': '12.3. Mit kell a szakmai stábnak hozzátennie?'},
+             {'type': 'bullet', 'text': 'Wellness, fájdalom, alvás, RPE és HR/HRV, ha rendelkezésre áll.'},
+             {'type': 'bullet', 'text': 'Edzésterv és taktikai cél: miért volt olyan az adott terhelés?'},
+             {'type': 'bullet', 'text': 'Pályaméret, létszám, feladatidő, pihenő és játékforma.'},
+             {'type': 'bullet', 'text': 'Rehabilitációs vagy egyéni program státusza.'},
+             {'type': 'bullet', 'text': 'Következő mérkőzés prioritása, utazás és meccssűrűség.'}]},
+ {'title': '13. Számítási példák',
+  'blocks': [{'type': 'subheading', 'text': '13.1. Benchmarkpélda - U19 akadémiai szélső'},
+             {'type': 'paragraph',
+              'text': 'Profil: U19, Akadémia, Szélső; elsődleges modell Magas presszing (70%), másodlagos Átmeneti játék (30%). HSR-mutatoról van szó.'},
+             {'type': 'table', 'rows': [['Játékmodell HSR-faktor = 0,70×1,07 + 0,30×1,08 = 1,073']]},
+             {'type': 'table', 'rows': [['Teljes HSR-faktor = 0,93 × 0,94 × 1,22 × 1,073 ≈ 1,14']]},
+             {'type': 'table', 'rows': [['Heti HSR-cél = 150-250% × 1,14 ≈ 171-286% a saját meccs-HSR-hez képest']]},
+             {'type': 'paragraph',
+              'text': 'Ha a játékos saját meccs-HSR mediánja 700 m/90, akkor az operatív heti cél körülbelül 1 200-2 000 m. Ez nem kötelező recept: a heti '
+                      'meccsszám, a feladatok, az egyéni státusz és a küszöbdefiníció módosíthatja az értelmezést.'},
+             {'type': 'subheading', 'text': '13.2. Readinesspélda'},
+             {'type': 'table',
+              'rows': [['Lépés', 'Hatás', 'Pont'],
+                       ['Alapérték', '', '75'],
+                       ['Részvétel 92%', '+3', '78'],
+                       ['Legalább 4 hét, heti Load +10%', '+4', '82'],
+                       ['Fő sprintdózis 31% MD-3-on', '+5', '87'],
+                       ['MD-1 40%, MD-2 65%', '+5', '92'],
+                       ['Játékmodell-illeszkedés 82', '+3', '95']]},
+             {'type': 'paragraph',
+              'text': 'A 95/100 nem azt jelenti, hogy a csapat 95%-os fizikai állapotban van. Azt jelenti, hogy az FPI-ben szereplő terhelési '
+                      'szerkezetkomponensek ebben a példában kedvezően rendeződtek.'},
+             {'type': 'subheading', 'text': '13.3. Player Risk példa'},
+             {'type': 'paragraph',
+              'text': 'Egy mezőnyjátékos 5/5 edzésen részt vett. Loadja +38%, lassításai +42%, játékperce +40% a saját előző 4 hetes mediánhoz képest.'},
+             {'type': 'table', 'rows': [['20 alap + 18 Load + 18 lassítás + 8 játékperc = 64 pont → közepes jelzés']]},
+             {'type': 'paragraph',
+              'text': 'A közepes jelzés gyakorlati jelentése: a játékos terhelését, wellnessét és következő napi programját külön ellenőrizni kell. Nem '
+                      'jelenti, hogy biztosan túlterhelt vagy megsérül.'},
+             {'type': 'subheading', 'text': '13.4. Miért lehet magas High Efforts és alacsony HSR egyszerre?'},
+             {'type': 'paragraph',
+              'text': 'Kis területen sok gyorsítás, lassítás és irányváltás történhet, miközben nincs elég hely 19,8 vagy 25 km/h fölötti futásra. A két '
+                      'mutató más fizikai ingert ír le, ezért nem ellentmondás, ha az egyik magas, a másik alacsony.'}]},
+ {'title': '14. Fogalomtár',
+  'blocks': [{'type': 'table',
+              'rows': [['Fogalom', 'Jelentés'],
+                       ['Exposure', 'Az a tényleges terhelési „kitettség”, amelyet a játékos edzésen vagy meccsen megkapott.'],
+                       ['HSR', 'Nagysebességű futás; a pontos küszöb a szolgáltatótól/klubtól függ.'],
+                       ['Sprint', 'A sprintküszöb feletti futás vagy sprintakció.'],
+                       ['Load', 'Szolgáltatóspecifikus külső terhelési pont; nem univerzális mértékegység.'],
+                       ['Readiness', 'Szabályalapú terhelési szerkezetindex, nem orvosi állapot.'],
+                       ['Player Risk', 'Szokatlan egyéni terhelési minta jelzése, nem sérülésjóslat.'],
+                       ['Meccsreferencia', 'A saját mérkőzésekből képzett /90 vagy 10×90 medián.'],
+                       ['Profilbenchmark', 'Korosztály/szint/poszt/játékmodell alapján skálázott FPI-célzóna.'],
+                       ['MD-3', 'A mérkőzés előtti harmadik nap.'],
+                       ['Tapering', 'A terhelés csökkentése a mérkőzés közeledtével az élesség megtartása mellett.']]}]},
+ {'title': '15. Szakirodalmi háttér',
+  'blocks': [{'type': 'paragraph',
+              'text': 'A hivatkozások a módszertani irányokat támasztják alá: GPS/GNSS terhelésmonitoring, korosztály- és posztkülönbségek, meccsrelatív '
+                      'edzésterhelés, periodizáció, küszöbdefiníció és eszközmegbízhatóság. Az FPI pontos operatív súlyai és célzónái saját '
+                      'modellparaméterek.'},
+             {'type': 'paragraph',
+              'text': '[1] Gualtieri A. et al. High-speed running and sprinting in professional adult soccer: current thresholds and methodological '
+                      'heterogeneity. Sports Medicine - Open, 2023. PMID: 36860737; PMCID: PMC9968809.'},
+             {'type': 'paragraph',
+              'text': '[2] Parr J. et al. Maturity-associated differences in match running performance in elite male youth soccer players. International '
+                      'Journal of Sports Physiology and Performance, 2021. PMID: 34706339.'},
+             {'type': 'paragraph',
+              'text': '[3] Aquino R. et al. Validity and reliability of a 6-a-side small-sided game as an indicator of match-related physical performance in '
+                      'elite youth Brazilian soccer players. Journal of Sports Sciences, 2019. DOI: 10.1080/02640414.2019.1608895; PMID: 31064264.'},
+             {'type': 'paragraph',
+              'text': '[4] Szigeti G. et al. Quantification of training load relative to match load in U-17 international soccer. International Journal of '
+                      'Sports Physiology and Performance, 2022. PMID: 33813955.'},
+             {'type': 'paragraph',
+              'text': '[5] Douchet T. et al. Typical weekly physical periodization in French academy soccer. International Journal of Sports Physiology and '
+                      'Performance, 2023. PMID: 37398965.'},
+             {'type': 'paragraph',
+              'text': '[6] Anderson L. et al. Quantification of training load during one-, two- and three-game week schedules in professional soccer players. '
+                      'Science and Medicine in Football / related publication, 2016. PMID: 26536538.'},
+             {'type': 'paragraph',
+              'text': '[7] Malone J.J. et al. Seasonal training-load quantification in elite English Premier League soccer players. International Journal of '
+                      'Sports Physiology and Performance, 2015. PMID: 25393111.'},
+             {'type': 'paragraph',
+              'text': '[8] Casamichana D. et al. Accumulative weekly load in a professional football team: total distance, HSR, sprint, HMLD, accelerations '
+                      'and decelerations. Biology of Sport, 2022. PMID: 35173370.'},
+             {'type': 'paragraph',
+              'text': '[9] Morgans R. et al. Comparison of running and accelerometry variables based on playing position and contextual factors across five '
+                      'seasons. Biology of Sport, 2024. PMCID: PMC11694196.'},
+             {'type': 'paragraph',
+              'text': '[10] Crang Z.L. et al. The inter-device reliability of global navigation satellite systems during team sport movement across multiple '
+                      'days. Journal of Science and Medicine in Sport, 2022;25(4):340-344. DOI: 10.1016/j.jsams.2021.11.044; PMID: 34893434.'},
+             {'type': 'paragraph',
+              'text': '[11] Silva H. et al. A comparison of GPS-based absolute and relative sprint thresholds in elite soccer. 2024. PMID: 38952912.'},
+             {'type': 'paragraph',
+              'text': '[12] Clarke A.C. et al. Physiologically based GPS speed zones for evaluating running demands in elite youth soccer. Journal of Strength '
+                      'and Conditioning Research, 2015. PMID: 25510337.'},
+             {'type': 'paragraph',
+              'text': '[13] Ravé G. et al. How to use GPS data to monitor training load in soccer: practical applications and limitations. International '
+                      'Journal of Environmental Research and Public Health, 2020. PMCID: PMC7468376.'}]},
+ {'title': '16. Saját csapat taktikai Excel – meccsenkénti referencia és adat-integritás',
+  'blocks': [{'type': 'paragraph',
+              'text': 'A Saját csapat modulban csak azonos nevezőjű értékeket szabad egymással összevetni. A meccsalapú referencia ezért meccsenkénti, szükség '
+                      'esetén /90-re normalizált érték; több mérkőzés feltöltésekor nem a meccsek nyers összege, hanem a meccsenkénti normalizált értékek '
+                      'mediánja kerül a riportba.'},
+             {'type': 'table',
+              'rows': [['Mutatócsoport', 'Aktuális érték', 'Referencia', 'Szabály'],
+                       ['Volumenmutatók (lövés, xG, boxbelépés, labdavesztés stb.)',
+                        '/ meccs vagy /90',
+                        '/ meccs vagy /90',
+                        'Több meccs esetén meccsenkénti medián; százalékos mutatót nem összegezünk.'],
+                       ['Százalékos mutatók', 'meccsenkénti %', 'meccsenkénti %', 'Több meccsnél medián; nem /90-esítjük.'],
+                       ['PPDA és aránymutatók', 'meccsenkénti érték', 'meccsenkénti érték', 'Nem összegezhető, mediánnal aggregáljuk.']]},
+             {'type': 'subheading', 'text': '16.1. Lövésprofil = volumen + helyzetminőség'},
+             {'type': 'paragraph',
+              'text': 'A lövésszám és az xG együtt értelmezendő. Sok lövés alacsony xG mellett volumenelőnyt, de gyenge átlagos helyzetminőséget jelezhet; '
+                      'kevesebb lövés magasabb xG-vel jobb helyzetkiválasztást jelezhet. Az xG/lövés külön magyarázó mutató, nem önmagában minősítés.'},
+             {'type': 'subheading', 'text': '16.2. Labdavesztés helye'},
+             {'type': 'paragraph',
+              'text': 'Ha a forrás tartalmazza a labdavesztés zónáját, az FPI külön bontja a saját/védőharmad, középső harmad és támadóharmad veszteségeit. A '
+                      'saját harmadban történő labdavesztés közvetlenebb kapu-kockázatot jelent; a támadóharmadbeli veszteség önmagában kevésbé negatív, és a '
+                      'visszatámadás/rest defence kontextusával együtt értelmezendő. Ha a forrás csak összes labdavesztést ad, a rendszer nem talál ki zónát.'},
+             {'type': 'paragraph',
+              'text': 'A riport minden csapatszintű taktikai táblán jelzi az aggregációt és a meccsszámot. Ha egy többmeccses összesítő fájlból a meccsszám '
+                      'vagy játékperc nem állapítható meg, a rendszer figyelmeztet, és nem hasonlítja automatikusan nyers összegként egy per-meccs '
+                      'benchmarkhoz.'}]},
+ {'title': 'Záró szakmai állítás',
+  'blocks': [{'type': 'table',
+              'rows': [['',
+                        'Az FPI helye a döntési folyamatban / A rendszer feladata nem az, hogy az edző helyett döntsön, hanem hogy ugyanazt az adatot minden '
+                        'héten következetesen, ellenőrizhetően és kontextusba helyezve mutassa meg. A legjobb benchmark mindig a saját klub azonos eszközzel, '
+                        'azonos küszöbökkel és stabil adatminőséggel felépített története; a nemzetközi és profilalapú referencia addig iránytű, nem '
+                        'végállomás.']]},
+             {'type': 'paragraph', 'text': 'Dokumentumverzió: 1.2 | FPI GPS-only szakmai metodika | 2026.08.07.'}]}]
+
 FPI_METHODOLOGY_SECTIONS_V143 = [
     ("1. GPS-only metodika", [
         "Cél: a rendelkezésre álló GPS-adatmennyiséghez igazodó fizikai döntéstámogatás. Az app nem kezeli ugyanúgy az egyetlen edzést, a csonka hetet, a teljes mikrociklust és a többhetes adatbázist.",
@@ -19653,7 +20396,7 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
     ("7. Import-, HalfTime-, kapus- és MD-logika", [
         "Minden PDF-export ugyanazon végső Unicode- és fontkapun fut át. Az ő, Ő, ű és Ű karakterek beágyazott Unicode-fonttal jelennek meg; fontkeresési hiba nem állítja le az alkalmazást.",
         "Az azonos mérkőzéshez tartozó Half 1 és Half 2 játékosonként egy Match eseménnyé egyesül. Az össztáv, Load, HSR, sprinttáv, sprintdarabszám, High Efforts, gyorsítások, lassítások és játékpercek összeadódnak; a Max Speed a két félidő közül a nagyobb érték.",
-        "A m/perc és per90 mutatók az összevont távolságból és időből újraszámolódnak. A két félidő nem jelenik meg két külön meccsként a readinessben, benchmarkban vagy játékosriportban.",
+        "A m/perc és per90 mutatók az összevont távolságból és időből újraszámolódnak. A két félidő nem jelenik meg két külön meccsként a readinessben, benchmarkban vagy játékosriportban. A sessiontábla edzésnél nyers mezőnyjátékos-mediánt, meccsnél pedig a félidők összevonása utáni, legalább 10 perces mezőnyjátékos /90 mediánt mutat.",
         "A Load- és HSR-rangsorok, valamint az alacsony mezőnyjátékos-expozíciós figyelmeztetések kapusok nélkül készülnek. A kapusok saját szerepkörük szerint maradnak az adatbázisban.",
         "Ha egy fájlnév MD-címkét, egy másik pedig dátumot tartalmaz, az app a dátumkülönbség alapján következteti ki a hiányzó MD-besorolást. A következő mérkőzés dátuma csak egyszer kerül megadásra.",
     ]),
@@ -19667,118 +20410,103 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
 
 
 def build_fpi_methodology_pdf_bytes_v143() -> Optional[bytes]:
+    """V415: a kibővített, számítási logikát és benchmarkokat részletező metodika PDF-je."""
     if SimpleDocTemplate is None:
         return None
     output = io.BytesIO()
     regular_font, bold_font = _register_pdf_font()
-
     styles = getSampleStyleSheet()
-    title = ParagraphStyle(
-        "FPI_METHOD_TITLE_V143",
-        parent=styles["Title"],
-        fontName=bold_font,
-        fontSize=20,
-        leading=24,
-        textColor=colors.HexColor("#0F172A"),
-        spaceAfter=10,
-    )
-    subtitle = ParagraphStyle(
-        "FPI_METHOD_SUB_V143",
-        parent=styles["BodyText"],
-        fontName=regular_font,
-        fontSize=9,
-        leading=12,
-        textColor=colors.HexColor("#475569"),
-        spaceAfter=10,
-    )
-    heading = ParagraphStyle(
-        "FPI_METHOD_HEAD_V143",
-        parent=styles["Heading2"],
-        fontName=bold_font,
-        fontSize=12,
-        leading=15,
-        textColor=colors.HexColor("#0F766E"),
-        spaceBefore=8,
-        spaceAfter=5,
-    )
-    body = ParagraphStyle(
-        "FPI_METHOD_BODY_V143",
-        parent=styles["BodyText"],
-        fontName=regular_font,
-        fontSize=10.4,
-        leading=14.0,
-        alignment=4,
-        textColor=colors.HexColor("#0F172A"),
-        spaceAfter=4,
-    )
+    title = ParagraphStyle("FPI_METHOD_TITLE_V415", parent=styles["Title"], fontName=bold_font, fontSize=19, leading=23, textColor=colors.HexColor("#0F172A"), spaceAfter=8)
+    subtitle = ParagraphStyle("FPI_METHOD_SUB_V415", parent=styles["BodyText"], fontName=regular_font, fontSize=8.7, leading=11.5, textColor=colors.HexColor("#475569"), spaceAfter=8)
+    heading = ParagraphStyle("FPI_METHOD_HEAD_V415", parent=styles["Heading2"], fontName=bold_font, fontSize=12.2, leading=15, textColor=colors.HexColor("#0F766E"), spaceBefore=8, spaceAfter=5)
+    subheading = ParagraphStyle("FPI_METHOD_SUBHEAD_V415", parent=styles["Heading3"], fontName=bold_font, fontSize=10.7, leading=13.2, textColor=colors.HexColor("#1E3A8A"), spaceBefore=5, spaceAfter=3)
+    body = ParagraphStyle("FPI_METHOD_BODY_V415", parent=styles["BodyText"], fontName=regular_font, fontSize=9.15, leading=12.3, alignment=4, textColor=colors.HexColor("#0F172A"), spaceAfter=3.5)
+    small = ParagraphStyle("FPI_METHOD_SMALL_V415", parent=styles["BodyText"], fontName=regular_font, fontSize=7.7, leading=9.5, textColor=colors.HexColor("#0F172A"))
+    small_bold = ParagraphStyle("FPI_METHOD_SMALLB_V415", parent=small, fontName=bold_font, textColor=colors.white, alignment=1)
 
-    doc = SimpleDocTemplate(
-        output,
-        pagesize=A4,
-        rightMargin=1.5 * cm,
-        leftMargin=1.5 * cm,
-        topMargin=1.4 * cm,
-        bottomMargin=1.4 * cm,
-    )
+    doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=1.25*cm, leftMargin=1.25*cm, topMargin=1.2*cm, bottomMargin=1.2*cm)
     story = [
-        Paragraph("Football Performance Intelligence – Metodika", title),
-        Paragraph(
-            "A Metodika Center kibontott, exportálható változata. Rövid, szakmai és transzparens áttekintés arról, hogy az FPI milyen adatokat és döntési logikát használ.",
-            subtitle,
-        ),
-        Spacer(1, 0.15 * cm),
+        Paragraph("Football Performance Intelligence – GPS-only kibővített szakmai metodika", title),
+        Paragraph("Hogyan készülnek az eredmények, milyen aggregációt és referenciahierarchiát használ a rendszer, és mit szabad – illetve mit nem szabad – kiolvasni a pontszámokból? V1.2 / 2026.08.07.", subtitle),
+        Paragraph("Fontos: az FPI döntéstámogató rendszer, nem orvosi diagnosztika, nem sérülés-előrejelző modell és nem automatikus edzői döntés.", subtitle),
+        Spacer(1,0.12*cm),
     ]
-    for section_title, paragraphs in FPI_METHODOLOGY_SECTIONS_V143:
-        story.append(Paragraph(pdf_safe_text(section_title), heading))
-        for paragraph in paragraphs:
-            story.append(Paragraph("• " + pdf_safe_text(paragraph), body))
-        story.append(Spacer(1, 0.10 * cm))
-    story.append(Spacer(1, 0.18 * cm))
-    story.append(Paragraph(
-        "Szakmai megjegyzés: az FPI döntéstámogató rendszer. A kimeneteket edzői, orvosi és teljesítménydiagnosztikai információkkal együtt kell értelmezni.",
-        subtitle,
-    ))
-    _fpi_pdf_build_v406(doc, story)
+    for section_data in FPI_EXTENDED_METHODOLOGY_BLOCKS_V415:
+        story.append(Paragraph(pdf_safe_text(section_data.get("title","")), heading))
+        for block in section_data.get("blocks",[]):
+            kind=block.get("type")
+            if kind == "subheading":
+                story.append(Paragraph(pdf_safe_text(block.get("text","")), subheading))
+            elif kind == "bullet":
+                story.append(Paragraph("• " + pdf_safe_text(block.get("text","")), body))
+            elif kind == "paragraph":
+                story.append(Paragraph(pdf_safe_text(block.get("text","")), body))
+            elif kind == "table":
+                rows=block.get("rows") or []
+                if not rows:
+                    continue
+                max_cols=max(len(r) for r in rows)
+                norm=[list(r)+[""]*(max_cols-len(r)) for r in rows]
+                pdf_rows=[]
+                for ri,r in enumerate(norm):
+                    style=small_bold if ri == 0 and len(norm)>1 else small
+                    pdf_rows.append([Paragraph(pdf_safe_text(c),style) for c in r])
+                usable_width=A4[0]-2.5*cm
+                widths=[usable_width/max_cols]*max_cols
+                t=Table(pdf_rows,colWidths=widths,repeatRows=1 if len(norm)>1 else 0,splitByRow=1,hAlign="LEFT")
+                ts=[("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]
+                if len(norm)>1:
+                    ts.extend([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#0F766E")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")])])
+                else:
+                    ts.append(("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#F8FAFC")))
+                t.setStyle(TableStyle(ts)); story.append(t); story.append(Spacer(1,0.08*cm))
+        story.append(Spacer(1,0.08*cm))
+    _fpi_pdf_build_v406(doc,story)
     output.seek(0)
     return output.read()
 
 
 def render_fpi_methodology_center_v143() -> None:
     _fpi_landing_css_v100()
-    c1, c2, c3 = st.columns([1, 1, 4])
+    c1,c2,c3=st.columns([1,1,4])
     with c1:
-        if st.button("← Főoldal", use_container_width=True, key="method_v143_back"):
+        if st.button("← Főoldal",use_container_width=True,key="method_v143_back"):
             _fpi_set_page_v100("landing")
     with c2:
-        if st.button("⚡ Riport", use_container_width=True, key="method_v143_clean"):
+        if st.button("⚡ Riport",use_container_width=True,key="method_v143_clean"):
             _fpi_set_page_v100("clean")
     with c3:
-        st.caption("Rövid, átlátható szakmai magyarázat – a képletek részletezése nélkül.")
-
-    st.markdown(
-        """
-        <div style="border-radius:26px;padding:24px 28px;background:linear-gradient(135deg,#ffffff,#e0f2fe,#ecfdf5);border:1px solid #bfdbfe;box-shadow:0 16px 44px rgba(15,23,42,.12);margin:8px 0 18px 0;">
-            <div style="font-size:.8rem;font-weight:950;color:#0f766e;letter-spacing:.07em;">FPI METHODOLOGY CENTER</div>
-            <div style="font-size:2.2rem;font-weight:980;color:#0f172a;letter-spacing:-.04em;margin-top:5px;">Mit számol a rendszer, és hogyan értelmezzük?</div>
-            <div style="color:#475569;margin-top:7px;">A legfontosabb szakmai kérdések rövid, kibontott magyarázata.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    method_pdf = build_fpi_methodology_pdf_bytes_v143()
+        st.caption("Kibővített szakmai metodika: képletek, aggregációk, benchmarkok, adatminimumok és korlátok.")
+    st.markdown("""
+    <div style="border-radius:26px;padding:24px 28px;background:linear-gradient(135deg,#ffffff,#e0f2fe,#ecfdf5);border:1px solid #bfdbfe;box-shadow:0 16px 44px rgba(15,23,42,.12);margin:8px 0 18px 0;">
+      <div style="font-size:.8rem;font-weight:950;color:#0f766e;letter-spacing:.07em;">FPI METHODOLOGY CENTER · V1.2</div>
+      <div style="font-size:2.15rem;font-weight:980;color:#0f172a;letter-spacing:-.04em;margin-top:5px;">Hogyan jönnek ki az eredmények?</div>
+      <div style="color:#475569;margin-top:7px;">Az adatimporttól a /90 és 10×90 normalizáláson át a benchmarkhierarchiáig, readinessig és trendminimumig.</div>
+    </div>""",unsafe_allow_html=True)
+    method_pdf=build_fpi_methodology_pdf_bytes_v143()
     if method_pdf:
-        st.download_button(
-            "⬇️ Teljes metodika PDF",
-            data=method_pdf,
-            file_name="fpi_metodika.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-            key="method_pdf_download_v143",
-        )
-    for title_text, paragraphs in FPI_METHODOLOGY_SECTIONS_V143:
-        with st.expander(title_text, expanded=False):
-            for paragraph in paragraphs:
-                st.markdown(f"- {paragraph}")
+        st.download_button("⬇️ Teljes, kibővített metodika PDF",data=method_pdf,file_name="FPI_GPS_only_kibovitett_szakmai_metodika_V1_2.pdf",mime="application/pdf",use_container_width=True,key="method_pdf_download_v143")
+    for si,section_data in enumerate(FPI_EXTENDED_METHODOLOGY_BLOCKS_V415):
+        with st.expander(section_data.get("title",""),expanded=(si==0)):
+            for bi,block in enumerate(section_data.get("blocks",[])):
+                kind=block.get("type")
+                if kind == "subheading":
+                    st.markdown("#### "+block.get("text",""))
+                elif kind == "bullet":
+                    st.markdown("- "+block.get("text",""))
+                elif kind == "paragraph":
+                    st.markdown(block.get("text",""))
+                elif kind == "table":
+                    rows=block.get("rows") or []
+                    if len(rows)>=2:
+                        hdr=rows[0]
+                        body_rows=rows[1:]
+                        try:
+                            st.dataframe(pd.DataFrame(body_rows,columns=hdr),use_container_width=True,hide_index=True)
+                        except Exception:
+                            st.table(rows)
+                    elif rows:
+                        st.info(" | ".join(rows[0]))
 
 
 # Override the older methodology renderer with the shared V143 content.
@@ -20639,14 +21367,48 @@ def build_next_microcycle_plan(
 
 
 # Sessiontábla: reprezentatív fájl-eseménynév és kezdés.
+# V416: edzésnél nyers mezőnyjátékos-medián, meccsnél /90 mezőnyjátékos-medián.
+FPI_MATCH_SESSION_MIN_MINUTES_V416 = 10.0
+
+def _fpi_v416_match_per90_series(group: pd.DataFrame, metric: str) -> pd.Series:
+    """Meccsen player-by-player /90 sorozat, minimum játékperc-kapuval."""
+    if group is None or group.empty:
+        return pd.Series(dtype=float)
+    work = finalize_exposure_columns(group.copy())
+    minutes = pd.to_numeric(work.get("player_minutes"), errors="coerce")
+    eligible = minutes.ge(FPI_MATCH_SESSION_MIN_MINUTES_V416)
+    if not eligible.any():
+        return pd.Series(dtype=float)
+    per90_col = f"{metric}_per90"
+    if per90_col in work.columns:
+        return pd.to_numeric(work.loc[eligible, per90_col], errors="coerce")
+    raw = pd.to_numeric(work.loc[eligible, metric], errors="coerce") if metric in work.columns else pd.Series(dtype=float)
+    mins = minutes.loc[eligible]
+    return raw.div(mins.where(mins > 0)).mul(90.0)
+
 def _fpi_v204_session_summary(df: pd.DataFrame, week: str, blocked: set) -> pd.DataFrame:
+    """Sessionprofil.
+
+    Edzés: a tényleges session mezőnyjátékos-mediánja.
+    Meccs: a félidők játékosonkénti összevonása UTÁN, legalább 10 percet játszó
+    mezőnyjátékosok /90 mediánja. Így a cserejátékosok nem húzzák le mesterségesen
+    a meccs tipikus össztávját/HSR/sprint/load értékét.
+    """
     data = df[df.get("week", pd.Series("", index=df.index)).astype(str).eq(str(week))].copy()
     if data.empty:
         return pd.DataFrame()
     data["_event204"] = _fpi_v202_event_key(data)
-    data["_date204"] = pd.to_datetime(data.get("_fpi_event_start", data.get("start_time", pd.Series(pd.NaT, index=data.index))), errors="coerce")
+    data["_date204"] = pd.to_datetime(
+        data.get("_fpi_event_start", data.get("start_time", pd.Series(pd.NaT, index=data.index))),
+        errors="coerce",
+    )
     rows = []
     for _, group in data.groupby("_event204", dropna=False):
+        metric_group = (
+            field_players_only(group)
+            if "is_goalkeeper" in group.columns and (~group["is_goalkeeper"].fillna(False)).any()
+            else group
+        )
         kind = _fpi_v200_session_kind(group.get("session_type", pd.Series("", index=group.index)).iloc[0])
         if "_fpi_event_name" in group.columns and group["_fpi_event_name"].notna().any():
             name = str(group["_fpi_event_name"].dropna().iloc[0])
@@ -20655,22 +21417,66 @@ def _fpi_v204_session_summary(df: pd.DataFrame, week: str, blocked: set) -> pd.D
         start = group["_date204"].dropna().min()
         row = {
             "Dátum": start.strftime("%Y-%m-%d %H:%M") if pd.notna(start) else "—",
-            "Típus": "Meccs" if kind == "match" else "Edzés",
+            "Típus": "Meccs (/90)" if kind == "match" else "Edzés",
             "Session": name,
             "Létszám": int(group.get("player_name", pd.Series(index=group.index, dtype=object)).nunique()),
         }
-        for col, label in [("duration_min", "Perc"), ("total_distance", "Össztáv"), ("distance_per_min", "m/perc"), ("hsr_distance", "HSR"), ("sprint_distance", "Sprint"), ("training_load", "Load")]:
-            values = _fpi_v204_numeric(group, col)
-            row[label] = np.nan if col in blocked else (float(values.median()) if values.notna().any() else np.nan)
+
+        if kind == "match":
+            prepared = finalize_exposure_columns(metric_group.copy())
+            mins = pd.to_numeric(prepared.get("player_minutes"), errors="coerce")
+            eligible = prepared.loc[mins.ge(FPI_MATCH_SESSION_MIN_MINUTES_V416)].copy()
+            if eligible.empty:
+                eligible = prepared.copy()
+                mins = pd.to_numeric(eligible.get("player_minutes"), errors="coerce")
+            row["Perc"] = 90.0
+
+            for metric, label in [
+                ("total_distance", "Össztáv"),
+                ("hsr_distance", "HSR"),
+                ("sprint_distance", "Sprint"),
+                ("training_load", "Load"),
+            ]:
+                if metric in blocked:
+                    row[label] = np.nan
+                    continue
+                vals = _fpi_v416_match_per90_series(prepared, metric)
+                row[label] = float(vals.median()) if vals.notna().any() else np.nan
+
+            if "distance_per_min" in blocked:
+                row["m/perc"] = np.nan
+            else:
+                dpm = pd.to_numeric(eligible.get("distance_per_min"), errors="coerce")
+                if not dpm.notna().any():
+                    d = pd.to_numeric(eligible.get("total_distance"), errors="coerce")
+                    mm = pd.to_numeric(eligible.get("player_minutes"), errors="coerce")
+                    dpm = d.div(mm.where(mm > 0))
+                row["m/perc"] = float(dpm.median()) if dpm.notna().any() else np.nan
+
+            actual_minutes = pd.to_numeric(prepared.get("player_minutes"), errors="coerce").dropna()
+            row["_actual_minutes_median"] = float(actual_minutes.median()) if not actual_minutes.empty else np.nan
+            row["_match_normalized"] = True
+        else:
+            for col, label in [
+                ("duration_min", "Perc"),
+                ("total_distance", "Össztáv"),
+                ("distance_per_min", "m/perc"),
+                ("hsr_distance", "HSR"),
+                ("sprint_distance", "Sprint"),
+                ("training_load", "Load"),
+            ]:
+                values = _fpi_v204_numeric(metric_group, col)
+                row[label] = np.nan if col in blocked else (float(values.median()) if values.notna().any() else np.nan)
+            row["_actual_minutes_median"] = row.get("Perc", np.nan)
+            row["_match_normalized"] = False
         rows.append(row)
     return pd.DataFrame(rows).sort_values("Dátum").reset_index(drop=True)
-
 
 
 # =========================================================
 # V414 - Többfájlos / többmunkalapos eseménymotor + HU számformátum
 # =========================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V414_MULTISOURCE_EVENT_FORMATTING_2026_08_05"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V416_MATCH90_HALFTIME_METHODOLOGY_2026_08_07"
 FPI_FULL_PERIOD_KEY_V414 = "__FPI_FULL_PERIOD_V414__"
 
 
@@ -21955,6 +22761,9 @@ TACTICAL_TEAM_ALIASES_FPI = {
     "crosses": ["crosses", "successful crosses", "beadások", "beadás"],
     "recoveries": ["recoveries", "ball recoveries", "regains", "labdaszerzések", "visszaszerzések"],
     "lost_balls": ["lost balls", "losses", "turnovers", "labdavesztések", "elvesztett labdák"],
+    "lost_balls_defensive_third": ["lost balls defensive third", "turnovers defensive third", "losses own third", "defensive third losses", "labdavesztés saját harmad", "labdavesztések saját harmad", "védőharmad labdavesztés"],
+    "lost_balls_middle_third": ["lost balls middle third", "turnovers middle third", "losses middle third", "middle third losses", "labdavesztés középső harmad", "labdavesztések középső harmad"],
+    "lost_balls_final_third": ["lost balls final third", "turnovers final third", "losses attacking third", "attacking third losses", "labdavesztés támadóharmad", "labdavesztések támadóharmad"],
     "counterattacks": ["counterattacks", "counter attacks", "fast attacks", "kontrák", "kontratámadások", "gyors támadások"],
 }
 
@@ -23579,12 +24388,15 @@ def _fpi_tactical_metric_label_v79(key: str) -> str:
         "counterattacks": "Kontrák",
         "recoveries": "Labdaszerzések",
         "lost_balls": "Labdavesztések",
+        "lost_balls_defensive_third": "Labdavesztés – saját harmad",
+        "lost_balls_middle_third": "Labdavesztés – középső harmad",
+        "lost_balls_final_third": "Labdavesztés – támadóharmad",
         "crosses": "Beadások",
     }.get(key, key)
 
 def _fpi_tactical_compare_team_metrics_v79(own_metrics: Dict[str, float], opp_metrics: Dict[str, float]) -> List[dict]:
     rows = []
-    metric_keys = ["possession_pct", "shots", "xg", "entries_box", "key_passes", "corners", "ppda", "pressing_success_pct", "counterattacks", "recoveries", "lost_balls", "crosses"]
+    metric_keys = ["possession_pct", "shots", "xg", "entries_box", "key_passes", "corners", "ppda", "pressing_success_pct", "counterattacks", "recoveries", "lost_balls", "lost_balls_defensive_third", "lost_balls_middle_third", "lost_balls_final_third", "crosses"]
     for k in metric_keys:
         own_raw = _fpi_metric_value_v79(own_metrics, k, 0.0)
         opp_raw = _fpi_metric_value_v79(opp_metrics, k, 0.0)
@@ -23660,20 +24472,21 @@ def _fpi_build_excel_driven_tactical_findings_v79(
         else:
             add(f"PDF: {tema}", sample or "PDF-ből felismert taktikai téma.", "Videóval ellenőrizendő, majd a heti taktikai blokkba beépíthető.", "Közepes")
 
-    # Team Excel alapján
-    if "shots" in by_key:
-        r = by_key["shots"]
-        if r["Ellenfél"] > r["Saját"] * 1.10:
-            add("Ellenfél lövésvolumen előnye", f"Ellenfél lövések: {r['Ellenfél']:.1f}, saját: {r['Saját']:.1f}.", "A lövőzónák zárása, box előtti nyomás és második labdák kontrollja kiemelt.", "Magas")
-        elif r["Saját"] > r["Ellenfél"] * 1.10:
-            add("Saját lövésvolumen előny", f"Saját lövések: {r['Saját']:.1f}, ellenfél: {r['Ellenfél']:.1f}.", "A támadóharmadba jutás fenntartható, a minőségi befejezésekre kell fókuszálni.", "Közepes")
-
-    if "xg" in by_key:
-        r = by_key["xg"]
-        if r["Ellenfél"] > r["Saját"] * 1.10:
-            add("Ellenfél magasabb xG-profil", f"Ellenfél xG: {r['Ellenfél']:.1f}, saját: {r['Saját']:.1f}.", "Nem csak lövésszám, hanem helyzetminőség ellen is védekezni kell: boxvédekezés és belső zónák.", "Magas")
-        elif r["Saját"] > r["Ellenfél"] * 1.10:
-            add("Saját xG-előny", f"Saját xG: {r['Saját']:.1f}, ellenfél: {r['Ellenfél']:.1f}.", "A meccsterv támadó oldalon vállalhatóbb lehet, ha a readiness ezt elbírja.", "Közepes")
+    # Team Excel alapján: a lövésszámot és az xG-t együtt értelmezzük.
+    if "shots" in by_key or "xg" in by_key:
+        sr = by_key.get("shots", {})
+        xr = by_key.get("xg", {})
+        os = float(sr.get("Saját", 0) or 0); ps = float(sr.get("Ellenfél", 0) or 0)
+        ox = float(xr.get("Saját", 0) or 0); px = float(xr.get("Ellenfél", 0) or 0)
+        evidence = f"Saját: {os:.1f} lövés / xG {ox:.2f}; ellenfél: {ps:.1f} lövés / xG {px:.2f}."
+        if os > ps * 1.10 and ox > px * 1.10:
+            add("Saját lövésprofil-előny", evidence, "A lövésvolumen és a helyzetminőség is kedvező; a támadó folyamat fenntartható, a rest defence biztosítása mellett.", "Közepes")
+        elif ps > os * 1.10 and px > ox * 1.10:
+            add("Ellenfél lövésprofil-előny", evidence, "Az ellenfél nemcsak többet, hanem jobb helyzetekből is lő: boxvédekezés, belső zónák és lövőhelyek zárása kiemelt.", "Magas")
+        elif os > ps * 1.10 and ox <= px:
+            add("Saját volumen, gyengébb helyzetminőség", evidence, "A támadások száma megfelelő, de jobb boxpozíciót és magasabb minőségű lövőhelyet kell keresni.", "Közepes")
+        elif ox > px * 1.10 and os <= ps:
+            add("Saját helyzetminőség-előny", evidence, "Kevesebb vagy hasonló lövésből jobb xG készül; a helyzetkiválasztás értékes, a támadó volumen növelhető.", "Közepes")
 
     if "possession_pct" in by_key:
         r = by_key["possession_pct"]
@@ -23700,6 +24513,20 @@ def _fpi_build_excel_driven_tactical_findings_v79(
             add("Ellenfél labdaszerzési aktivitás", f"Ellenfél labdaszerzések: {r['Ellenfél']:.1f}, saját: {r['Saját']:.1f}.", "Labdabiztonság, első érintés és visszatámadás elleni biztosítás fontos.", "Közepes")
         elif r["Saját"] > r["Ellenfél"] * 1.08:
             add("Saját labdaszerzési előny", f"Saját labdaszerzések: {r['Saját']:.1f}, ellenfél: {r['Ellenfél']:.1f}.", "Aktívabb presszing vagy középső blokkban labdaszerzésre építő terv működhet.", "Közepes")
+
+
+    # Labdavesztés helye – csak akkor állítunk zónát, ha a forrás ténylegesen tartalmazza.
+    own_d=float(own_team.get("lost_balls_defensive_third",0) or 0); own_m=float(own_team.get("lost_balls_middle_third",0) or 0); own_a=float(own_team.get("lost_balls_final_third",0) or 0)
+    if own_d or own_m or own_a:
+        zones={"saját harmad":own_d,"középső harmad":own_m,"támadóharmad":own_a}
+        top_zone=max(zones,key=zones.get)
+        evidence=f"Labdavesztés zónánként: saját harmad {own_d:.1f}, középső {own_m:.1f}, támadóharmad {own_a:.1f}."
+        if top_zone=="saját harmad":
+            add("Labdavesztés – saját harmad kockázat", evidence, "A kihozatal biztonsága, első biztosító passz és labdavesztés utáni azonnali kapuvédelem legyen fókusz.", "Magas")
+        elif top_zone=="középső harmad":
+            add("Labdavesztés – középső harmad", evidence, "Második labdák, visszatámadás és labda mögötti szerkezet legyen a fő kontrollpont.", "Közepes")
+        else:
+            add("Labdavesztés – támadóharmad", evidence, "A veszteségek helye önmagában kevésbé kritikus; a visszatámadás és rest defence minőségével együtt értékelendő.", "Közepes")
 
     # Player Excel alapján
     own_creator, own_creator_val = _fpi_player_table_top_v79(own_players, "creators", "key_passes")
