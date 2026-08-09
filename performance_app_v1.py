@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V416_MATCH90_HALFTIME_METHODOLOGY_2026_08_07"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V417_VALIDATION_FIXES_2026_08_09"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -8704,7 +8704,8 @@ def _fpi_v302_coach_actions(benchmark_df:pd.DataFrame)->pd.DataFrame:
         "Sprint táv":("Sprinttávolság", "4–8 minőségi sprint, 2–3 perces pihenőkkel", "A sprinttávolság elmaradt a célzónától."),
         "Sprint db":("Sprintismétlések", "4–6 technikailag tiszta, maximális közeli ismétlés", "Kevés minőségi sprintismétlés történt."),
         "High Efforts":("Robbanékony akciók", "2–3 rövid, meccsszerű intenzív blokk", "A gyorsításokból, lassításokból és intenzív akciókból álló terhelés alacsony."),
-        "Load":("Összterhelés", "15–20 perc közepes–magas munkasűrűség", "A teljes külső terhelés a célzóna alatt maradt.")
+        "Load":("Összterhelés", "15–20 perc közepes–magas munkasűrűség", "A teljes külső terhelés a célzóna alatt maradt."),
+        "HMLD":("HMLD-terhelés", "15–20 perc közepes–magas munkasűrűség", "A heti HMLD a célzóna alatt maradt.")
     }
     source=benchmark_df[benchmark_df["Szint"].astype(str).eq("Heti edzésösszeg")]
     out=[]
@@ -8787,7 +8788,7 @@ def _fpi_v300_training_match_ratios(
         ("Sprint táv","sprint_distance","m"),
         ("Sprint db","sprints","db"),
         ("High Efforts","high_efforts","db/pont"),
-        ("Load","training_load","pont"),
+        (_fpi_v417_load_label(analysis_df),"training_load",_fpi_v417_load_unit(analysis_df)),
     ]:
         if col not in training.columns: continue
         training[col]=pd.to_numeric(training[col],errors="coerce")
@@ -8799,7 +8800,7 @@ def _fpi_v300_training_match_ratios(
         match_value=ref["metrics"].get(col)
         if match_value in {None,0} or pd.isna(match_value): continue
         _,_,wlo,whi,alo,ahi,profile = _fpi_composition_reference_ranges_v116(master_df, selected_week, col)
-        context_v302=_fpi_v302_week_context_factor(training,selected_week)
+        context_v302=_fpi_v302_week_context_factor(analysis_df,selected_week)
         scope_meta_v411 = _fpi_v411_scope_meta_for_week(selected_week) if "_fpi_v411_scope_meta_for_week" in globals() else {}
         if scope_meta_v411.get("scope_type") == "single_session":
             context_v302 = {"completion":1.0,"phase_factor":1.0,"label":"egyetlen esemény; csak sessioncélzóna","week_type":"session","partial":True}
@@ -12341,7 +12342,9 @@ def build_fpi_gps_only_pdf_bytes(
     small=ParagraphStyle('V204Small',parent=body,fontSize=8.5,leading=10.8)
     head=ParagraphStyle('V204Head',parent=body,fontName=font_bold,textColor=colors.white,alignment=1)
     story=[]
-    def P(x,s=body): return Paragraph(pdf_safe_text(_fpi_tactical_pdf_text_v157(x)),s)
+    def P(x,s=body):
+        x = _fpi_v417_render_load_text(x, df)
+        return Paragraph(pdf_safe_text(_fpi_tactical_pdf_text_v157(x)),s)
     def section(x,color='#DBEAFE'):
         return Table([[P(x,ParagraphStyle('Sec'+str(len(story)),parent=body,fontName=font_bold,fontSize=11))]],colWidths=[27.7*cm],style=TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor(color)),('BOX',(0,0),(-1,-1),.4,colors.HexColor('#CBD5E1')),('LEFTPADDING',(0,0),(-1,-1),6),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5)]))
     def tbl(rows,widths,bg='#1E3A8A'):
@@ -12446,13 +12449,13 @@ def build_fpi_gps_only_pdf_bytes(
         story.append(tbl(rows,[3.2*cm,4.3*cm,5.0*cm,4.5*cm,4.5*cm,4.5*cm],'#047857'))
         note_v411 = ('A trend csak legalább négy teljes hétből készül.' if trend_status_v411.get('available') else 'A rendelkezésre álló 2–3 teljes hét csak összehasonlítás; a riport ezt nem nevezi trendnek.')
         story.append(Spacer(1,.15*cm)); story.append(P(note_v411 + ' Folyamatban lévő hétnél csak azonos hétközi pontig gyűlt korábbi terheléshez hasonlítunk.',small))
-    story += [PageBreak(),section('6. Játékosonkénti kumulált terhelés és eltérések','#E0F2FE')]
+    story += [PageBreak(),section('6. Játékosonkénti heti kumulált terhelés – edzések + meccs (mezőnyjátékosok)','#E0F2FE')]
     if players.empty: story.append(P('Nincs játékosonként aggregálható mutató.'))
     else:
         story += [_fpi_v304_player_charts(players), Spacer(1,.10*cm)]
         display=players.copy(); metric_cols=[c for c in ['sessions','duration_min','total_distance','hsr_distance','sprint_distance','sprints','high_efforts','training_load'] if c in display.columns]
-        labels={'player_name':'Játékos','sessions':'Session','duration_min':'Perc','total_distance':'Össztáv','hsr_distance':'HSR','sprint_distance':'Sprint','sprints':'Sprint db','high_efforts':'High Eff.','training_load':'Load'}
-        sortcol='total_distance' if 'total_distance' in display else metric_cols[0]; display=display.sort_values(sortcol,ascending=False).head(20)
+        labels={'player_name':'Játékos','sessions':'Session','duration_min':'Perc','total_distance':'Össztáv','hsr_distance':'HSR','sprint_distance':'Sprint','sprints':'Sprint db','high_efforts':'High Eff.','training_load':_fpi_v417_load_label(df)}
+        sortcol='total_distance' if 'total_distance' in display else metric_cols[0]; display=display.sort_values(sortcol,ascending=False)
         cols=['player_name']+metric_cols; rows=[[P(labels.get(c,c),head) for c in cols]]
         for _,r in display.iterrows(): rows.append([P(str(r[c]) if c=='player_name' else _fpi_v414_number(r[c]),small) for c in cols])
         widths=[5.8*cm]+[(21.9/len(metric_cols))*cm for _ in metric_cols]; story.append(tbl(rows,widths,'#0369A1'))
@@ -19854,7 +19857,7 @@ FPI_EXTENDED_METHODOLOGY_BLOCKS_V415 = [{'title': '1. A riport eredményeinek ol
                         'A referencia minősége meghatározza a következtetés erejét.'],
                        ['4. Milyen időszakra szól?',
                         'Egy esemény, naptári hét, gördülő dátumtartomány.',
-                        'A hétfő-keddi csonka hét nem hasonlítható közvetlenül teljes héthez.'],
+                        'A hétfő-keddi csonka hét nem hasonlítható közvetlenül teljes héthez. Teljes mikrociklusnál (edzés + heti meccs) nem alkalmazunk mesterséges időarányos csökkentést.'],
                        ['5. Mekkora a bizonyosság?',
                         'Előzetes / összehasonlító / trendértékű.',
                         'Kevés adat mellett a pontszám irányjelző, nem stabil minősítés.']]},
@@ -19887,7 +19890,7 @@ FPI_EXTENDED_METHODOLOGY_BLOCKS_V415 = [{'title': '1. A riport eredményeinek ol
                        ['hsr_distance', 'HSR Distance, Zone 4+5', 'Nagysebességű futás, a forrás küszöbe szerint.'],
                        ['sprint_distance', 'Sprint Distance, Zone 5', 'Sprintküszöb feletti távolság, méter.'],
                        ['sprints', 'Sprint Count, Number of Sprints', 'Sprintakciók darabszáma.'],
-                       ['training_load', 'PlayerLoad, Training Load, HMLD', 'Szolgáltatóspecifikus összterhelési pont.'],
+                       ['training_load', 'PlayerLoad, Training Load, HMLD', 'Szolgáltatóspecifikus külső terhelési mutató. Barin/Brainsports esetén HMLD, méterben; ezt nem nevezzük Load-pontnak.'],
                        ['duration / match_minutes', 'Duration, Minutes Played', 'Edzésidő vagy tényleges mérkőzésperc.'],
                        ['acc / dec / high_efforts', 'Accelerations, Decelerations, HIE', 'Robbanékony, mechanikai vagy intenzív akciók.']]},
              {'type': 'subheading', 'text': '2.2. Eseményazonosítás'},
@@ -19944,8 +19947,8 @@ FPI_EXTENDED_METHODOLOGY_BLOCKS_V415 = [{'title': '1. A riport eredményeinek ol
                        ['Össztáv', 'm', 'Összeadódik.', 'Volumen.'],
                        ['HSR', 'm', 'Összeadódik; küszöb a szolgáltatótól függ.', 'Nagysebességű futóinger.'],
                        ['Sprinttáv', 'm', 'Összeadódik.', 'Sprintküszöb feletti expozíció.'],
-                       ['Sprint db', 'db', 'Összeadódik.', 'Sprintismétlések száma.'],
-                       ['Load', 'pont', 'Összeadódik; szolgáltatóspecifikus.', 'Külső összterhelés.'],
+                       ['Sprint db', 'db', 'Csak akkor összegezzük, ha a forrás tényleges sprintdarabot tartalmaz.', 'Hiányzó sprintdarabot nem becsülünk a sprinttávból és nem jelenítünk meg 0-ként.'],
+                       ['Load / HMLD', 'pont vagy m', 'Összeadódik; szolgáltatóspecifikus.', 'Player/Training Load esetén pont; Barin/Brainsports HMLD esetén méter.'],
                        ['Táv/perc', 'm/perc', 'Össztáv / teljes idő; nem egyszerű részátlag.', 'Relatív intenzitás.'],
                        ['Max Speed', 'km/h', 'A maximum marad meg.', 'Legmagasabb elért sebesség.'],
                        ['Gyorsítás/lassítás', 'db', 'Összeadódik, küszöbfüggő.', 'Mechanikai/neuromuszkuláris inger.'],
@@ -21476,7 +21479,7 @@ def _fpi_v204_session_summary(df: pd.DataFrame, week: str, blocked: set) -> pd.D
 # =========================================================
 # V414 - Többfájlos / többmunkalapos eseménymotor + HU számformátum
 # =========================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V416_MATCH90_HALFTIME_METHODOLOGY_2026_08_07"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V417_VALIDATION_FIXES_2026_08_09"
 FPI_FULL_PERIOD_KEY_V414 = "__FPI_FULL_PERIOD_V414__"
 
 
@@ -21913,6 +21916,305 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
     report["event_engine_v413"] = "V414: upload + valódi munkalap + dátum/típus + 120 perces időklaszter"
     out.attrs["fpi_v300_master_report"] = report
     return out, report
+
+
+
+
+# =============================================================================
+# V417 – hitelesítési javítások
+# =============================================================================
+# 1) Barin/Brainsports HMLD = méter, nem generikus Load-pont.
+# 2) Csapatszintű heti/trend/mikrociklus aggregáció mezőnyjátékos-alapú.
+# 3) Teljes mikrociklusnál nincs téves "csonka hét" időarányos célcsökkentés.
+# 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
+# 5) A játékostábla nem vág le 20 főnél.
+
+FPI_IMPORT_ENGINE_VERSION = "FPI_V417_VALIDATION_FIXES_2026_08_09"
+
+
+def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+    work = df.copy()
+    if "is_goalkeeper" not in work.columns:
+        try:
+            work = add_keeper_flag_from_position(work)
+        except Exception:
+            work["is_goalkeeper"] = False
+    if "is_goalkeeper" in work.columns:
+        mask = ~work["is_goalkeeper"].fillna(False).astype(bool)
+        if mask.any():
+            return work.loc[mask].copy()
+    return work
+
+
+def _fpi_v417_load_kind(df: pd.DataFrame) -> str:
+    """A training_load oszlop mögötti tényleges szolgáltatói mutató."""
+    if df is None or df.empty:
+        return "load"
+    if "_fpi_load_metric" in df.columns:
+        vals = (
+            df["_fpi_load_metric"].astype("string").fillna("").astype(str)
+            .str.strip().str.upper()
+        )
+        vals = vals[vals.ne("")]
+        if not vals.empty and vals.eq("HMLD").all():
+            return "hmld"
+        if vals.eq("HMLD").any():
+            return "mixed"
+    return "load"
+
+
+def _fpi_v417_load_label(df: pd.DataFrame) -> str:
+    kind = _fpi_v417_load_kind(df)
+    if kind == "hmld":
+        return "HMLD"
+    if kind == "mixed":
+        return "Terhelési mutató"
+    return "Load"
+
+
+def _fpi_v417_load_unit(df: pd.DataFrame) -> str:
+    kind = _fpi_v417_load_kind(df)
+    if kind == "hmld":
+        return "m"
+    if kind == "mixed":
+        return "forrásfüggő"
+    return "pont"
+
+
+def _fpi_v417_render_load_text(value: object, df: pd.DataFrame) -> object:
+    """PDF-ben a Barin HMLD-t ne nevezzük Load-pontnak."""
+    if _fpi_v417_load_kind(df) != "hmld" or value is None:
+        return value
+    text = str(value)
+    replacements = [
+        ("Load = a szolgáltató vagy az import által adott összterhelési pont.",
+         "HMLD = High Metabolic Load Distance; a Barin/Brainsports exportban méterben mért külső terhelési mutató."),
+        ("Load (terhelési pont)", "HMLD"),
+        ("Összterhelési pont", "HMLD"),
+        ("összterhelési pont", "HMLD"),
+        ("Terhelési pont:", "HMLD:"),
+        ("terhelési pont:", "HMLD:"),
+        ("Terhelési pont", "HMLD"),
+        ("terhelési pont", "HMLD"),
+        ("Összterhelés", "HMLD-terhelés"),
+        ("összterhelés", "HMLD-terhelés"),
+        ("Load-trend", "HMLD-trend"),
+        ("load-trend", "HMLD-trend"),
+        ("Medián load", "Medián HMLD"),
+        ("medián load", "medián HMLD"),
+        ("Load –", "HMLD –"),
+        ("load /", "HMLD /"),
+        ("Load /", "HMLD /"),
+        ("mezőnyjátékos-load", "mezőnyjátékos-HMLD"),
+        ("saját load", "saját HMLD"),
+        ("load spike", "HMLD-kiugrás"),
+        ("load célzott", "HMLD célzott"),
+        ("load profil", "HMLD-profil"),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    # Önálló Load szó, de a "Player Load" módszertani kifejezést ne írjuk át vakon.
+    text = re.sub(r"(?<!Player )\bLoad\b", "HMLD", text)
+    text = re.sub(r"\bload\b", "HMLD", text)
+    text = text.replace("High Metabolic HMLD Distance", "High Metabolic Load Distance")
+    text = text.replace("Player HMLD", "Player Load").replace("Training HMLD", "Training Load")
+    return text
+
+
+# Brainsports/Barin import: őrizzük meg, hogy a belső training_load valójában HMLD.
+_fpi_v417_base_prepare_brainsports = _fpi_prepare_brainsports_v143
+
+def _fpi_prepare_brainsports_v143(
+    sheets: Dict[str, pd.DataFrame],
+    forced_type: Optional[str],
+    file_name: str,
+) -> pd.DataFrame:
+    out = _fpi_v417_base_prepare_brainsports(sheets, forced_type, file_name)
+    if out is None or out.empty:
+        return out
+    out = out.copy()
+    hmld_present = "HMLD" in out.columns and pd.to_numeric(out["HMLD"], errors="coerce").notna().any()
+    if hmld_present:
+        out["_fpi_load_metric"] = "HMLD"
+        out["_fpi_load_unit"] = "m"
+    else:
+        out["_fpi_load_metric"] = "Load"
+        out["_fpi_load_unit"] = "pont"
+    if "Sprints" in out.columns:
+        out["_fpi_sprints_source_available"] = pd.to_numeric(out["Sprints"], errors="coerce").notna()
+    else:
+        out["_fpi_sprints_source_available"] = False
+    return out
+
+
+# Smart Mapper / standardizálás után is maradjon meg a szemantikai metaadat.
+_fpi_v417_base_standardize_dataframe = standardize_dataframe
+
+def standardize_dataframe(raw: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Optional[str]], List[str]]:
+    out, mapping, missing = _fpi_v417_base_standardize_dataframe(raw)
+    if out is None or raw is None or raw.empty:
+        return out, mapping, missing
+    meta_cols = ["_fpi_load_metric", "_fpi_load_unit", "_fpi_sprints_source_available"]
+    for col in meta_cols:
+        if col in raw.columns and col not in out.columns:
+            source = raw[col]
+            try:
+                if len(source) == len(out):
+                    out[col] = source.reset_index(drop=True).to_numpy()
+                elif set(out.index).issubset(set(source.index)):
+                    out[col] = source.reindex(out.index).to_numpy()
+            except Exception:
+                pass
+    # Kézi/generikus HMLD mapping esetén is helyes egység.
+    source_load = str((mapping or {}).get("training_load") or "")
+    if "hmld" in _norm_mapping_text(source_load):
+        out["_fpi_load_metric"] = "HMLD"
+        out["_fpi_load_unit"] = "m"
+    if "_fpi_sprints_source_available" not in out.columns:
+        source_sprints = (mapping or {}).get("sprints")
+        if source_sprints and source_sprints in raw.columns:
+            vals = pd.to_numeric(raw[source_sprints], errors="coerce")
+            if len(vals) == len(out):
+                out["_fpi_sprints_source_available"] = vals.reset_index(drop=True).notna().to_numpy()
+        else:
+            out["_fpi_sprints_source_available"] = False
+    return out, mapping, missing
+
+
+_fpi_v417_base_apply_mapping_to_raw = apply_mapping_to_raw
+
+def apply_mapping_to_raw(raw: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> Tuple[pd.DataFrame, Dict[str, Optional[str]], List[str]]:
+    out, fixed_mapping, missing = _fpi_v417_base_apply_mapping_to_raw(raw, mapping)
+    if out is None or raw is None or raw.empty:
+        return out, fixed_mapping, missing
+    source_load = str((fixed_mapping or {}).get("training_load") or "")
+    if "hmld" in _norm_mapping_text(source_load):
+        out["_fpi_load_metric"] = "HMLD"
+        out["_fpi_load_unit"] = "m"
+    source_sprints = (fixed_mapping or {}).get("sprints")
+    if source_sprints and source_sprints in raw.columns:
+        vals = pd.to_numeric(raw[source_sprints], errors="coerce")
+        if len(vals) == len(out):
+            out["_fpi_sprints_source_available"] = vals.reset_index(drop=True).notna().to_numpy()
+    else:
+        out["_fpi_sprints_source_available"] = False
+    return out, fixed_mapping, missing
+
+
+# A csapatszintű heti fingerprint és mikrociklus a meccsreferenciához hasonlóan
+# kizárólag mezőnyjátékosokból készüljön.
+_fpi_v417_base_weekly_fingerprints = build_weekly_fingerprints
+
+def build_weekly_fingerprints(df: pd.DataFrame) -> pd.DataFrame:
+    return _fpi_v417_base_weekly_fingerprints(_fpi_v417_field_players(df))
+
+
+_fpi_v417_base_microcycle_table = build_microcycle_table
+
+def build_microcycle_table(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
+    work = _fpi_v417_field_players(df)
+    out = _fpi_v417_base_microcycle_table(work, selected_week)
+    if out is not None and not out.empty and _fpi_v417_load_kind(work) == "hmld":
+        if "load_index_label" in out.columns:
+            out["load_index_label"] = "HMLD (m)"
+    return out
+
+
+# Teljes mikrociklus = teljes heti cél, nem 82/91%-os mesterséges időarányosítás.
+_fpi_v417_base_week_context_factor = _fpi_v302_week_context_factor
+
+def _fpi_v302_week_context_factor(analysis_df: pd.DataFrame, selected_week: str) -> Dict[str, object]:
+    base = dict(_fpi_v417_base_week_context_factor(analysis_df, selected_week) or {})
+    meta = _fpi_v411_scope_meta_for_week(selected_week) if "_fpi_v411_scope_meta_for_week" in globals() else {}
+    # Egyéni dátumtartományt és egyetlen sessiont nem minősítünk automatikusan teljes hétnek.
+    if meta.get("scope_type") in {"single_session", "date_range", "full_period"}:
+        return base
+    try:
+        mode = _fpi_v202_detect_analysis_mode(analysis_df, selected_week)
+    except Exception:
+        mode = {}
+    if str(mode.get("code", "")) == "full_microcycle":
+        phase = _norm_mapping_text(st.session_state.get("fpi_season_phase_v205", "Automatikus felismerés"))
+        week_hint = _norm_mapping_text(st.session_state.get("clean_week_type_v137", "") or st.session_state.get("app_week_type_v112", ""))
+        if "recovery" in week_hint or "regener" in week_hint or "alulterhelt" in week_hint:
+            pf, wt = .78, "recovery"
+        elif "overload" in week_hint or "terhelesepito" in week_hint:
+            pf, wt = 1.12, "overload"
+        elif "felkesz" in phase:
+            pf, wt = 1.05, "felkészülés"
+        else:
+            pf, wt = 1.0, "normál"
+        return {"completion": 1.0, "phase_factor": pf, "label": "teljes hét", "week_type": wt, "partial": False}
+    return base
+
+
+# Játékos kumulált tábla: mezőnyjátékosok, NA-biztos összeadás és Sprint db csak
+# akkor, ha az összes eseményhez tényleges forrásadat áll rendelkezésre.
+def _fpi_v204_player_period(df: pd.DataFrame, week: str, blocked: set) -> pd.DataFrame:
+    data = df[df.get("week", pd.Series("", index=df.index)).astype(str).eq(str(week))].copy()
+    if data.empty or "player_name" not in data.columns:
+        return pd.DataFrame()
+    data = _fpi_v417_field_players(data)
+    if data.empty:
+        return pd.DataFrame()
+    data["_event204"] = _fpi_v202_event_key(data)
+
+    # Sprint darab csak akkor teljes heti mutató, ha minden eseményben ténylegesen mérve van.
+    sprints_complete = False
+    if "sprints" in data.columns:
+        sprint_num = pd.to_numeric(data["sprints"], errors="coerce")
+        event_has = data.assign(_sprint_v417=sprint_num).groupby("_event204", dropna=False)["_sprint_v417"].apply(lambda s: s.notna().any())
+        sprints_complete = bool(len(event_has) and event_has.all())
+    if "_fpi_sprints_source_available" in data.columns:
+        event_source = data.groupby("_event204", dropna=False)["_fpi_sprints_source_available"].apply(lambda s: s.fillna(False).astype(bool).any())
+        sprints_complete = sprints_complete and bool(len(event_source) and event_source.all())
+
+    additive = ["duration_min", "total_distance", "hsr_distance", "sprint_distance", "high_efforts", "training_load"]
+    if sprints_complete:
+        additive.insert(4, "sprints")
+    additive = [c for c in additive if c in data.columns and c not in blocked]
+    if not additive:
+        return pd.DataFrame()
+
+    rows = []
+    for player, group in data.groupby("player_name", dropna=False, sort=False):
+        row = {"player_name": player}
+        for c in additive:
+            vals = pd.to_numeric(group[c], errors="coerce")
+            row[c] = vals.sum(min_count=1)
+        row["sessions"] = int(group["_event204"].nunique())
+        row["is_goalkeeper"] = False
+        rows.append(row)
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    out["_fpi_load_metric"] = "HMLD" if _fpi_v417_load_kind(data) == "hmld" else "Load"
+    out["_fpi_load_unit"] = _fpi_v417_load_unit(data)
+    return out
+
+
+# Dinamikus játékosdiagram: Barinnál HMLD, nem Load.
+def _fpi_v304_player_charts(players: pd.DataFrame):
+    if players is None or players.empty:
+        return Spacer(1, 0)
+    field_players = _fpi_v417_field_players(players)
+    if field_players.empty:
+        return Spacer(1, 0)
+    load_label = _fpi_v417_load_label(field_players)
+    load_suffix = " m" if _fpi_v417_load_kind(field_players) == "hmld" else ""
+    charts = []
+    for col, label, suffix in [("training_load", load_label, load_suffix), ("hsr_distance", "HSR", " m")]:
+        if col not in field_players.columns:
+            continue
+        items, bottom_n, top_n = _fpi_v401_top_bottom_items(field_players, col)
+        if not items:
+            continue
+        title = f"{label} – mezőnyjátékos alsó {bottom_n} és top {top_n} ({len(items)} külön játékos)"
+        chart_height = 5.8 if len(items) >= 9 else 5.1
+        charts.append(_fpi_v401_compact_bar_chart(items, title, 13.4, chart_height, suffix, max_items=10))
+    return Table([charts[:2]], colWidths=[13.7 * cm] * len(charts[:2])) if charts else Spacer(1, 0)
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
