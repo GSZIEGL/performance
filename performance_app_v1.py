@@ -73,7 +73,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V417_VALIDATION_FIXES_2026_08_09"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V418_REFERENCE_CONSISTENCY_AUDIT_2026_08_11"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -20099,21 +20099,22 @@ FPI_EXTENDED_METHODOLOGY_BLOCKS_V415 = [{'title': '1. A riport eredményeinek ol
               'rows': [['Komponens', 'Mit vizsgál?', 'Fő szabály'],
                        ['Edzésrészvétel', 'A keret tényleges részvétele a csapatedzéseken.', '≥90%: +3; 75-89%: -3; 60-74%: -8; <60%: -14.'],
                        ['Load trend', 'Aktuális heti Load változása.', 'Csak ≥4 teljes hétnél minősít; >+25%: -12; <-30%: -6; kontrollált: +4.'],
-                       ['Speed Exposure', 'A legerősebb meccs előtti sprintdózis és időzítés.', 'Fő cél MD-4/MD-3, meccssprint 25-40%-a.'],
+                       ['Speed Exposure', 'A legerősebb meccs előtti HSR- és sprintdózis, valamint az időzítés.', 'Mindkét mutató külön a saját mezőnyjátékos /90 meccsreferenciához viszonyul; a két részpont átlaga adja a komponenst. Operatív fő zóna MD-4/MD-3: kb. 35-60%.'],
                        ['Tapering', 'MD-2 és MD-1 Load a fő naphoz képest.', 'MD-1 cél 30-45%; MD-2 cél 55-70%.'],
-                       ['Játékmodell-illeszkedés', 'A heti edzésprofil intenzitás/sprint/High Efforts aránya.', '<60: -8; >80: +3; köztes érték semleges.']]},
+                       ['Játékmodell-illeszkedés', 'A tipikus edzés-session fizikai profiljának illeszkedése.', 'A kor/szint/poszt/játékmodell szerint differenciált session benchmarkzónákhoz mér; <60: -8; >80: +3; köztes érték semleges.']]},
              {'type': 'subheading', 'text': '8.1. Speed Exposure részletesen'},
              {'type': 'paragraph',
               'text': 'A rendszer csak a következő mérkőzés előtti MD-5 és MD-1 közötti edzéseket értékeli. Az MD+1 regeneráció vagy pótló terhelés, ezért nem '
                       'számít a következő mérkőzés előtti erősségnek.'},
+             {'type': 'paragraph', 'text': 'A HSR és a sprint külön részpontot kap ugyanazzal a dózis-időzítés logikával. Ha mindkettő rendelkezésre áll, a Speed Exposure komponens a két részpont egyszerű átlaga; így egy jó sprintdózis nem fedi el az alacsony HSR-expozíciót, és fordítva.'},
              {'type': 'table',
-              'rows': [['Fő sprintdózis / meccsref.', 'Dózispont az időzítés előtt'],
+              'rows': [['Fő HSR- vagy sprintdózis / saját /90 meccsref.', 'Részpont az időzítés előtt'],
                        ['<10%', '20 pont'],
                        ['10-20%', '40-60 pont, lineárisan'],
-                       ['20-25%', '60-80 pont, lineárisan'],
-                       ['25-40%', '90 pont'],
-                       ['40-50%', '80 pont'],
-                       ['>50%', 'fokozatosan csökken, minimum 55 pont']]},
+                       ['20-35%', '60-85 pont, lineárisan'],
+                       ['35-60%', '90 pont'],
+                       ['60-75%', '80 pont'],
+                       ['>75%', 'magas dózis: kontextusfüggő, fokozatosan csökken, minimum 55 pont']]},
              {'type': 'table', 'rows': [['Időzítés', 'Szorzó'], ['MD-5', '0,90'], ['MD-4', '1,00'], ['MD-3', '1,00'], ['MD-2', '0,70'], ['MD-1', '0,40']]},
              {'type': 'table', 'rows': [['Speed Exposure pont = dózispont × időzítési szorzó']]},
              {'type': 'subheading', 'text': '8.2. Tapering részletesen'},
@@ -20351,7 +20352,7 @@ FPI_METHODOLOGY_SECTIONS_V143 = [
         "A román SuperLiga induló, előzetes benchmarkja a magyar NB I célzónáit, a román Liga II induló benchmarkja a magyar NB II célzónáit használja. A riport ezt előzetes liga-profilként jelöli, amíg nincs elegendő saját meccsadat; nem állítjuk, hogy a két bajnokság fizikailag azonos.",
         "A játékmodell egyszer kerül megadásra. Az elsődleges modell 70%, az opcionális másodlagos modell 30% súllyal módosítja a metrikánkénti célzónákat. A védekezési blokk és a támadási út többértékű taktikai kontextus, de nem emeli automatikusan az összes GPS-benchmarkot.",
         "Minden táblázatnál egyértelműen jelöljük az adatkört, az időszakot, az aggregációt és a referencia forrását. Összeadható például az össztáv, Load, HSR, sprinttáv, sprintdarabszám, High Efforts, gyorsítás és lassítás; a m/percet újraszámítjuk, a Max Speednél pedig az időszak legnagyobb értékét tartjuk meg.",
-        "A sebességi expozíció a dózis mellett az időzítést is figyelembe veszi. A fő sprintinger MD-4/MD-3 környékén, a saját meccs sprintreferenciájának 25–40%-os operatív célzónájában kap teljes értéket; MD-2-n csökkentett, MD-1-en erősen csökkentett értékelést kap.",
+        "A sebességi expozíció a dózis mellett az időzítést is figyelembe veszi. A fő nagysebességű inger MD-4/MD-3 környékén kap teljes időzítési értéket. Az FPI a sprint- és HSR-távot külön-külön a saját mezőnyjátékos /90 meccsreferenciához viszonyítja, majd együtt értékeli. Operatív fő zóna: kb. 35–60%; ez nem univerzális élettani optimum, hanem a saját meccsadatokkal és a szakirodalmi mikrociklusmintákkal együtt értelmezendő referenciazóna.",
         "A tapering külön vizsgálja az MD-1 és MD-2 összterhelését, valamint az MD-2 sprintterhelését. Operatív célzóna: MD-1 a fő MD-4/MD-3 nap 30–45%-a, MD-2 55–70%-a.",
         "A Player Risk Score nem sérülésjóslat. A saját korábbi terheléshez viszonyított kiugrásokat, alulexpozíciót, sprint- és HSR-profilt, gyorsításokat, lassításokat és High Efforts értéket jelzi. A mezőnyjátékos-listákból a kapusok kimaradnak.",
     ]),
@@ -21512,7 +21513,7 @@ def _fpi_v414_sheet_event_token(df: pd.DataFrame) -> pd.Series:
     sheet = _fpi_v413_nonempty_text_series(df, "_fpi_source_sheet")
     normalized = sheet.map(_norm_mapping_text)
     helper_pattern = (
-        r"^(data|adat|adatok|raw data|gps data|summary|overall|osszesites|összesítés|"
+        r"^(?:data|adat|adatok|raw data|gps data|summary|overall|osszesites|összesítés|"
         r"dashboard|targets?|settings?|config|metadata|main table|all)$|"
         r"(?:^|\b)(?:first|second|1st|2nd|elso|első|masodik|második)[ _.-]*(?:half|felido|félidő)(?:\b|$)|"
         r"(?:^|\b)(?:half|felido|félidő|warm.?up|bemelegites|bemelegítés|cool.?down|levezetes|levezetés)(?:\b|$)|"
@@ -22215,6 +22216,1016 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
         chart_height = 5.8 if len(items) >= 9 else 5.1
         charts.append(_fpi_v401_compact_bar_chart(items, title, 13.4, chart_height, suffix, max_items=10))
     return Table([charts[:2]], colWidths=[13.7 * cm] * len(charts[:2])) if charts else Spacer(1, 0)
+
+
+
+# =============================================================================
+# V418 – production reference-consistency audit
+# =============================================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V418_REFERENCE_CONSISTENCY_AUDIT_2026_08_11"
+# Cél:
+# - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
+#   mezőnyjátékos session-medián / saját /90 meccsreferencia.
+# - HSR és sprint együtt, ugyanazzal a populációval és aggregációval.
+# - Readiness, magyarázat, játékmodell-illeszkedés, trend és heti benchmark
+#   ugyanazokra a referenciaelvekre épüljön.
+# - Kapus ne kerüljön mezőnyjátékos csapatbenchmarkba.
+# - Barin/Brainsports felismerés és néhány stabilitási figyelmeztetés javítása.
+
+FPI_SPEED_MAIN_TARGET_LOW_V418 = 0.35
+FPI_SPEED_MAIN_TARGET_HIGH_V418 = 0.60
+FPI_SPEED_HIGH_REVIEW_V418 = 0.75
+
+
+def _fpi_v418_field_players(df: pd.DataFrame) -> pd.DataFrame:
+    """Egyetlen, közös mezőnyjátékos-populáció minden csapatfizikai összevetéshez."""
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+    if "_fpi_v417_field_players" in globals():
+        return _fpi_v417_field_players(df)
+    out = df.copy()
+    if "is_goalkeeper" in out.columns:
+        mask = ~out["is_goalkeeper"].fillna(False).astype(bool)
+        if mask.any():
+            return out[mask].copy()
+    return out
+
+
+# --- Provider felismerés: Barin/Brainsports ne "Catapult" címkét kapjon. ---
+_fpi_v418_base_detect_provider = _fpi_detect_provider_v143
+
+def _fpi_detect_provider_v143(sheets: Dict[str, pd.DataFrame], file_name: str = "") -> str:
+    name = str(file_name or "").lower()
+    sample_text = ""
+    for frame in list((sheets or {}).values())[:6]:
+        try:
+            sample_text += " " + " ".join(
+                str(x).lower()
+                for x in frame.head(20).fillna("").astype(str).values.ravel().tolist()
+            )
+        except Exception:
+            pass
+    # Erős Barin/Brainsports aláírás: ezek együtt lényegesen specifikusabbak,
+    # mint az általános "total distance" mezők.
+    barin_signature = (
+        ("distance(4+5)" in sample_text or "distance (4+5)" in sample_text)
+        and "hmld" in sample_text
+        and "high efforts" in sample_text
+        and ("total distance" in sample_text or "equivalent distance" in sample_text)
+    )
+    if "barin" in name or "brainsport" in name or barin_signature:
+        return "Brainsports"
+    return _fpi_v418_base_detect_provider(sheets, file_name)
+
+
+# --- Dátum parsing: ISO dátumot ne dayfirst=True próbáljon értelmezni. ---
+_fpi_v418_base_excel_datetime = _fpi_excel_serial_to_datetime_v143
+
+def _fpi_excel_serial_to_datetime_v143(value):
+    try:
+        if pd.isna(value):
+            return pd.NaT
+    except Exception:
+        pass
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return pd.to_datetime(value, errors="coerce")
+    try:
+        num = float(value)
+        if 20000 <= num <= 80000:
+            return pd.Timestamp("1899-12-30") + pd.to_timedelta(num, unit="D")
+    except Exception:
+        pass
+    text = str(value).strip()
+    # 2026-08-11[ HH:MM:SS] jellegű ISO először year-first módon.
+    if re.match(r"^\d{4}-\d{1,2}-\d{1,2}(?:[ T].*)?$", text):
+        parsed = pd.to_datetime(text, errors="coerce", yearfirst=True)
+        if pd.notna(parsed):
+            return parsed
+    return pd.to_datetime(value, errors="coerce", dayfirst=True)
+
+
+
+# A ZIP belső fájljainál a régi report-row címke a helyes mapping ellenére
+# maradhatott "Catapult". A numerikus mappinget nem változtatjuk meg, csak a
+# bizonyítható Barin/Brainsports forrás címkéjét normalizáljuk.
+_fpi_v418_base_read_many_gps = _fpi_read_many_gps_files_v143
+
+def _fpi_read_many_gps_files_v143(
+    training_files: Optional[List[object]],
+    match_files: Optional[List[object]],
+    mixed_files: Optional[List[object]],
+    provider_override: str = "Automatikus felismerés",
+) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame, str]:
+    sheets, report, signature = _fpi_v418_base_read_many_gps(
+        training_files, match_files, mixed_files, provider_override
+    )
+    if isinstance(report, pd.DataFrame) and not report.empty and "Fájl" in report.columns and "Rendszer" in report.columns:
+        report = report.copy()
+        file_text = report["Fájl"].astype(str).str.lower()
+        barin_mask = file_text.str.contains(r"(?:^|[/\\])barin(?:[/\\]|_)|brainsport", regex=True, na=False)
+        report.loc[barin_mask, "Rendszer"] = "Brainsports"
+    return sheets, report, signature
+
+
+# Játékmodell aliasok: a felületi "Magas letámadás" ugyanazt a fizikai profilt
+# használja, mint a referencia-motor "Magas presszing" kategóriája.
+_fpi_v418_base_build_reference_profile = _fpi_build_reference_profile_v112
+
+def _fpi_build_reference_profile_v112(age: str, level: str, position: str, playmodel: str) -> Dict[str, object]:
+    p = _norm_mapping_text(playmodel)
+    if any(k in p for k in ["magas letamadas", "magas letámadás", "pressing", "presszing"]):
+        playmodel = "Magas presszing"
+    elif any(k in p for k in ["atmeneti", "átmeneti", "transition"]):
+        playmodel = "Átmeneti játék"
+    elif any(k in p for k in ["dominancia", "possession", "labdabirtok"]):
+        playmodel = "Dominancia"
+    elif any(k in p for k in ["direkt"]):
+        playmodel = "Direkt játék"
+    return _fpi_v418_base_build_reference_profile(age, level, position, playmodel)
+
+
+def _fpi_v418_match_rate_reference(df: pd.DataFrame, metric: str) -> float:
+    """Saját, mezőnyjátékos meccsreferencia rate/perc mutatóhoz."""
+    if df is None or df.empty:
+        return np.nan
+    work = _fpi_v418_field_players(df)
+    work = work[work.get("session_type", pd.Series("", index=work.index)).astype(str).eq("Meccs")].copy()
+    if work.empty:
+        return np.nan
+    try:
+        work = finalize_exposure_columns(work)
+    except Exception:
+        pass
+
+    if metric == "distance_per_min":
+        if "total_distance" not in work.columns:
+            return np.nan
+        mins = pd.to_numeric(
+            work.get("player_minutes", work.get("duration_min", pd.Series(np.nan, index=work.index))),
+            errors="coerce",
+        )
+        dist = pd.to_numeric(work["total_distance"], errors="coerce")
+        eligible = mins.ge(10) & dist.notna()
+        vals = dist[eligible] / mins[eligible].where(mins[eligible] > 0)
+        return float(vals.median()) if vals.notna().any() else np.nan
+
+    ref = _fpi_v300_match_reference(work)
+    value = (ref.get("metrics") or {}).get(metric) if ref.get("available") else None
+    return float(value) if value is not None and pd.notna(value) else np.nan
+
+
+def _fpi_v418_player_day_profiles(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
+    """Napi profil egy játékos -> egy nap logikával.
+
+    Edzés: tényleges napi játékosterhelés.
+    Meccs: min. 10 perc, majd az additív volumenmutatók /90-re normalizálva.
+    Végül mezőnyjátékos-medián készül. Így a létszám és a cserék nem torzítják
+    az MD-napok egymáshoz viszonyított értékét.
+    """
+    if df is None or df.empty or "week" not in df.columns:
+        return pd.DataFrame()
+    full = _fpi_v418_field_players(df)
+    week_df = full[full["week"].astype(str).eq(str(selected_week))].copy()
+    if week_df.empty:
+        return pd.DataFrame()
+
+    week_df = _fpi_v407_apply_filename_md_inference(week_df)
+    try:
+        week_df = finalize_exposure_columns(week_df)
+    except Exception:
+        pass
+
+    starts = pd.to_datetime(
+        week_df.get("start_time", week_df.get("session_date", pd.Series(pd.NaT, index=week_df.index))),
+        errors="coerce",
+    )
+    week_df["_v418_date"] = starts.dt.normalize()
+    if week_df["_v418_date"].isna().all() and "session_date" in week_df.columns:
+        week_df["_v418_date"] = pd.to_datetime(week_df["session_date"], errors="coerce").dt.normalize()
+    week_df = week_df[week_df["_v418_date"].notna()].copy()
+    if week_df.empty:
+        return pd.DataFrame()
+
+    add_metrics = [
+        c for c in [
+            "training_load", "total_distance", "sprint_distance", "hsr_distance",
+            "acc_count", "dec_count", "high_efforts", "sprints",
+        ] if c in week_df.columns
+    ]
+    max_metrics = [c for c in ["max_speed"] if c in week_df.columns]
+
+    rows = []
+    for (day, kind, player), g in week_df.groupby(
+        ["_v418_date", "session_type", "player_name"], dropna=False, sort=False
+    ):
+        kind_text = str(kind)
+        is_match = kind_text == "Meccs"
+        if is_match:
+            mins = pd.to_numeric(
+                g.get("player_minutes", g.get("match_minutes", g.get("duration_min", pd.Series(np.nan, index=g.index)))),
+                errors="coerce",
+            ).sum(min_count=1)
+        else:
+            mins = pd.to_numeric(g.get("duration_min", pd.Series(np.nan, index=g.index)), errors="coerce").sum(min_count=1)
+
+        if is_match and (pd.isna(mins) or mins < 10):
+            continue
+
+        row = {
+            "session_date_dt": pd.to_datetime(day),
+            "session_type": kind_text,
+            "player_name": player,
+            "player_minutes": mins,
+        }
+        for metric in add_metrics:
+            raw = pd.to_numeric(g[metric], errors="coerce").sum(min_count=1)
+            row[metric] = (
+                raw / mins * 90.0
+                if is_match and pd.notna(raw) and pd.notna(mins) and mins > 0
+                else raw
+            )
+        for metric in max_metrics:
+            vals = pd.to_numeric(g[metric], errors="coerce")
+            row[metric] = vals.max() if vals.notna().any() else np.nan
+
+        # Rate-et mindig az adott játékos tényleges táv/perce alapján számoljuk.
+        td_raw = pd.to_numeric(g.get("total_distance", pd.Series(np.nan, index=g.index)), errors="coerce").sum(min_count=1)
+        row["distance_per_min"] = (
+            float(td_raw) / float(mins)
+            if pd.notna(td_raw) and pd.notna(mins) and mins > 0
+            else np.nan
+        )
+        row["duration_min"] = 90.0 if is_match else mins
+        rows.append(row)
+
+    player_day = pd.DataFrame(rows)
+    if player_day.empty:
+        return player_day
+
+    daily_rows = []
+    med_metrics = [
+        c for c in [
+            "duration_min", "training_load", "total_distance", "sprint_distance",
+            "hsr_distance", "distance_per_min", "acc_count", "dec_count",
+            "high_efforts", "sprints",
+        ] if c in player_day.columns
+    ]
+    for (day, kind), g in player_day.groupby(["session_date_dt", "session_type"], dropna=False, sort=False):
+        r = {
+            "session_date_dt": day,
+            "session_type": kind,
+            "játékosok": int(g["player_name"].nunique()),
+        }
+        for metric in med_metrics:
+            vals = pd.to_numeric(g[metric], errors="coerce")
+            r[metric] = float(vals.median()) if vals.notna().any() else np.nan
+        if "max_speed" in g.columns:
+            vals = pd.to_numeric(g["max_speed"], errors="coerce")
+            # A napi max speednél a csapat legmagasabb tényleges expozícióját tartjuk meg.
+            r["max_speed"] = float(vals.max()) if vals.notna().any() else np.nan
+        daily_rows.append(r)
+
+    daily = pd.DataFrame(daily_rows)
+    match_day = detect_match_day(week_df)
+    if match_day is not None and not daily.empty:
+        daily["md_delta"] = (
+            pd.to_datetime(daily["session_date_dt"]).dt.normalize()
+            - pd.to_datetime(match_day).normalize()
+        ).dt.days
+        daily["md_label"] = daily["md_delta"].apply(day_label_from_delta)
+        actual_match_dates = set(
+            pd.to_datetime(
+                week_df.loc[week_df["session_type"].astype(str).eq("Meccs"), "_v418_date"],
+                errors="coerce",
+            ).dropna().dt.normalize()
+        )
+        daily["md_context_source"] = np.where(
+            pd.to_datetime(daily["session_date_dt"]).dt.normalize().isin(actual_match_dates),
+            "feltöltött meccs",
+            "fájlnév + dátum következtetés" if not actual_match_dates else "feltöltött meccsnap",
+        )
+    else:
+        daily["md_delta"] = np.nan
+        daily["md_label"] = "Nincs meccs"
+        daily["md_context_source"] = "nincs MD-horgony"
+
+    if "training_load" in daily.columns and pd.to_numeric(daily["training_load"], errors="coerce").notna().any():
+        daily["load_index"] = pd.to_numeric(daily["training_load"], errors="coerce")
+        daily["load_index_label"] = "HMLD (m)" if _fpi_v417_load_kind(full) == "hmld" else "Terhelési pont"
+    elif "total_distance" in daily.columns:
+        daily["load_index"] = pd.to_numeric(daily["total_distance"], errors="coerce")
+        daily["load_index_label"] = "Össztáv"
+    else:
+        daily["load_index"] = np.nan
+        daily["load_index_label"] = "Nincs load mutató"
+
+    # A történeti saját /90 meccsreferencia ugyanabba a táblába kerül, így minden
+    # későbbi motor ugyanazt a nevezőt használja.
+    ref = _fpi_v300_match_reference(full)
+    ref_metrics = (ref.get("metrics") or {}) if ref.get("available") else {}
+    for metric in ["sprint_distance", "hsr_distance", "total_distance", "high_efforts", "training_load"]:
+        value = ref_metrics.get(metric)
+        daily[f"match_reference_{metric}"] = (
+            float(value) if value is not None and pd.notna(value) else np.nan
+        )
+    daily["match_reference_distance_per_min"] = _fpi_v418_match_rate_reference(full, "distance_per_min")
+    daily["_fpi_match_reference_events"] = int(ref.get("match_events", 0) or 0)
+    daily["_fpi_match_reference_source"] = (
+        f"saját {int(ref.get('match_events', 0) or 0)} meccses mezőnyjátékos /90 medián"
+        if ref.get("available") else "aktuális meccs /90 fallback"
+    )
+    return daily.sort_values("session_date_dt").reset_index(drop=True)
+
+
+# A V417 wrapper helyett teljes, medián-alapú napi profil.
+def build_microcycle_table(df: pd.DataFrame, selected_week: str) -> pd.DataFrame:
+    return _fpi_v418_player_day_profiles(df, selected_week)
+
+
+def _fpi_v418_dose_score(ratio: float) -> float:
+    if ratio is None or pd.isna(ratio) or ratio < 0:
+        return 55.0
+    ratio = float(ratio)
+    if ratio < 0.10:
+        return 20.0
+    if ratio < 0.20:
+        return 40.0 + (ratio - 0.10) / 0.10 * 20.0
+    if ratio < FPI_SPEED_MAIN_TARGET_LOW_V418:
+        return 60.0 + (ratio - 0.20) / (FPI_SPEED_MAIN_TARGET_LOW_V418 - 0.20) * 25.0
+    if ratio <= FPI_SPEED_MAIN_TARGET_HIGH_V418:
+        return 90.0
+    if ratio <= FPI_SPEED_HIGH_REVIEW_V418:
+        return 80.0
+    return max(55.0, 80.0 - (ratio - FPI_SPEED_HIGH_REVIEW_V418) * 80.0)
+
+
+def _fpi_v418_peak_exposure(
+    eligible: pd.DataFrame,
+    metric: str,
+    reference: float,
+) -> Dict[str, object]:
+    out = {"valid": False, "metric": metric, "ratio": np.nan, "md": "", "peak": np.nan, "score": 55.0}
+    if metric not in eligible.columns or pd.isna(reference) or reference <= 0:
+        return out
+    vals = pd.to_numeric(eligible[metric], errors="coerce")
+    if not vals.notna().any():
+        return out
+    idx = vals.idxmax()
+    peak = float(vals.loc[idx])
+    ratio = peak / float(reference)
+    md = str(eligible.loc[idx].get("md_label", "")).upper().replace(" ", "")
+    timing_factor = {"MD-5": 0.90, "MD-4": 1.00, "MD-3": 1.00, "MD-2": 0.70, "MD-1": 0.40}.get(md, 0.50)
+    score = max(0.0, min(100.0, _fpi_v418_dose_score(ratio) * timing_factor))
+    out.update({"valid": True, "ratio": ratio, "md": md, "peak": peak, "score": score})
+    return out
+
+
+def _fpi_v408_speed_exposure_assessment(daily: pd.DataFrame) -> Dict[str, object]:
+    """V418: HSR + sprint, session-medián / saját mezőnyjátékos /90 meccsref."""
+    result = {
+        "score": 55.0,
+        "ratio": np.nan,            # kompatibilitás: sprint ratio, ha van
+        "md": "",
+        "match_sprint": np.nan,
+        "peak_sprint": np.nan,
+        "sprint_ratio": np.nan,
+        "sprint_md": "",
+        "hsr_ratio": np.nan,
+        "hsr_md": "",
+        "match_hsr": np.nan,
+        "peak_hsr": np.nan,
+        "valid": False,
+        "reason": "",
+        "reference_source": "",
+        "target": "MD-4/MD-3 fő napon a saját /90 meccs HSR- és sprintreferencia kb. 35–60%-a",
+    }
+    if daily is None or daily.empty:
+        result["reason"] = "Nincs értékelhető napi profil."
+        return result
+
+    train = daily[daily.get("session_type", pd.Series("", index=daily.index)).astype(str).eq("Edzés")].copy()
+    if train.empty:
+        result["reason"] = "Nincs értékelhető edzésadat."
+        return result
+
+    md_series = train.get("md_label", pd.Series("", index=train.index)).astype(str).str.upper().str.replace(" ", "", regex=False)
+    eligible_labels = {"MD-5", "MD-4", "MD-3", "MD-2", "MD-1"}
+    eligible = train[md_series.isin(eligible_labels)].copy()
+    post_match = train[md_series.str.startswith("MD+")].copy()
+    if eligible.empty:
+        result["score"] = 25.0 if not post_match.empty else 45.0
+        result["reason"] = (
+            "Csak meccs utáni MD+ edzésen látható nagysebességű inger; ez nem a következő meccs előtti expozíció."
+            if not post_match.empty else
+            "Nincs MD-5–MD-1 közé sorolt, értékelhető sebességi edzés."
+        )
+        return result
+
+    def _ref(metric: str) -> float:
+        col = f"match_reference_{metric}"
+        if col in daily.columns:
+            vals = pd.to_numeric(daily[col], errors="coerce").dropna()
+            if not vals.empty and float(vals.iloc[0]) > 0:
+                return float(vals.iloc[0])
+        # Fallback: csak ha történeti referencia tényleg nincs.
+        match = daily[daily.get("session_type", pd.Series("", index=daily.index)).astype(str).eq("Meccs")]
+        if metric in match.columns and not match.empty:
+            vals = pd.to_numeric(match[metric], errors="coerce").dropna()
+            if not vals.empty and float(vals.median()) > 0:
+                return float(vals.median())
+        return np.nan
+
+    sprint_ref = _ref("sprint_distance")
+    hsr_ref = _ref("hsr_distance")
+    sprint = _fpi_v418_peak_exposure(eligible, "sprint_distance", sprint_ref)
+    hsr = _fpi_v418_peak_exposure(eligible, "hsr_distance", hsr_ref)
+
+    subs = [x for x in [sprint, hsr] if x.get("valid")]
+    if not subs:
+        result["reason"] = "Nincs összevethető HSR- vagy sprinttáv és saját meccsreferencia."
+        return result
+
+    # Azonos súly: egyik dimenzió se fedje el a másik hiányát.
+    score = float(np.mean([float(x["score"]) for x in subs]))
+    reference_source = ""
+    if "_fpi_match_reference_source" in daily.columns:
+        vals = daily["_fpi_match_reference_source"].dropna().astype(str)
+        reference_source = vals.iloc[0] if len(vals) else ""
+    result.update({
+        "score": max(0.0, min(100.0, score)),
+        "valid": True,
+        "reference_source": reference_source or "saját mezőnyjátékos /90 meccsreferencia",
+        "sprint_ratio": sprint.get("ratio", np.nan),
+        "sprint_md": sprint.get("md", ""),
+        "match_sprint": sprint_ref,
+        "peak_sprint": sprint.get("peak", np.nan),
+        "hsr_ratio": hsr.get("ratio", np.nan),
+        "hsr_md": hsr.get("md", ""),
+        "match_hsr": hsr_ref,
+        "peak_hsr": hsr.get("peak", np.nan),
+        # Régi hívók kompatibilitása.
+        "ratio": sprint.get("ratio", hsr.get("ratio", np.nan)),
+        "md": sprint.get("md", hsr.get("md", "")),
+    })
+
+    parts = []
+    if sprint.get("valid"):
+        sr = float(sprint["ratio"])
+        state = (
+            "célzónában"
+            if FPI_SPEED_MAIN_TARGET_LOW_V418 <= sr <= FPI_SPEED_MAIN_TARGET_HIGH_V418
+            and sprint.get("md") in {"MD-4", "MD-3"}
+            else "alacsony"
+            if sr < FPI_SPEED_MAIN_TARGET_LOW_V418
+            else "magas / kontextust igényel"
+            if sr > FPI_SPEED_HIGH_REVIEW_V418
+            else "elfogadható"
+        )
+        parts.append(f"sprint {sr:.0%} ({sprint.get('md')}, {state})")
+    if hsr.get("valid"):
+        hr = float(hsr["ratio"])
+        state = (
+            "célzónában"
+            if FPI_SPEED_MAIN_TARGET_LOW_V418 <= hr <= FPI_SPEED_MAIN_TARGET_HIGH_V418
+            and hsr.get("md") in {"MD-4", "MD-3"}
+            else "alacsony"
+            if hr < FPI_SPEED_MAIN_TARGET_LOW_V418
+            else "magas / kontextust igényel"
+            if hr > FPI_SPEED_HIGH_REVIEW_V418
+            else "elfogadható"
+        )
+        parts.append(f"HSR {hr:.0%} ({hsr.get('md')}, {state})")
+    result["reason"] = "; ".join(parts) if parts else "A nagysebességű inger részben értékelhető."
+    return result
+
+
+# --- Heti fingerprint: ne játékossor-csapatösszeg, hanem játékos heti kumuláció -> mezőnyjátékos-medián. ---
+def _fpi_v418_weekly_population_profile(data: pd.DataFrame) -> pd.DataFrame:
+    if data is None or data.empty or "week" not in data.columns or "player_name" not in data.columns:
+        return pd.DataFrame()
+    work = _fpi_v418_field_players(data)
+    if work.empty:
+        return pd.DataFrame()
+
+    additive = [
+        c for c in [
+            "training_load", "total_distance", "sprint_distance", "hsr_distance",
+            "acc_count", "dec_count", "high_efforts", "duration_min",
+        ] if c in work.columns
+    ]
+    rows = []
+    for (week, player), g in work.groupby(["week", "player_name"], dropna=False, sort=False):
+        row = {"week": str(week), "player_name": player}
+        for c in additive:
+            vals = pd.to_numeric(g[c], errors="coerce")
+            row[c] = vals.sum(min_count=1)
+        if "total_distance" in row and "duration_min" in row:
+            dur = row.get("duration_min")
+            row["distance_per_min"] = row.get("total_distance") / dur if pd.notna(dur) and dur > 0 else np.nan
+        elif "distance_per_min" in g.columns:
+            vals = pd.to_numeric(g["distance_per_min"], errors="coerce")
+            row["distance_per_min"] = vals.median() if vals.notna().any() else np.nan
+        if "max_speed" in g.columns:
+            vals = pd.to_numeric(g["max_speed"], errors="coerce")
+            row["max_speed"] = vals.max() if vals.notna().any() else np.nan
+        if "hrv" in g.columns:
+            vals = pd.to_numeric(g["hrv"], errors="coerce")
+            row["hrv"] = vals.mean() if vals.notna().any() else np.nan
+        rows.append(row)
+
+    pp = pd.DataFrame(rows)
+    if pp.empty:
+        return pp
+    weekly_rows = []
+    metric_cols = [c for c in pp.columns if c not in {"week", "player_name"}]
+    for week, g in pp.groupby("week", sort=False):
+        row = {"week": str(week), "players": int(g["player_name"].nunique())}
+        for c in metric_cols:
+            vals = pd.to_numeric(g[c], errors="coerce")
+            if c == "max_speed":
+                row[c] = float(vals.max()) if vals.notna().any() else np.nan
+            else:
+                row[c] = float(vals.median()) if vals.notna().any() else np.nan
+        weekly_rows.append(row)
+    return pd.DataFrame(weekly_rows)
+
+
+def build_weekly_fingerprints(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty or "week" not in df.columns:
+        return pd.DataFrame()
+    work = _fpi_v418_field_players(df)
+    weekly = _fpi_v418_weekly_population_profile(work)
+    if weekly.empty:
+        return weekly
+
+    train = work[work.get("session_type", pd.Series("", index=work.index)).astype(str).eq("Edzés")].copy()
+    train_weekly = _fpi_v418_weekly_population_profile(train)
+    if not train_weekly.empty:
+        train_weekly = train_weekly.drop(columns=["players"], errors="ignore").add_prefix("train_")
+        train_weekly = train_weekly.rename(columns={"train_week": "week"})
+        weekly = weekly.merge(train_weekly, on="week", how="left")
+
+    match = work[work.get("session_type", pd.Series("", index=work.index)).astype(str).eq("Meccs")].copy()
+    match_weekly = _fpi_v418_weekly_population_profile(match)
+    if not match_weekly.empty:
+        match_weekly = match_weekly.drop(columns=["players"], errors="ignore").add_prefix("match_")
+        match_weekly = match_weekly.rename(columns={"match_week": "week"})
+        weekly = weekly.merge(match_weekly, on="week", how="left")
+
+    weekly = weekly.sort_values("week").reset_index(drop=True)
+    for metric in ["training_load", "sprint_distance", "distance_per_min", "max_speed", "dec_count", "high_efforts"]:
+        if metric in weekly.columns:
+            weekly[f"{metric}_rolling4"] = pd.to_numeric(weekly[metric], errors="coerce").rolling(4, min_periods=2).median()
+            weekly[f"{metric}_change"] = pd.to_numeric(weekly[metric], errors="coerce").pct_change(fill_method=None)
+
+    contexts = []
+    for idx, row in weekly.iterrows():
+        contexts.append(classify_week_context(row, weekly.iloc[:idx]))
+    weekly["periodizacios_tipus"] = contexts
+    weekly.attrs["fpi_aggregation"] = "mezőnyjátékos heti kumuláció -> medián"
+    return weekly
+
+
+# A periodizációs kontextus saját mediánhoz, ne átlaghoz viszonyítson.
+_fpi_v418_base_classify_week_context = classify_week_context
+
+def classify_week_context(weekly_row: pd.Series, history: pd.DataFrame) -> str:
+    if history is None or history.empty:
+        return "Tanuló hét"
+    load = weekly_row.get("training_load", np.nan)
+    sprint = weekly_row.get("sprint_distance", np.nan)
+    intensity = weekly_row.get("distance_per_min", np.nan)
+    hist_load = pd.to_numeric(history.get("training_load", pd.Series(dtype=float)), errors="coerce").dropna()
+    hist_sprint = pd.to_numeric(history.get("sprint_distance", pd.Series(dtype=float)), errors="coerce").dropna()
+    if len(hist_load) >= 3 and pd.notna(load):
+        base = float(hist_load.median())
+        if base > 0:
+            ratio = float(load) / base
+            if ratio > 1.18:
+                return "Terhelésépítő / overload hét"
+            if ratio < 0.82:
+                return "Recovery / alulterhelt hét"
+    if len(hist_sprint) >= 3 and pd.notna(sprint):
+        base = float(hist_sprint.median())
+        if base > 0 and float(sprint) / base < 0.75:
+            return "Intenzitáshiányos hét"
+    if pd.notna(intensity) and "distance_per_min" in history.columns:
+        vals = pd.to_numeric(history["distance_per_min"], errors="coerce").dropna()
+        if len(vals) >= 3 and float(vals.median()) > 0 and float(intensity) / float(vals.median()) > 1.12:
+            return "Intenzitásfókuszú hét"
+    return "Normál hét"
+
+
+# --- Heti edzés vs meccs benchmark: mindkét oldalon mezőnyjátékos. ---
+_fpi_v418_base_training_match_ratios = _fpi_v300_training_match_ratios
+
+def _fpi_v300_training_match_ratios(
+    analysis_df: pd.DataFrame,
+    master_df: pd.DataFrame,
+) -> pd.DataFrame:
+    return _fpi_v418_base_training_match_ratios(
+        _fpi_v418_field_players(analysis_df),
+        _fpi_v418_field_players(master_df),
+    )
+
+
+# Poszt-súlyozott mezőnybenchmarkból a kapus teljesen kimarad.
+_fpi_v418_base_composition_ranges = _fpi_composition_reference_ranges_v116
+
+def _fpi_composition_reference_ranges_v116(
+    df: pd.DataFrame,
+    week: str,
+    metric: str,
+) -> Tuple[str, str, float, float, float, float, str]:
+    return _fpi_v418_base_composition_ranges(_fpi_v418_field_players(df), week, metric)
+
+
+
+def _fpi_v418_playstyle_ratios(df: pd.DataFrame, selected_week: str) -> Dict[str, float]:
+    """Tipikus edzés-session / saját mezőnyjátékos /90 meccsref arányok."""
+    daily = build_microcycle_table(df, selected_week)
+    if daily is None or daily.empty:
+        return {}
+    tr = daily[daily["session_type"].astype(str).eq("Edzés")].copy()
+    if tr.empty:
+        return {}
+    ratios: Dict[str, float] = {}
+    for metric in [
+        "distance_per_min", "total_distance", "hsr_distance",
+        "sprint_distance", "high_efforts", "training_load",
+    ]:
+        vals = pd.to_numeric(tr.get(metric, pd.Series(dtype=float)), errors="coerce").dropna()
+        if vals.empty:
+            continue
+        training_value = float(vals.median())
+        if metric == "distance_per_min":
+            ref = pd.to_numeric(
+                daily.get("match_reference_distance_per_min", pd.Series(dtype=float)),
+                errors="coerce",
+            ).dropna()
+        else:
+            ref = pd.to_numeric(
+                daily.get(f"match_reference_{metric}", pd.Series(dtype=float)),
+                errors="coerce",
+            ).dropna()
+        ref_value = float(ref.iloc[0]) if len(ref) else np.nan
+        if pd.notna(ref_value) and ref_value > 0:
+            ratios[metric] = training_value / ref_value
+    return ratios
+
+
+def _fpi_v418_band_score(value_ratio: float, low_pct: float, high_pct: float) -> float:
+    """Referenciazóna-illeszkedés. A zóna nem optimum, hanem operatív benchmark."""
+    if pd.isna(value_ratio) or low_pct <= 0 or high_pct <= 0:
+        return np.nan
+    value_pct = float(value_ratio) * 100.0
+    low_pct, high_pct = float(low_pct), float(high_pct)
+    if low_pct <= value_pct <= high_pct:
+        return 90.0
+    if value_pct < low_pct:
+        return max(30.0, min(90.0, 90.0 * value_pct / low_pct))
+    # A magasabb érték ne legyen automatikusan "rossz", de jelezze, hogy a
+    # célzónán kívül van és frissességi kontextust igényel.
+    return max(55.0, min(85.0, 90.0 * high_pct / value_pct))
+
+
+def _fpi_v418_playstyle_component(df: pd.DataFrame, selected_week: str, playstyle: str) -> float:
+    """Játékmodell-illeszkedés a már meglévő benchmarkmotor session-zónái alapján.
+
+    Nem követeli meg, hogy egy teljes edzés 90%-ban reprodukálja a meccs
+    átlagintenzitását; ez a korábbi szabály túl szigorú volt. Ehelyett az FPI
+    ugyanazt a kor/szint/poszt/játékmodell-differenciált session referenciazónát
+    használja, mint a benchmarktábla.
+    """
+    ratios = _fpi_v418_playstyle_ratios(df, selected_week)
+    if not ratios:
+        return 70.0
+    p = _norm_mapping_text(playstyle)
+    if any(k in p for k in ["press", "letamadas", "letámadás"]):
+        weights = {"hsr_distance": .30, "high_efforts": .30, "total_distance": .20, "sprint_distance": .20}
+    elif any(k in p for k in ["transition", "atmenet", "átmenet", "direkt"]):
+        weights = {"sprint_distance": .35, "hsr_distance": .30, "high_efforts": .20, "total_distance": .15}
+    elif any(k in p for k in ["possession", "dominancia", "labdabirtok"]):
+        weights = {"total_distance": .35, "training_load": .25, "high_efforts": .20, "hsr_distance": .20}
+    elif any(k in p for k in ["low block", "mely blokk", "mély blokk"]):
+        weights = {"hsr_distance": .30, "sprint_distance": .25, "high_efforts": .25, "total_distance": .20}
+    else:
+        weights = {"total_distance": .30, "hsr_distance": .25, "sprint_distance": .20, "high_efforts": .25}
+
+    scored = []
+    used_weights = []
+    field = _fpi_v418_field_players(df)
+    for metric, weight in weights.items():
+        if metric not in ratios:
+            continue
+        try:
+            _, _, _, _, avg_low, avg_high, _ = _fpi_composition_reference_ranges_v116(
+                field, selected_week, metric
+            )
+            metric_score = _fpi_v418_band_score(ratios[metric], avg_low, avg_high)
+        except Exception:
+            metric_score = np.nan
+        if pd.notna(metric_score):
+            scored.append(float(metric_score) * float(weight))
+            used_weights.append(float(weight))
+    if not used_weights:
+        return 70.0
+    return max(0.0, min(100.0, sum(scored) / sum(used_weights)))
+
+
+# A meglévő readiness-motor minden más szabályát megtartjuk, de a V418 daily/weekly
+# motor miatt Speed Exposure és trend már helyes. A játékmodell-részt utólag ugyanarra
+# az alma-alma aggregációra igazítjuk.
+_fpi_v418_base_readiness = calculate_readiness_score
+
+def calculate_readiness_score(
+    df: pd.DataFrame,
+    selected_week: str,
+    playstyle: str,
+) -> Tuple[int, Dict[str, float], List[str]]:
+    score, components, reasons = _fpi_v418_base_readiness(df, selected_week, playstyle)
+    components = dict(components or {})
+    reasons = list(reasons or [])
+    old_fit = float(components.get("playstyle_fit", 70) or 70)
+    old_adj = -8 if old_fit < 60 else 3 if old_fit > 80 else 0
+    new_fit = _fpi_v418_playstyle_component(df, selected_week, playstyle)
+    new_adj = -8 if new_fit < 60 else 3 if new_fit > 80 else 0
+    score = int(max(0, min(100, round(float(score) - old_adj + new_adj))))
+    components["playstyle_fit"] = max(0.0, min(100.0, new_fit))
+    reasons = [r for r in reasons if "játékmodell" not in str(r).lower()]
+    if new_fit < 60:
+        reasons.append(f"A session-medián / saját meccsreferencia alapján a heti profil nem illeszkedik elég jól a(z) {playstyle} játékmodellhez.")
+    return score, components, reasons
+
+
+# Readiness magyarázat: ugyanazok a nevezők, amiket a pontszám használ.
+_fpi_v418_base_readiness_details = _fpi_v407_readiness_component_details
+
+def _fpi_v407_readiness_component_details(
+    df: pd.DataFrame,
+    selected_week: str,
+    playstyle: str,
+    components: Dict[str, float],
+) -> Dict[str, str]:
+    details = dict(_fpi_v418_base_readiness_details(df, selected_week, playstyle, components) or {})
+    daily = build_microcycle_table(df, selected_week)
+    speed = _fpi_v408_speed_exposure_assessment(daily)
+    if speed.get("valid"):
+        parts = []
+        if pd.notna(speed.get("sprint_ratio", np.nan)):
+            parts.append(
+                f"sprint: {float(speed['sprint_ratio']):.0%} ({speed.get('sprint_md')})"
+            )
+        if pd.notna(speed.get("hsr_ratio", np.nan)):
+            parts.append(
+                f"HSR: {float(speed['hsr_ratio']):.0%} ({speed.get('hsr_md')})"
+            )
+        details["speed_exposure"] = (
+            f"A fő meccs előtti nagysebességű nap a saját /90 meccsreferenciához képest "
+            f"{', '.join(parts)}. {str(speed.get('reason', '')).capitalize()}. "
+            f"Operatív referenciazóna: {speed.get('target')}. "
+            f"Referenciaforrás: {speed.get('reference_source')}. "
+            "Az MD+1 nem számít bele a következő mérkőzés előtti Speed Exposure értékelésébe."
+        )
+    else:
+        details["speed_exposure"] = (
+            f"{speed.get('reason')} Operatív referenciazóna: {speed.get('target')}."
+        )
+
+    ratios = _fpi_v418_playstyle_ratios(df, selected_week)
+    ratio_text = []
+    for metric, label in [
+        ("distance_per_min", "intenzitás"),
+        ("total_distance", "össztáv"),
+        ("hsr_distance", "HSR"),
+        ("sprint_distance", "sprint"),
+        ("high_efforts", "High Efforts"),
+    ]:
+        if metric in ratios and pd.notna(ratios[metric]):
+            ratio_text.append(f"{label} {ratios[metric]:.0%} a saját /90 meccsreferenciához képest")
+    fit = float(components.get("playstyle_fit", 70) or 70)
+    fit_meaning = "jól támogatja" if fit >= 75 else "részben támogatja" if fit >= 55 else "nem támogatja elég erősen"
+    details["playstyle_fit"] = (
+        f"{', '.join(ratio_text)}; a játékmodell-pont a kor/szint/poszt/játékmodell-differenciált session benchmarkzónákhoz mérve {fit_meaning} a(z) {playstyle} modellt."
+        if ratio_text
+        else f"Nincs teljes, azonos aggregációjú edzés–meccs összevetés; a(z) {playstyle} játékmodell-illeszkedés előzetes."
+    )
+    return details
+
+
+# Readiness definícióban is legyen egyértelmű: HSR + sprint, saját /90 referencia.
+_fpi_v418_base_readiness_breakdown = _fpi_v302_readiness_breakdown
+
+def _fpi_v302_readiness_breakdown(
+    score: int,
+    components: Dict[str, float],
+    reasons: List[str],
+    component_details: Optional[Dict[str, str]] = None,
+) -> pd.DataFrame:
+    out = _fpi_v418_base_readiness_breakdown(score, components, reasons, component_details)
+    if out is not None and not out.empty and "Komponens" in out.columns and "Magyarázat" in out.columns:
+        mask = out["Komponens"].astype(str).eq("Sebességi expozíció")
+        if mask.any():
+            for idx in out.index[mask]:
+                text = str(out.at[idx, "Magyarázat"])
+                old = (
+                    "A HSR/sprint jellegű, nagy futósebességű inger dózisa és időzítése a saját "
+                    "meccs-sprintreferenciához képest."
+                )
+                new = (
+                    "A HSR- és sprintinger dózisa és időzítése a saját mezőnyjátékos /90 "
+                    "meccsreferenciákhoz képest."
+                )
+                out.at[idx, "Magyarázat"] = text.replace(old, new)
+    return out
+
+
+# A régi insightokban több raw-player-row átlag volt. A sebesség- és load-jelzéseket
+# egységes V418 motorból állítjuk elő; a többi régi insightot megtartjuk.
+_fpi_v418_base_team_insights = team_insights
+
+def team_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
+    base = _fpi_v418_base_team_insights(_fpi_v418_field_players(df), selected_week)
+    remove_titles = {
+        "Alacsony sprintterhelés",
+        "Heti terhelési kiugrás",
+        "Heti terheléscsökkenés",
+        "Meccsintenzitási eltérés",
+        "Magas lassítási terhelés",
+        "Maximális sebesség visszaesése",
+    }
+    out = [x for x in base if getattr(x, "title", "") not in remove_titles]
+
+    daily = build_microcycle_table(df, selected_week)
+    speed = _fpi_v408_speed_exposure_assessment(daily)
+    if speed.get("valid") and float(speed.get("score", 55) or 55) < 65:
+        severity = "KRITIKUS" if float(speed.get("score", 55) or 55) < 50 else "FIGYELMEZTETÉS"
+        out.append(Insight(
+            "Nagysebességű expozíció",
+            severity,
+            f"{speed.get('reason')}.",
+            "A HSR és sprint külön meccsreferenciához viszonyítva mutatja, hogy a fő speed nap dózisa megfelelő-e.",
+            "A fő nagysebességű ingert elsősorban MD-4/MD-3 környékén, a játékosállapot és az edzéstartalom figyelembevételével érdemes elhelyezni.",
+        ))
+
+    weekly = build_weekly_fingerprints(df)
+    cur = weekly[weekly["week"].astype(str).eq(str(selected_week))] if not weekly.empty else pd.DataFrame()
+    if not cur.empty:
+        chg = cur.iloc[0].get("training_load_change", np.nan)
+        if pd.notna(chg):
+            if chg > .25:
+                out.append(Insight(
+                    "Heti terhelési kiugrás", "FIGYELMEZTETÉS",
+                    f"A mezőnyjátékos heti kumulált terhelés mediánja {chg:.0%}-kal nőtt az előző héthez képest.",
+                    "A játékossorok nyers összege helyett azonos populációjú heti mediánt hasonlítunk.",
+                    "Ellenőrizd a következő napok terhelését és az egyéni reakciókat.",
+                ))
+            elif chg < -.25:
+                out.append(Insight(
+                    "Heti terheléscsökkenés", "INFORMÁCIÓ",
+                    f"A mezőnyjátékos heti kumulált terhelés mediánja {abs(chg):.0%}-kal csökkent az előző héthez képest.",
+                    "Ez lehet tudatos frissítés, de lehet alulexpozíció is.",
+                    "A hét típusával, meccsterheléssel és hiányzásokkal együtt értelmezd.",
+                ))
+
+    ratios = _fpi_v418_playstyle_ratios(df, selected_week)
+    ir = ratios.get("distance_per_min", np.nan)
+    if pd.notna(ir) and ir < .85:
+        out.append(Insight(
+            "Meccsintenzitási eltérés", "FIGYELMEZTETÉS",
+            f"Az edzések session-medián táv/perc értéke a saját /90 meccsintenzitás kb. {ir:.0%}-a.",
+            "A tipikus edzésintenzitás elmarad a mérkőzés tempójától.",
+            "Rövidebb, intenzívebb játékszituációkkal vagy tudatos tempóváltásokkal lehet közelíteni, ha ez illik a heti célhoz.",
+        ))
+    return sorted(out, key=lambda x: SEVERITY_RANK.get(x.severity, 9))[:8]
+
+
+_fpi_v418_base_microcycle_insights = microcycle_insights
+
+def microcycle_insights(df: pd.DataFrame, selected_week: str) -> List[Insight]:
+    base = _fpi_v418_base_microcycle_insights(df, selected_week)
+    remove_titles = {"Hiányzó maximális sebességű inger", "Alacsony maximális sebességű inger"}
+    out = [x for x in base if getattr(x, "title", "") not in remove_titles]
+    speed = _fpi_v408_speed_exposure_assessment(build_microcycle_table(df, selected_week))
+    if speed.get("valid") and float(speed.get("score", 55) or 55) < 65:
+        out.append(Insight(
+            "Sebességi expozíció kontroll",
+            "KRITIKUS" if float(speed.get("score", 55) or 55) < 50 else "FIGYELMEZTETÉS",
+            f"{speed.get('reason')}.",
+            "A sprint és HSR külön saját /90 meccsreferenciához viszonyítva, az MD-időzítéssel együtt kerül értékelésre.",
+            "A fő speed blokk dózisát és helyét az MD-4/MD-3 környékén kontrolláld; MD-1-en csak rövid aktiváció maradjon.",
+            scope="Mikrociklus",
+        ))
+    return out
+
+
+# Játékmodell-insightokban se raw player-row átlag legyen.
+def playstyle_insights(df: pd.DataFrame, selected_week: str, playstyle: str) -> List[Insight]:
+    p = _norm_mapping_text(playstyle)
+    if not p or "kiegyensulyozott" in p or "kiegyensúlyozott" in p:
+        return []
+    ratios = _fpi_v418_playstyle_ratios(df, selected_week)
+    intensity = ratios.get("distance_per_min", np.nan)
+    sprint = ratios.get("sprint_distance", np.nan)
+    efforts = ratios.get("high_efforts", np.nan)
+    insights = []
+    if any(k in p for k in ["press", "letamadas", "letámadás"]):
+        if pd.notna(intensity) and intensity < .90:
+            insights.append(Insight(
+                "Pressing profil: intenzitáshiány", "FIGYELMEZTETÉS",
+                f"A session-medián edzésintenzitás a saját meccsintenzitás kb. {intensity:.0%}-a.",
+                "Pressing modellnél rendszeresen szükség van magas munkasűrűségű helyzetekre.",
+                "Rövidebb, nagy nyomású, pressing-specifikus blokkokkal kontrolláltan emelhető.",
+                scope="Játékmodell",
+            ))
+        if pd.notna(efforts) and efforts < .75:
+            insights.append(Insight(
+                "Pressing profil: kevés nagy intenzitású erőfeszítés", "FIGYELMEZTETÉS",
+                f"A tipikus edzés High Efforts profilja a saját /90 meccsreferencia kb. {efforts:.0%}-a.",
+                "A gyorsítások, lassítások és ismételt intenzív akciók fontosak a pressing identitáshoz.",
+                "Az ismételt intenzív akciókat tartalmazó gyakorlatok arányát érdemes kontextusban ellenőrizni.",
+                scope="Játékmodell",
+            ))
+    elif any(k in p for k in ["transition", "atmenet", "átmenet", "direkt"]):
+        if pd.notna(sprint) and sprint < .35:
+            insights.append(Insight(
+                "Átmeneti profil: alacsony sprintinger", "FIGYELMEZTETÉS",
+                f"A tipikus edzés sprinttávja a saját /90 meccsreferencia kb. {sprint:.0%}-a.",
+                "Átmenetekre építő modellben fontos a rendszeres nagy területű sebességi inger.",
+                "Célzott átmeneti játék vagy nagyobb területű futóhelyzet adható a megfelelő MD-napon.",
+                scope="Játékmodell",
+            ))
+    return insights
+
+
+# Trendgrafikon: Barinnál ne "Load-trend" legyen a cím és az egység.
+_fpi_v418_base_aligned_comparison = _fpi_v204_aligned_comparison
+
+def _fpi_v204_aligned_comparison(df: pd.DataFrame, week: str, blocked: set) -> pd.DataFrame:
+    out = _fpi_v418_base_aligned_comparison(df, week, blocked)
+    if out is not None and isinstance(out, pd.DataFrame):
+        out.attrs["fpi_load_kind"] = _fpi_v417_load_kind(df)
+    return out
+
+
+def _fpi_v304_trend_charts(aligned: pd.DataFrame):
+    if aligned is None or aligned.empty:
+        return Spacer(1, 0)
+    charts = []
+    labels = aligned["Hét"].astype(str).tolist() if "Hét" in aligned else [str(i + 1) for i in range(len(aligned))]
+    load_kind = str((getattr(aligned, "attrs", {}) or {}).get("fpi_load_kind", "load"))
+    load_title = "Időarányos HMLD-trend" if load_kind == "hmld" else "Időarányos Load-trend"
+    load_suffix = " m" if load_kind == "hmld" else ""
+    for col, title, suffix in [
+        ("Medián load", load_title, load_suffix),
+        ("Medián HSR", "Időarányos HSR-trend", " m"),
+    ]:
+        if col in aligned.columns:
+            charts.append(
+                _fpi_v401_compact_bar_chart(
+                    list(zip(labels, pd.to_numeric(aligned[col], errors="coerce"))),
+                    title, 13.4, 4.1, suffix, max_items=6
+                )
+            )
+    return Table([charts[:2]], colWidths=[13.7 * cm] * len(charts[:2])) if charts else Spacer(1, 0)
+
+
+# Production önellenőrzési segéd: nem állítja le az appot, de a fejlesztői tesztekhez
+# egy helyen ellenőrzi a legfontosabb invariánsokat.
+def _fpi_v418_integrity_check(df: pd.DataFrame, selected_week: Optional[str] = None) -> Dict[str, object]:
+    issues = []
+    if df is None or df.empty:
+        return {"ok": False, "issues": ["Nincs adat."], "checks": {}}
+    work = _fpi_v418_field_players(df)
+    checks = {}
+
+    for metric_a, metric_b, label in [
+        ("sprint_distance", "hsr_distance", "Sprint <= HSR"),
+        ("hsr_distance", "total_distance", "HSR <= össztáv"),
+    ]:
+        if metric_a in work.columns and metric_b in work.columns:
+            a = pd.to_numeric(work[metric_a], errors="coerce")
+            b = pd.to_numeric(work[metric_b], errors="coerce")
+            valid = (a.isna() | b.isna() | (a <= b * 1.02))
+            checks[label] = bool(valid.all())
+            if not valid.all():
+                issues.append(f"{label} sérül {int((~valid).sum())} sorban.")
+
+    ref = _fpi_v300_match_reference(work)
+    checks["match_reference_available"] = bool(ref.get("available"))
+    checks["match_events"] = int(ref.get("match_events", 0) or 0)
+
+    if selected_week and "week" in work.columns and work["week"].astype(str).eq(str(selected_week)).any():
+        daily = build_microcycle_table(work, selected_week)
+        speed = _fpi_v408_speed_exposure_assessment(daily)
+        checks["speed_valid"] = bool(speed.get("valid"))
+        checks["speed_score"] = round(float(speed.get("score", 55) or 55), 1)
+        if speed.get("valid"):
+            checks["speed_sprint_ratio"] = speed.get("sprint_ratio")
+            checks["speed_hsr_ratio"] = speed.get("hsr_ratio")
+    return {"ok": not issues, "issues": issues, "checks": checks}
+
+
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
