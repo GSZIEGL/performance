@@ -75,7 +75,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V422_PASSWORD_CHANGE_DUAL_AUTH_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V423_CLEAN_DEMO_PRODUCTION_SAMPLES_2026_08_13"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -14471,14 +14471,9 @@ def build_fpi_own_team_profile_sample_pdf_bytes() -> Optional[bytes]:
     }
 
     try:
-        demo_raw = build_demo_performance_data()
-        demo_df, _, missing = standardize_dataframe(demo_raw)
-        if missing or demo_df is None or demo_df.empty:
-            return None
-
-        demo_df = add_position_group(demo_df)
-        latest = _fpi_latest_week(demo_df)
-        if not latest:
+        demo_df = _fpi_v423_production_like_sample_df()
+        latest = _fpi_v423_sample_latest_week(demo_df)
+        if demo_df is None or demo_df.empty or not latest:
             return None
 
         tactical_ctx = _build_demo_tactical_context()
@@ -14541,9 +14536,9 @@ def build_fpi_own_team_profile_sample_pdf_bytes() -> Optional[bytes]:
         return build_fpi_own_team_profile_pdf_bytes(
             demo_df,
             latest,
-            "Kiegyensúlyozott",
+            "Magas letámadás",
             tactical_context=tactical_ctx,
-            demo_label="MINTA RIPORT / SAJÁT CSAPAT PROFIL",
+            demo_label="MINTA RIPORT / DEMO FC – SAJÁT CSAPAT",
         )
     except Exception:
         return None
@@ -14816,46 +14811,36 @@ def _fpi_landing_css_v100() -> None:
 
 
 def render_landing_login_panel_v103() -> None:
-    """Főoldali backward-compatible Demo/Pro belépő panel."""
+    """Főoldali backward-compatible Demo/Pro belépő panel – natív Streamlit elemekkel.
+
+    V423: nincs kézzel nyitott/zárt HTML <div>, így semmilyen nyers </div>
+    nem jelenhet meg a felületen.
+    """
     mode_label = "PRO" if is_pro_mode() else "DEMO"
-    mode_color = "#16A34A" if is_pro_mode() else "#2563EB"
     lic = st.session_state.get("license_status", {}) or {}
-    club = lic.get("club_name") or ""
-    full_name = lic.get("full_name") or lic.get("email") or ""
-    teams = _fpi_license_teams_text(lic)
+    club = str(lic.get("club_name") or "").strip()
+    full_name = str(lic.get("full_name") or lic.get("email") or "").strip()
+    teams = str(_fpi_license_teams_text(lic) or "").strip()
     auth_mode = str(lic.get("auth_mode") or "").lower()
 
-    extra_bits = []
-    if full_name:
-        extra_bits.append(html.escape(str(full_name)))
-    if club:
-        extra_bits.append(html.escape(str(club)))
-    if teams:
-        extra_bits.append("Csapat: " + html.escape(str(teams)))
-    if is_pro_mode():
-        extra_bits.append("névre szóló fiók" if auth_mode == "named" else "meglévő aktiváló kód")
-    extra = (" · " + " · ".join(extra_bits)) if extra_bits else ""
-
-    st.markdown(
-        f"""
-        <div style="border-radius:22px;padding:18px 20px;background:#ffffff;border:1px solid #e5e7eb;
-                    box-shadow:0 12px 28px rgba(15,23,42,.08);margin-bottom:18px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
-                <div>
-                    <div style="font-size:.82rem;font-weight:900;color:#64748b;letter-spacing:.06em;">HOZZÁFÉRÉS</div>
-                    <div style="font-size:1.55rem;font-weight:900;color:#0f172a;margin-top:2px;">
-                        Aktuális mód: <span style="color:{mode_color};">{mode_label}</span>
-                    </div>
-                    <div style="color:#64748b;font-size:.95rem;margin-top:4px;">
-                        {"Pro hozzáférés aktív" if is_pro_mode() else f"Demo limit: max {DEMO_PLAYER_LIMIT} játékos · max {DEMO_WEEK_LIMIT} hét · max {DEMO_ROW_LIMIT} sor"}
-                        {extra}
-                    </div>
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        st.caption("HOZZÁFÉRÉS")
+        st.subheader(f"Aktuális mód: {mode_label}")
+        if is_pro_mode():
+            details = ["Pro hozzáférés aktív"]
+            if full_name:
+                details.append(full_name)
+            if club:
+                details.append(club)
+            if teams:
+                details.append(f"Csapat: {teams}")
+            details.append("névre szóló fiók" if auth_mode == "named" else "meglévő aktiváló kód")
+            st.caption(" · ".join(details))
+        else:
+            st.caption(
+                f"Demo limit: max {DEMO_PLAYER_LIMIT} játékos · "
+                f"max {DEMO_WEEK_LIMIT} hét · max {DEMO_ROW_LIMIT} sor"
+            )
 
     auth_message = st.session_state.pop("_fpi_auth_message", None)
     if auth_message:
@@ -14869,56 +14854,8 @@ def render_landing_login_panel_v103() -> None:
                 st.rerun()
         return
 
-    with st.expander("🔐 Pro belépés", expanded=False):
-        st.caption("A korábban kiadott aktiváló kódok továbbra is érvényesek. Új licenceknél a névre szóló e-mail + jelszó belépést használd.")
-        login_type = st.radio(
-            "Belépés módja",
-            options=["E-mail + jelszó", "Meglévő aktiváló kód"],
-            horizontal=True,
-            key="landing_login_type_v421",
-        )
-        email = st.text_input(
-            "E-mail",
-            value=st.session_state.get("user_email", ""),
-            placeholder="nev@klub.hu",
-            key="landing_license_email_v103",
-        )
-        if email:
-            st.session_state["user_email"] = email
-
-        if login_type == "E-mail + jelszó":
-            password = st.text_input(
-                "Jelszó",
-                type="password",
-                help="A Supabase Auth-fiókod saját jelszava.",
-                key="landing_license_password_v421",
-            )
-            if st.button("Belépés", use_container_width=True, key="landing_activate_named_license_v421"):
-                result = login_named_user_supabase(email, password)
-                if result.get("ok"):
-                    st.session_state["license_status"] = result
-                    st.success("Sikeres Pro belépés.")
-                    st.rerun()
-                else:
-                    st.warning(result.get("message", "Sikertelen belépés."))
-            st.caption("Új / névre szóló licenc: a meghívó link először saját jelszó beállítására visz; utána az eszköz- és egyidejű session-korlát is érvényesül.")
-        else:
-            activation_code = st.text_input(
-                "Aktiváló kód",
-                type="password",
-                help="A korábban kapott aktiváló kód.",
-                key="landing_legacy_license_key_v421",
-            )
-            if st.button("Régi licenc aktiválása", use_container_width=True, key="landing_activate_legacy_license_v421"):
-                result = validate_legacy_license_supabase(email, activation_code)
-                if result.get("ok"):
-                    st.session_state["license_status"] = result
-                    st.session_state["_fpi_legacy_last_check"] = time.time()
-                    st.success("Meglévő Pro licenc aktiválva.")
-                    st.rerun()
-                else:
-                    st.warning(result.get("message", "Sikertelen aktiválás."))
-            st.caption("Régi kompatibilitási mód: a már kiküldött e-mail + aktiváló kód hozzáférésekhez.")
+    # A meglévő két belépési útvonal marad: névre szóló Supabase Auth és legacy aktiváló kód.
+    render_license_panel()
 
 
 def render_fpi_landing_page_v100() -> None:
@@ -14988,7 +14925,7 @@ def render_fpi_landing_page_v100() -> None:
         </div>
         """, unsafe_allow_html=True)
 
-    st.markdown('<div class="fpi-v137-section-title">Minta riportok</div>', unsafe_allow_html=True)
+    st.markdown('<div class="fpi-v137-section-title">Minta riportok – az éles exporttal azonos szerkezetben</div>', unsafe_allow_html=True)
     m1, m2, m3, m4, m5 = st.columns(5)
 
     def _fpi_safe_sample_v153(builder):
@@ -20568,21 +20505,24 @@ def build_fpi_tactical_only_pdf_bytes_v156(
 
 
 def build_fpi_tactical_only_sample_pdf_bytes_v156() -> Optional[bytes]:
-    return build_fpi_tactical_only_pdf_bytes_v156(_build_demo_tactical_context(), demo_label="MINTA RIPORT")
+    """Tactical-only minta: pontosan az éles Tactical-only renderelővel."""
+    return build_fpi_tactical_only_pdf_bytes_v156(
+        _build_demo_tactical_context(),
+        demo_label="MINTA RIPORT / DEMO FC – TACTICAL-ONLY",
+    )
 
 
 def build_fpi_integrated_sample_pdf_bytes_v156() -> Optional[bytes]:
-    demo_raw = build_demo_performance_data()
-    demo_df, _, missing = standardize_dataframe(demo_raw)
-    if missing or demo_df is None or demo_df.empty:
+    """GPS+taktikai minta: ugyanaz a production bundle/renderelő, mint éles exportnál."""
+    demo_df = _fpi_v423_production_like_sample_df()
+    latest = _fpi_v423_sample_latest_week(demo_df)
+    if demo_df is None or demo_df.empty or not latest:
         return None
-    demo_df = add_position_group(demo_df)
-    latest = _fpi_latest_week(demo_df)
     return build_fpi_product_pdf_bytes(
-        demo_df, latest, "Kiegyensúlyozott",
+        demo_df, latest, "Magas letámadás",
         report_type="executive",
         tactical_context=_build_demo_tactical_context(),
-        demo_label="MINTA RIPORT / GPS + TAKTIKAI",
+        demo_label="MINTA RIPORT / DEMO FC – GPS + TAKTIKAI",
     )
 
 
@@ -21722,36 +21662,124 @@ def _fpi_v204_aligned_comparison(df: pd.DataFrame, week: str, blocked: set) -> p
     return pd.DataFrame(rows)
 
 
-# A landing oldalon továbbra is egyetlen GPS-minta marad, de több teljes hetet mutat.
-def build_fpi_gps_only_sample_pdf_bytes() -> Optional[bytes]:
-    """Egyetlen, több teljes hetes GPS-minta; külön session/csonka hét minták nem készülnek."""
+# =============================================================================
+# V423 – Éles riporttal azonos minta-PDF pipeline
+# =============================================================================
+@st.cache_data(show_spinner=False)
+def _fpi_v423_production_like_sample_df() -> pd.DataFrame:
+    """Életszerű, 8 teljes mikrociklusos mintaadat az ÉLES renderelők tesztjéhez.
+
+    A minta PDF-ek nem külön statikus sablont használnak: ugyanazokat a
+    riport-renderelőket kapják, mint a klubok éles exportjai. A szintetikus
+    adat csak a bemenetet helyettesíti.
+    """
     demo_raw = build_demo_performance_data()
     demo_df, _, missing = standardize_dataframe(demo_raw)
-    if missing:
-        return None
+    if missing or demo_df is None or demo_df.empty:
+        return pd.DataFrame()
+
+    # Éleshez hasonló keretméret: 20 mezőnyjátékos + 3 kapus.
+    roster = [
+        ("Nagy Bence", "CB"), ("Kovács Márk", "CB"), ("Tóth Ádám", "FB"),
+        ("Szabó Levente", "FB"), ("Varga Dávid", "DM"), ("Molnár Máté", "CM"),
+        ("Farkas Bálint", "CM"), ("Horváth Patrik", "AM"), ("Kiss Zalán", "W"),
+        ("Takács Dániel", "W"), ("Balogh Gergő", "F"), ("Papp András", "F"),
+        ("Lakatos Milán", "CB"), ("Juhász Roland", "FB"), ("Oláh Kristóf", "DM"),
+        ("Simon Áron", "CM"), ("Fehér Botond", "AM"), ("Sipos Noel", "W"),
+        ("Kelemen Zsombor", "CM"), ("Bíró Dominik", "F"),
+        ("Pálfi Kristóf", "GK"), ("Ruisz Barnabás", "GK"), ("Szabados István", "GK"),
+    ]
+    source_players = demo_df["player_name"].dropna().astype(str).drop_duplicates().tolist()
+    if not source_players:
+        return pd.DataFrame()
+
+    blocks = []
+    additive = [
+        "total_distance", "hsr_distance", "sprint_distance", "training_load",
+        "muscle_load", "sprints", "high_efforts", "acc_count", "dec_count",
+        "acc_high", "dec_high", "speed_zone_4", "speed_zone_5",
+    ]
+    for idx, (name, position) in enumerate(roster):
+        template = source_players[idx % len(source_players)]
+        block = demo_df[demo_df["player_name"].astype(str).eq(str(template))].copy()
+        if block.empty:
+            continue
+        block["player_name"] = name
+        if "position" in block.columns:
+            block["position"] = position
+        scale = 0.90 + (idx % 11) * 0.018
+        if position == "GK":
+            scale = 0.72 + (idx % 3) * 0.025
+        for col in additive:
+            if col in block.columns:
+                vals = pd.to_numeric(block[col], errors="coerce")
+                metric_scale = scale
+                if position == "GK" and col in {"hsr_distance", "sprint_distance", "sprints", "speed_zone_4", "speed_zone_5"}:
+                    metric_scale *= 0.35
+                block[col] = vals * metric_scale
+        if "max_speed" in block.columns:
+            ms = pd.to_numeric(block["max_speed"], errors="coerce")
+            block["max_speed"] = ms - (2.8 if position == "GK" else 0.0) + ((idx % 5) - 2) * 0.18
+        blocks.append(block)
+
+    if not blocks:
+        return pd.DataFrame()
+    demo_df = pd.concat(blocks, ignore_index=True, sort=False)
     demo_df = add_position_group(demo_df)
     demo_df, _ = _fpi_v300_master_dataset(demo_df)
-    complete = _fpi_v411_complete_week_codes(demo_df)
-    if len(complete) < 4 and complete:
-        # A beépített demo korábban háromhetes volt. A legkorábbi teljes hetet
-        # egy héttel korábbra másoljuk, enyhén csökkentett fizikai értékekkel,
-        # hogy a minta valódi 4+ hetes trendkaput mutasson.
-        earliest = complete[0]
-        clone = demo_df[demo_df["week"].astype(str).eq(str(earliest))].copy()
-        if not clone.empty:
-            clone["start_time"] = pd.to_datetime(clone["start_time"], errors="coerce") - pd.Timedelta(days=7)
-            for col in ["duration_min", "total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts", "training_load", "acc_count", "dec_count", "acc_high", "dec_high"]:
-                if col in clone.columns:
-                    clone[col] = pd.to_numeric(clone[col], errors="coerce") * 0.94
-            if "session_id" in clone.columns:
-                clone["session_id"] = clone["session_id"].astype(str) + "_SAMPLE_PREV"
-            if "match_event_id" in clone.columns:
-                clone["match_event_id"] = clone["match_event_id"].astype(str) + "_SAMPLE_PREV"
-            demo_df = pd.concat([clone, demo_df], ignore_index=True, sort=False)
-            demo_df, _ = _fpi_v300_master_dataset(demo_df)
+
+    # A beépített demo 3 teljes hetes. Visszafelé klónozzuk 8 teljes hétig,
+    # hogy a trend, saját múlt és meccsreferencia ugyanúgy működjön, mint élesben.
+    guard = 0
+    while guard < 8:
+        guard += 1
+        complete = _fpi_v411_complete_week_codes(demo_df)
+        if len(complete) >= 8:
+            break
+        if not complete:
+            break
+        earliest = str(complete[0])
+        clone = demo_df[demo_df["week"].astype(str).eq(earliest)].copy()
+        if clone.empty:
+            break
+        clone["start_time"] = pd.to_datetime(clone["start_time"], errors="coerce") - pd.Timedelta(days=7)
+        hist_scale = max(0.88, 0.97 - 0.012 * guard)
+        for col in [
+            "total_distance", "hsr_distance", "sprint_distance", "training_load",
+            "muscle_load", "sprints", "high_efforts", "acc_count", "dec_count",
+            "acc_high", "dec_high", "speed_zone_4", "speed_zone_5",
+        ]:
+            if col in clone.columns:
+                clone[col] = pd.to_numeric(clone[col], errors="coerce") * hist_scale
+        for col in ["session_id", "match_event_id", "_fpi_event_id_v413"]:
+            if col in clone.columns:
+                clone[col] = clone[col].astype(str) + f"_SAMPLE_H{guard}"
+        demo_df = pd.concat([clone, demo_df], ignore_index=True, sort=False)
+        demo_df, _ = _fpi_v300_master_dataset(demo_df)
+
+    return demo_df
+
+
+def _fpi_v423_sample_latest_week(df: pd.DataFrame) -> Optional[str]:
+    if df is None or df.empty:
+        return None
+    complete = _fpi_v411_complete_week_codes(df)
+    if complete:
+        return str(complete[-1])
+    return _fpi_latest_week(df)
+
+
+# A landing oldalon továbbra is egyetlen GPS-minta marad, de több teljes hetet mutat.
+def build_fpi_gps_only_sample_pdf_bytes() -> Optional[bytes]:
+    """GPS minta: ugyanaz az éles PDF-renderelő, ugyanaz a teljes-mikrociklus scope."""
+    demo_df = _fpi_v423_production_like_sample_df()
+    latest = _fpi_v423_sample_latest_week(demo_df)
+    if demo_df is None or demo_df.empty or not latest:
+        return None
+    # Nincs külön minta-sablon és nincs eltérő főcím: ugyanaz a cím/szerkezet, mint élesben.
+    # A letöltési fájlnév és a szintetikus Demo FC adatok jelzik, hogy mintáról van szó.
     return build_fpi_gps_only_pdf_bytes(
-        demo_df, "__ALL__", "Magas presszing",
-        demo_label="MINTA RIPORT / TÖBBHETES, TELJES HETEK GPS-ONLY",
+        demo_df, latest, "Magas letámadás",
     )
 
 
@@ -22754,7 +22782,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V422_PASSWORD_CHANGE_DUAL_AUTH_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V423_CLEAN_DEMO_PRODUCTION_SAMPLES_2026_08_13"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -23046,7 +23074,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V422_PASSWORD_CHANGE_DUAL_AUTH_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V423_CLEAN_DEMO_PRODUCTION_SAMPLES_2026_08_13"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
