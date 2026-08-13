@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import html
+import base64
 import io
 import hashlib
 import secrets
@@ -14858,17 +14859,42 @@ def render_landing_login_panel_v103() -> None:
     render_license_panel()
 
 
+def _fpi_landing_logo_data_uri_v424() -> str:
+    """Repo-root logo.png -> data URI. Hiány esetén üres string, az app nem hibázik."""
+    try:
+        logo_path = Path(__file__).resolve().parent / "logo.png"
+        if not logo_path.exists() or not logo_path.is_file():
+            return ""
+        raw = logo_path.read_bytes()
+        if not raw:
+            return ""
+        return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+    except Exception:
+        return ""
+
+
 def render_fpi_landing_page_v100() -> None:
     _fpi_landing_css_v100()
     st.markdown(
         """
         <style>
         .fpi-v137-hero{border-radius:34px;padding:34px 38px;margin:8px 0 18px 0;background:radial-gradient(circle at 10% 8%,rgba(20,184,166,.20),transparent 30%),radial-gradient(circle at 90% 4%,rgba(37,99,235,.18),transparent 30%),linear-gradient(135deg,#ffffff 0%,#e0f2fe 54%,#ecfdf5 100%);border:1px solid #bfdbfe;box-shadow:0 26px 70px rgba(15,23,42,.16);color:#0f172a;}
+        .fpi-v137-hero-row{display:grid;grid-template-columns:minmax(0,1fr) 180px;gap:28px;align-items:start;}
+        .fpi-v137-hero-copy{min-width:0;}
+        .fpi-v137-logo-wrap{display:flex;justify-content:flex-end;align-items:flex-start;min-height:118px;}
+        .fpi-v137-logo{display:block;width:min(160px,100%);max-height:145px;object-fit:contain;filter:drop-shadow(0 8px 16px rgba(15,23,42,.10));}
         .fpi-v137-kicker{display:inline-block;padding:7px 13px;border-radius:999px;background:#ffffff;border:1px solid #93c5fd;color:#0f766e;font-weight:950;letter-spacing:.07em;font-size:.82rem;margin-bottom:12px;}
         .fpi-v137-title{font-size:3.25rem;line-height:.98;font-weight:980;letter-spacing:-.06em;color:#0f172a;margin:0 0 12px 0;max-width:980px;}
         .fpi-v137-sub{font-size:1.12rem;line-height:1.46;color:#334155;max-width:900px;margin-bottom:14px;}
         .fpi-v137-flow{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}
         .fpi-v137-flow span{display:inline-block;padding:8px 12px;border-radius:999px;background:#ffffff;border:1px solid #dbeafe;color:#0f172a;font-weight:850;font-size:.88rem;}
+        @media (max-width: 760px){
+            .fpi-v137-hero{padding:26px 24px;}
+            .fpi-v137-hero-row{grid-template-columns:1fr;gap:14px;}
+            .fpi-v137-logo-wrap{grid-row:1;justify-content:flex-start;min-height:0;}
+            .fpi-v137-logo{width:112px;max-height:96px;}
+            .fpi-v137-title{font-size:2.35rem;}
+        }
         .fpi-v137-login{border-radius:24px;padding:18px 20px;background:#ffffff;border:1px solid #dbeafe;box-shadow:0 14px 34px rgba(15,23,42,.10);margin-bottom:18px;}
         .fpi-v137-login b{font-size:1.15rem;color:#0f172a;}.fpi-v137-login span{color:#475569;}
         .fpi-v137-kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0 6px 0;}
@@ -14880,11 +14906,27 @@ def render_fpi_landing_page_v100() -> None:
         .stButton > button{border-radius:18px !important;min-height:54px !important;font-weight:950 !important;}
         .stDownloadButton > button{border-radius:18px !important;min-height:48px !important;font-weight:950 !important;}
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    logo_uri_v424 = _fpi_landing_logo_data_uri_v424()
+    logo_html_v424 = (
+        f'<div class="fpi-v137-logo-wrap"><img class="fpi-v137-logo" src="{logo_uri_v424}" alt="FPI logo"></div>'
+        if logo_uri_v424 else ""
+    )
+    st.markdown(
+        f"""
         <div class="fpi-v137-hero">
-            <div class="fpi-v137-kicker">FOOTBALL PERFORMANCE INTELLIGENCE</div>
-            <div class="fpi-v137-title">Vezetői riport 30 másodperc alatt.</div>
-            <div class="fpi-v137-sub">GPS exportból – és opcionálisan taktikai PDF/Excel anyagokból – azonnal kapsz heti állapotképet, játékoskockázatot, referencia-összevetést, ellenfél-specifikus fókuszokat és mikrociklus-javaslatot.</div>
-            <div class="fpi-v137-flow"><span>1. GPS / ZIP feltöltés</span><span>2. Heti kontextus</span><span>3. Tactical Pro+ input</span><span>4. Executive PDF</span></div>
+            <div class="fpi-v137-hero-row">
+                <div class="fpi-v137-hero-copy">
+                    <div class="fpi-v137-kicker">FOOTBALL PERFORMANCE INTELLIGENCE</div>
+                    <div class="fpi-v137-title">Vezetői riport 30 másodperc alatt.</div>
+                    <div class="fpi-v137-sub">GPS exportból – és opcionálisan taktikai PDF/Excel anyagokból – azonnal kapsz heti állapotképet, játékoskockázatot, referencia-összevetést, ellenfél-specifikus fókuszokat és mikrociklus-javaslatot.</div>
+                    <div class="fpi-v137-flow"><span>1. GPS / ZIP feltöltés</span><span>2. Heti kontextus</span><span>3. Tactical Pro+ input</span><span>4. Executive PDF</span></div>
+                </div>
+                {logo_html_v424}
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
