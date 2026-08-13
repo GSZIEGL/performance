@@ -14860,9 +14860,9 @@ def render_landing_login_panel_v103() -> None:
 
 
 def _fpi_landing_logo_data_uri_v424() -> str:
-    """Repo-root logo2.png -> data URI. Hiány esetén üres string, az app nem hibázik."""
+    """Repo-root logo2.PNG -> data URI. Hiány esetén üres string, az app nem hibázik."""
     try:
-        logo_path = Path(__file__).resolve().parent / "logo2.png"
+        logo_path = Path(__file__).resolve().parent / "logo2.PNG"
         if not logo_path.exists() or not logo_path.is_file():
             return ""
         raw = logo_path.read_bytes()
