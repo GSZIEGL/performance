@@ -75,7 +75,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V420_DUAL_AUTH_BACKWARD_COMPATIBLE_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V421_DUAL_AUTH_INVITE_FLOW_2026_08_13"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7954,7 +7954,7 @@ def _fpi_browser_device_seed() -> str:
     """Best-effort browser-persistent random seed for MVP device control.
 
     Streamlit's built-in cookie interface is read-only. To avoid adding an
-    extra third-party cookie component, V420 stores a random opaque seed in a
+    extra third-party cookie component, V421 stores a random opaque seed in a
     query parameter. It survives normal reruns/reloads of the same URL. The
     seed is combined with coarse browser context and hashed before Supabase
     receives it. It is a licence-abuse signal, not a hardware fingerprint.
@@ -8008,7 +8008,7 @@ def _fpi_device_hash() -> str:
         _fpi_context_value("locale"),
         _fpi_context_value("timezone"),
     ])
-    salt = get_secret_value("DEVICE_HASH_SALT") or get_secret_value("LICENSE_SALT", "fpi-device-v420")
+    salt = get_secret_value("DEVICE_HASH_SALT") or get_secret_value("LICENSE_SALT", "fpi-device-v421")
     return hashlib.sha256((salt + "::" + coarse_context).encode("utf-8")).hexdigest()
 
 
@@ -8016,7 +8016,7 @@ def _fpi_session_token_hash() -> str:
     if "_fpi_runtime_session_token" not in st.session_state:
         st.session_state["_fpi_runtime_session_token"] = secrets.token_urlsafe(32)
     raw = str(st.session_state["_fpi_runtime_session_token"])
-    salt = get_secret_value("DEVICE_HASH_SALT") or get_secret_value("LICENSE_SALT", "fpi-session-v420")
+    salt = get_secret_value("DEVICE_HASH_SALT") or get_secret_value("LICENSE_SALT", "fpi-session-v421")
     return hashlib.sha256((salt + "::" + raw).encode("utf-8")).hexdigest()
 
 
@@ -8054,6 +8054,248 @@ def _fpi_claim_session_rpc(client, device_hash: str, session_hash: str) -> Dict[
         return {"ok": False, "message": f"Munkamenet-ellenőrzési hiba: {exc}"}
 
 
+def _fpi_query_param_first_v421(name: str, default: str = "") -> str:
+    """Return one query-parameter value without ever logging sensitive callback tokens."""
+    try:
+        value = st.query_params.get(name, default)
+        if isinstance(value, list):
+            value = value[0] if value else default
+        return str(value or default).strip()
+    except Exception:
+        return str(default or "")
+
+
+def _fpi_remove_auth_query_params_v421() -> None:
+    """Remove one-time auth callback parameters while preserving unrelated params (e.g. device seed)."""
+    for key in (
+        "token_hash", "type", "fpi_auth", "code",
+        "error", "error_code", "error_description",
+    ):
+        try:
+            if key in st.query_params:
+                del st.query_params[key]
+        except Exception:
+            try:
+                st.query_params.pop(key, None)
+            except Exception:
+                pass
+
+
+def _fpi_clear_invite_state_v421() -> None:
+    for key in (
+        "_fpi_invite_pending_v421",
+        "_fpi_invite_user_id_v421",
+        "_fpi_invite_email_v421",
+        "_fpi_invite_verified_at_v421",
+    ):
+        st.session_state.pop(key, None)
+
+
+def _fpi_complete_named_user_session(client, email_hint: str = "") -> Dict[str, object]:
+    """Apply FPI licence, device and single-session controls to an already authenticated Supabase user."""
+    if client is None:
+        return {"ok": False, "message": "Supabase kapcsolat nincs beállítva."}
+
+    try:
+        user_resp = client.auth.get_user()
+        user = getattr(user_resp, "user", None)
+        if user is None or not getattr(user, "id", None):
+            return {"ok": False, "message": "A bejelentkezett felhasználó nem ellenőrizhető."}
+    except Exception:
+        return {"ok": False, "message": "A bejelentkezett felhasználó nem ellenőrizhető."}
+
+    lic = _fpi_license_rpc(client)
+    if not lic.get("ok"):
+        return {"ok": False, "message": lic.get("message", "Ehhez a felhasználóhoz nincs aktív FPI licenc.")}
+
+    device_hash = _fpi_device_hash()
+    device = _fpi_register_device_rpc(client, device_hash)
+    if not device.get("ok"):
+        return {"ok": False, "message": device.get("message", "Ez az eszköz nincs engedélyezve.")}
+
+    session_hash = _fpi_session_token_hash()
+    claimed = _fpi_claim_session_rpc(client, device_hash, session_hash)
+    if not claimed.get("ok"):
+        return {"ok": False, "message": claimed.get("message", "A licenc egy másik aktív munkamenetben használatban van.")}
+
+    user_email = str(lic.get("email") or getattr(user, "email", "") or email_hint or "").strip().lower()
+    result = {
+        "ok": True,
+        "auth_mode": "named",
+        "user_id": str(lic.get("user_id") or getattr(user, "id", "")),
+        "email": user_email,
+        "full_name": str(lic.get("full_name") or ""),
+        "club_name": str(lic.get("club_name") or ""),
+        "licensed_teams": list(lic.get("licensed_teams") or []),
+        "plan": str(lic.get("plan") or "pro"),
+        "expires_at": lic.get("expires_at"),
+        "max_devices": lic.get("max_devices"),
+        "device_hash": device_hash,
+        "session_token_hash": session_hash,
+        "message": "Pro hozzáférés aktív.",
+    }
+    st.session_state["_fpi_supabase_client"] = client
+    st.session_state["_fpi_auth_user_id"] = result["user_id"]
+    st.session_state["_fpi_auth_last_heartbeat"] = time.time()
+    st.session_state["user_email"] = result["email"]
+    return result
+
+
+def _fpi_handle_invite_callback_v421() -> bool:
+    """Verify a custom Supabase invite callback carrying token_hash in the query string.
+
+    Required Invite User e-mail template link:
+    {{ .SiteURL }}?fpi_auth=invite&token_hash={{ .TokenHash }}&type=invite
+
+    Supabase's default confirmation URL can return the Auth session in a URL fragment,
+    which a server-side Streamlit app cannot read via st.query_params. V421 therefore
+    intentionally uses TokenHash + verify_otp for the invitation callback.
+    """
+    if st.session_state.get("_fpi_invite_pending_v421"):
+        return True
+
+    flow = _fpi_query_param_first_v421("fpi_auth").lower()
+    token_hash = _fpi_query_param_first_v421("token_hash")
+    otp_type = _fpi_query_param_first_v421("type").lower()
+
+    # Only consume links explicitly intended for the FPI invitation flow.
+    if flow != "invite" and otp_type != "invite":
+        return False
+    if not token_hash:
+        st.session_state["_fpi_auth_message"] = (
+            "A meghívó linkből hiányzik az aktiváló token. Küldj új FPI-meghívót a V421 sablonnal."
+        )
+        _fpi_remove_auth_query_params_v421()
+        return False
+
+    client = _fpi_new_supabase_client()
+    if client is None:
+        st.session_state["_fpi_auth_message"] = "Supabase kapcsolat nincs beállítva; a meghívó nem ellenőrizhető."
+        return False
+
+    try:
+        client.auth.verify_otp({
+            "token_hash": token_hash,
+            "type": "invite",
+        })
+        user_resp = client.auth.get_user()
+        user = getattr(user_resp, "user", None)
+        if user is None or not getattr(user, "id", None):
+            raise RuntimeError("invite verification returned no authenticated user")
+    except Exception:
+        _fpi_remove_auth_query_params_v421()
+        st.session_state["_fpi_auth_message"] = (
+            "A meghívó link érvénytelen, lejárt vagy már felhasználták. Küldj új meghívót."
+        )
+        return False
+
+    st.session_state["_fpi_supabase_client"] = client
+    st.session_state["_fpi_invite_pending_v421"] = True
+    st.session_state["_fpi_invite_user_id_v421"] = str(getattr(user, "id", ""))
+    st.session_state["_fpi_invite_email_v421"] = str(getattr(user, "email", "") or "").strip().lower()
+    st.session_state["_fpi_invite_verified_at_v421"] = time.time()
+    if st.session_state["_fpi_invite_email_v421"]:
+        st.session_state["user_email"] = st.session_state["_fpi_invite_email_v421"]
+
+    # TokenHash is one-time sensitive material. Remove it immediately after verification.
+    _fpi_remove_auth_query_params_v421()
+    return True
+
+
+def render_invite_activation_panel_v421() -> None:
+    """First-login password setup shown only after a verified Supabase invitation."""
+    st.markdown(
+        """
+        <div style="max-width:760px;margin:30px auto 16px auto;padding:26px 28px;border-radius:24px;
+                    background:#ffffff;border:1px solid #dbeafe;box-shadow:0 18px 46px rgba(15,23,42,.12);">
+            <div style="font-size:.82rem;font-weight:900;letter-spacing:.07em;color:#0f766e;">FPI FIÓKAKTIVÁLÁS</div>
+            <div style="font-size:1.8rem;font-weight:950;color:#0f172a;margin-top:5px;">Állíts be saját jelszót</div>
+            <div style="color:#475569;margin-top:8px;line-height:1.45;">
+                A meghívó ellenőrzése sikerült. Ez a névre szóló fiók egyetlen szerződésben megjelölt felhasználóhoz tartozik.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    client = st.session_state.get("_fpi_supabase_client")
+    invite_email = str(st.session_state.get("_fpi_invite_email_v421") or "")
+    if client is None:
+        st.error("Az aktiválási munkamenet megszakadt. Kérj új meghívót.")
+        if st.button("Vissza a belépéshez", key="invite_back_no_client_v421"):
+            _fpi_clear_invite_state_v421()
+            _fpi_remove_auth_query_params_v421()
+            st.rerun()
+        return
+
+    if invite_email:
+        st.info(f"Meghívott fiók: {invite_email}")
+
+    p1 = st.text_input(
+        "Új jelszó",
+        type="password",
+        key="invite_password_1_v421",
+        help="Legalább 10 karaktert javaslunk; használj egyedi jelszót.",
+    )
+    p2 = st.text_input(
+        "Új jelszó még egyszer",
+        type="password",
+        key="invite_password_2_v421",
+    )
+
+    c1, c2 = st.columns([1.25, 1])
+    with c1:
+        if st.button("Fiók aktiválása", type="primary", use_container_width=True, key="invite_set_password_v421"):
+            if len(str(p1 or "")) < 10:
+                st.warning("A jelszó legyen legalább 10 karakter.")
+                return
+            if p1 != p2:
+                st.warning("A két jelszó nem egyezik.")
+                return
+
+            try:
+                client.auth.update_user({"password": p1})
+            except Exception as exc:
+                st.error(f"A jelszó beállítása nem sikerült: {exc}")
+                return
+
+            result = _fpi_complete_named_user_session(client, email_hint=invite_email)
+            _fpi_clear_invite_state_v421()
+            _fpi_remove_auth_query_params_v421()
+
+            if result.get("ok"):
+                st.session_state["license_status"] = result
+                st.session_state["_fpi_auth_message"] = "FPI-fiók aktiválva. Sikeres Pro belépés."
+                st.session_state["fpi_active_page_v100"] = "landing"
+                st.rerun()
+
+            # Password setup succeeded, but FPI licence/device/session activation did not.
+            try:
+                client.auth.sign_out()
+            except Exception:
+                pass
+            st.session_state.pop("_fpi_supabase_client", None)
+            st.session_state["_fpi_auth_message"] = (
+                "A jelszó sikeresen beállítva, de az FPI hozzáférés még nem aktiválható: "
+                + str(result.get("message", "nincs aktív licenc"))
+                + " Most már a saját e-mail + jelszó párossal tudsz belépni, amint a licenc aktív."
+            )
+            st.session_state["fpi_active_page_v100"] = "landing"
+            st.rerun()
+
+    with c2:
+        if st.button("Megszakítás", use_container_width=True, key="invite_cancel_v421"):
+            try:
+                client.auth.sign_out()
+            except Exception:
+                pass
+            st.session_state.pop("_fpi_supabase_client", None)
+            _fpi_clear_invite_state_v421()
+            _fpi_remove_auth_query_params_v421()
+            st.session_state["_fpi_auth_message"] = "A fiókaktiválást megszakítottad."
+            st.session_state["fpi_active_page_v100"] = "landing"
+            st.rerun()
+
 def _fpi_clear_local_auth(keep_message: bool = True) -> None:
     message = st.session_state.get("_fpi_auth_message") if keep_message else None
     for key in [
@@ -8078,58 +8320,16 @@ def login_named_user_supabase(email: str, password: str) -> Dict[str, object]:
 
     try:
         client.auth.sign_in_with_password({"email": email, "password": password})
-        user_resp = client.auth.get_user()
-        user = getattr(user_resp, "user", None)
-        if user is None or not getattr(user, "id", None):
-            return {"ok": False, "message": "A bejelentkezés nem ellenőrizhető."}
     except Exception:
         return {"ok": False, "message": "Hibás e-mail/jelszó, vagy a felhasználó még nincs aktiválva."}
 
-    lic = _fpi_license_rpc(client)
-    if not lic.get("ok"):
+    result = _fpi_complete_named_user_session(client, email_hint=email)
+    if not result.get("ok"):
         try:
             client.auth.sign_out()
         except Exception:
             pass
-        return {"ok": False, "message": lic.get("message", "Ehhez a felhasználóhoz nincs aktív FPI licenc.")}
-
-    device_hash = _fpi_device_hash()
-    device = _fpi_register_device_rpc(client, device_hash)
-    if not device.get("ok"):
-        try:
-            client.auth.sign_out()
-        except Exception:
-            pass
-        return {"ok": False, "message": device.get("message", "Ez az eszköz nincs engedélyezve.")}
-
-    session_hash = _fpi_session_token_hash()
-    claimed = _fpi_claim_session_rpc(client, device_hash, session_hash)
-    if not claimed.get("ok"):
-        try:
-            client.auth.sign_out()
-        except Exception:
-            pass
-        return {"ok": False, "message": claimed.get("message", "A licenc egy másik aktív munkamenetben használatban van.")}
-
-    result = {
-        "ok": True,
-        "auth_mode": "named",
-        "user_id": str(lic.get("user_id") or getattr(user, "id", "")),
-        "email": str(lic.get("email") or email),
-        "full_name": str(lic.get("full_name") or ""),
-        "club_name": str(lic.get("club_name") or ""),
-        "licensed_teams": list(lic.get("licensed_teams") or []),
-        "plan": str(lic.get("plan") or "pro"),
-        "expires_at": lic.get("expires_at"),
-        "max_devices": lic.get("max_devices"),
-        "device_hash": device_hash,
-        "session_token_hash": session_hash,
-        "message": "Pro hozzáférés aktív.",
-    }
-    st.session_state["_fpi_supabase_client"] = client
-    st.session_state["_fpi_auth_user_id"] = result["user_id"]
-    st.session_state["_fpi_auth_last_heartbeat"] = time.time()
-    st.session_state["user_email"] = result["email"]
+        return result
     return result
 
 
@@ -8289,7 +8489,7 @@ def render_license_panel() -> None:
         "Belépés módja",
         options=["E-mail + jelszó", "Meglévő aktiváló kód"],
         index=0,
-        key="fpi_login_type_v420",
+        key="fpi_login_type_v421",
         help="A korábbi felhasználók továbbra is használhatják a meglévő aktiváló kódjukat. Új előfizetőknek a névre szóló e-mail + jelszó belépést javasoljuk.",
     )
 
@@ -8307,9 +8507,9 @@ def render_license_panel() -> None:
             "Jelszó",
             type="password",
             help="A névre szóló FPI-fiókod jelszava. A fiók más személynek nem adható át.",
-            key="license_password_v420",
+            key="license_password_v421",
         )
-        if st.sidebar.button("Belépés", use_container_width=True, key="activate_named_license_v420"):
+        if st.sidebar.button("Belépés", use_container_width=True, key="activate_named_license_v421"):
             result = login_named_user_supabase(email, password)
             if result.get("ok"):
                 st.session_state["license_status"] = result
@@ -8317,15 +8517,15 @@ def render_license_panel() -> None:
                 st.rerun()
             else:
                 st.sidebar.warning(result.get("message", "Sikertelen belépés."))
-        st.sidebar.caption("Új / névre szóló hozzáférés. Egy fiók egy szerződésben megjelölt felhasználóhoz tartozik.")
+        st.sidebar.caption("Új / névre szóló hozzáférés. Meghívás után a V421 aktiváló oldalon kell először saját jelszót beállítani.")
     else:
         activation_code = st.sidebar.text_input(
             "Aktiváló kód",
             type="password",
             help="A korábban kapott aktiváló kód. A meglévő licencek változatlanul működnek.",
-            key="legacy_license_key_v420",
+            key="legacy_license_key_v421",
         )
-        if st.sidebar.button("Régi licenc aktiválása", use_container_width=True, key="activate_legacy_license_v420"):
+        if st.sidebar.button("Régi licenc aktiválása", use_container_width=True, key="activate_legacy_license_v421"):
             result = validate_legacy_license_supabase(email, activation_code)
             if result.get("ok"):
                 st.session_state["license_status"] = result
@@ -14517,7 +14717,7 @@ def render_landing_login_panel_v103() -> None:
             "Belépés módja",
             options=["E-mail + jelszó", "Meglévő aktiváló kód"],
             horizontal=True,
-            key="landing_login_type_v420",
+            key="landing_login_type_v421",
         )
         email = st.text_input(
             "E-mail",
@@ -14533,9 +14733,9 @@ def render_landing_login_panel_v103() -> None:
                 "Jelszó",
                 type="password",
                 help="A Supabase Auth-fiókod saját jelszava.",
-                key="landing_license_password_v420",
+                key="landing_license_password_v421",
             )
-            if st.button("Belépés", use_container_width=True, key="landing_activate_named_license_v420"):
+            if st.button("Belépés", use_container_width=True, key="landing_activate_named_license_v421"):
                 result = login_named_user_supabase(email, password)
                 if result.get("ok"):
                     st.session_state["license_status"] = result
@@ -14543,15 +14743,15 @@ def render_landing_login_panel_v103() -> None:
                     st.rerun()
                 else:
                     st.warning(result.get("message", "Sikertelen belépés."))
-            st.caption("Új / névre szóló licenc: az eszköz- és egyidejű session-korlát ezen a belépési módon érvényesül.")
+            st.caption("Új / névre szóló licenc: a meghívó link először saját jelszó beállítására visz; utána az eszköz- és egyidejű session-korlát is érvényesül.")
         else:
             activation_code = st.text_input(
                 "Aktiváló kód",
                 type="password",
                 help="A korábban kapott aktiváló kód.",
-                key="landing_legacy_license_key_v420",
+                key="landing_legacy_license_key_v421",
             )
-            if st.button("Régi licenc aktiválása", use_container_width=True, key="landing_activate_legacy_license_v420"):
+            if st.button("Régi licenc aktiválása", use_container_width=True, key="landing_activate_legacy_license_v421"):
                 result = validate_legacy_license_supabase(email, activation_code)
                 if result.get("ok"):
                     st.session_state["license_status"] = result
@@ -22396,7 +22596,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V417_VALIDATION_FIXES_2026_08_09"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V421_DUAL_AUTH_INVITE_FLOW_2026_08_13"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -22688,7 +22888,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V420_DUAL_AUTH_BACKWARD_COMPATIBLE_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V421_DUAL_AUTH_INVITE_FLOW_2026_08_13"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -23694,13 +23894,20 @@ def _fpi_v418_integrity_check(df: pd.DataFrame, selected_week: Optional[str] = N
 
 
 
+# V421: consume a custom Supabase invite callback before any page routing.
+# The one-time token_hash is verified and immediately removed from the URL.
+_fpi_handle_invite_callback_v421()
+if st.session_state.get("_fpi_invite_pending_v421"):
+    render_invite_activation_panel_v421()
+    st.stop()
+
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
 if "fpi_active_page_v100" not in st.session_state:
     st.session_state["fpi_active_page_v100"] = "landing"
 
 active_page_v101 = st.session_state.get("fpi_active_page_v100", "landing")
 
-# V419: every Streamlit rerun refreshes the active named-user session at most
+# V421: every Streamlit rerun refreshes the active named-user session at most
 # once per 120 seconds. This makes parallel-session blocking independent of
 # which FPI page the user is viewing.
 if (st.session_state.get("license_status", {}) or {}).get("ok"):
@@ -28172,4 +28379,3 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
             )
     else:
         st.info("Mapping ellenőrzéshez előbb tölts fel egy Excel/CSV fájlt.")
-
