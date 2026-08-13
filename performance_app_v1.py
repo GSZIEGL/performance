@@ -7,6 +7,8 @@ from __future__ import annotations
 import html
 import io
 import hashlib
+import secrets
+import time
 import importlib
 import sys
 import os
@@ -73,7 +75,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V418_REFERENCE_CONSISTENCY_AUDIT_2026_08_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V420_DUAL_AUTH_BACKWARD_COMPATIBLE_2026_08_13"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -7793,18 +7795,37 @@ DEMO_WEEK_LIMIT = 3
 DEMO_ROW_LIMIT = 5000
 
 # -----------------------------------------------------------------------------
-# V4.5 - Emailhez kötött aktiváló kód koncepció
+# V420 - Backward-compatible dual Supabase access
 # -----------------------------------------------------------------------------
-# Éles verzióban ezt nem a kódban tároljuk, hanem Supabase táblában:
-# licenses(email, activation_code_hash, plan, is_active, expires_at, max_users, club_name)
-# A felhasználó megadja: email + aktiváló kód.
-# Az app lekéri / ellenőrzi a hash-t, és ha aktív, Pro módot ad.
-# Mostani MVP-ben marad az egyszerű tesztkód: .
+# Two access paths run in parallel:
+#
+# A) LEGACY / grandfathered users
+#    Existing e-mail + activation-code access stays valid through the existing
+#    public.licenses table and public.validate_license RPC. No existing user
+#    needs to be migrated immediately.
+#
+# B) NAMED USER / new commercial model
+#    Supabase Auth e-mail + password + public.fpi_user_licenses. This path can
+#    enforce named-user licences, device limits and one active FPI session.
+#
+# IMPORTANT:
+# - Do NOT drop the existing licenses table or validate_license RPC while any
+#   legacy customer still uses an activation code.
+# - New customers should normally be created in Supabase Auth +
+#   fpi_user_licenses.
+# - Legacy customers can be migrated one by one later, with no hard cut-over.
+#
+# Required Streamlit secrets:
+#   SUPABASE_URL = "https://...supabase.co"
+#   SUPABASE_PUBLISHABLE_KEY = "sb_publishable_..."   # preferred
+# or:
+#   SUPABASE_ANON_KEY = "..."
+#   LICENSE_SALT = "existing-legacy-license-salt"     # keep unchanged
+#   DEVICE_HASH_SALT = "long-random-secret"           # recommended for named users
+#
+# Never place a Supabase secret/service-role key in this client application.
 
 
-# -----------------------------------------------------------------------------
-# Supabase license layer
-# -----------------------------------------------------------------------------
 def get_secret_value(name: str, default: str = "") -> str:
     try:
         if name in st.secrets:
@@ -7814,9 +7835,9 @@ def get_secret_value(name: str, default: str = "") -> str:
     return os.getenv(name, default)
 
 
-def get_supabase_client():
+def _fpi_new_supabase_client():
     url = get_secret_value("SUPABASE_URL")
-    key = get_secret_value("SUPABASE_ANON_KEY")
+    key = get_secret_value("SUPABASE_PUBLISHABLE_KEY") or get_secret_value("SUPABASE_ANON_KEY")
     if not url or not key or create_client is None:
         return None
     try:
@@ -7825,80 +7846,431 @@ def get_supabase_client():
         return None
 
 
+def get_supabase_client():
+    """Return the per-Streamlit-session Supabase client for named-user Auth.
+
+    Do not cache this globally: a Supabase client may carry the authenticated
+    user's in-memory Auth session. Global sharing between visitors would be a
+    security bug.
+    """
+    client = st.session_state.get("_fpi_supabase_client")
+    if client is not None:
+        return client
+    client = _fpi_new_supabase_client()
+    if client is not None:
+        st.session_state["_fpi_supabase_client"] = client
+    return client
+
+
+def _fpi_rpc_dict(data) -> Dict[str, object]:
+    if isinstance(data, list):
+        data = data[0] if data else None
+    return dict(data) if isinstance(data, dict) else {}
+
+
+# -----------------------------
+# Legacy activation-code access
+# -----------------------------
 def hash_license_key(raw_key: str) -> str:
+    # MUST stay identical to the old production logic, otherwise existing
+    # activation codes would stop matching the hashes stored in Supabase.
     salt = get_secret_value("LICENSE_SALT", "performance-intelligence")
     return hashlib.sha256((salt + "::" + str(raw_key).strip()).encode("utf-8")).hexdigest()
 
 
-def validate_license_supabase(email: str, license_key: str) -> Dict[str, object]:
+def _validate_legacy_license_hash_supabase(email: str, license_hash: str) -> Dict[str, object]:
+    """Validate a legacy licence using the existing validate_license RPC.
+
+    We keep only the hash in Streamlit session_state, never the raw activation
+    code. This lets us re-check expiry/is_active periodically without asking the
+    user for the code again during the same browser session.
+    """
+    email = str(email or "").strip().lower()
+    license_hash = str(license_hash or "").strip()
+    if not email or not license_hash:
+        return {"ok": False, "message": "Hiányzó régi licencadat."}
+
+    client = _fpi_new_supabase_client()  # anonymous client, separate from named Auth client
+    if client is None:
+        return {"ok": False, "message": "Supabase kapcsolat nincs beállítva. Demo módban folytatható."}
+
+    try:
+        resp = client.rpc("validate_license", {
+            "p_email": email,
+            "p_license_hash": license_hash,
+        }).execute()
+        data = _fpi_rpc_dict(resp.data)
+        if not data:
+            return {"ok": False, "message": "Nem található aktív licenc ehhez az e-mailhez és kódhoz."}
+        if not data.get("ok"):
+            return {"ok": False, "message": data.get("message", "A licenc nem aktív vagy lejárt.")}
+
+        team_name = str(data.get("team_name") or "").strip()
+        result = {
+            "ok": True,
+            "auth_mode": "legacy",
+            "email": str(data.get("email") or email),
+            "plan": str(data.get("plan") or "pro"),
+            "club_name": str(data.get("club_name") or ""),
+            "team_name": team_name,
+            "licensed_teams": [team_name] if team_name else [],
+            "license_id": str(data.get("license_id") or ""),
+            "legacy_license_hash": license_hash,
+            "message": "Pro hozzáférés aktív (meglévő licenc).",
+        }
+        return result
+    except Exception as exc:
+        return {"ok": False, "message": f"Licencellenőrzési hiba: {exc}"}
+
+
+def validate_legacy_license_supabase(email: str, license_key: str) -> Dict[str, object]:
     email = str(email or "").strip().lower()
     license_key = str(license_key or "").strip()
     if not email or not license_key:
         return {"ok": False, "message": "Add meg az e-mail címet és az aktiváló kódot."}
 
+    # Preserve the old emergency/fallback behaviour if it is still configured.
     fallback = get_secret_value("FALLBACK_PRO_CODE")
     if fallback and license_key == fallback:
         return {
             "ok": True,
+            "auth_mode": "legacy_fallback",
             "email": email,
             "plan": "pro",
             "club_name": "Pro klub",
             "team_name": "Pro csapat",
+            "licensed_teams": ["Pro csapat"],
             "license_id": "fallback",
-            "message": "Pro hozzáférés aktív.",
+            "message": "Pro hozzáférés aktív (meglévő licenc).",
         }
 
-    client = get_supabase_client()
-    if client is None:
-        return {"ok": False, "message": "Supabase kapcsolat nincs beállítva. Demo módban folytatható."}
+    return _validate_legacy_license_hash_supabase(email, hash_license_key(license_key))
 
+
+# -----------------------------
+# Named-user access
+# -----------------------------
+def _fpi_browser_device_seed() -> str:
+    """Best-effort browser-persistent random seed for MVP device control.
+
+    Streamlit's built-in cookie interface is read-only. To avoid adding an
+    extra third-party cookie component, V420 stores a random opaque seed in a
+    query parameter. It survives normal reruns/reloads of the same URL. The
+    seed is combined with coarse browser context and hashed before Supabase
+    receives it. It is a licence-abuse signal, not a hardware fingerprint.
+    """
+    key = "_fpi_d"
     try:
-        key_hash = hash_license_key(license_key)
-        resp = client.rpc("validate_license", {
-            "p_email": email,
-            "p_license_hash": key_hash,
-        }).execute()
-        data = resp.data
-        if isinstance(data, list):
-            data = data[0] if data else None
+        raw = st.query_params.get(key, "")
+        if isinstance(raw, list):
+            raw = raw[0] if raw else ""
+        raw = str(raw or "").strip()
+        if not raw:
+            raw = secrets.token_urlsafe(18)
+            st.query_params[key] = raw
+        return raw
+    except Exception:
+        if "_fpi_device_seed_fallback" not in st.session_state:
+            st.session_state["_fpi_device_seed_fallback"] = secrets.token_urlsafe(18)
+        return str(st.session_state["_fpi_device_seed_fallback"])
 
-        if not data:
-            return {"ok": False, "message": "Nem található aktív licenc ehhez az e-mailhez és kódhoz."}
 
-        if data.get("ok"):
-            return {
-                "ok": True,
-                "email": data.get("email", email),
-                "plan": data.get("plan", "pro"),
-                "club_name": data.get("club_name", ""),
-                "team_name": data.get("team_name", ""),
-                "license_id": data.get("license_id", ""),
-                "message": "Pro hozzáférés aktív.",
-            }
+def _fpi_context_value(name: str, default: str = "") -> str:
+    try:
+        ctx = getattr(st, "context", None)
+        if ctx is None:
+            return default
+        value = getattr(ctx, name, default)
+        return str(value or default)
+    except Exception:
+        return default
 
-        return {"ok": False, "message": data.get("message", "A licenc nem aktív vagy lejárt.")}
+
+def _fpi_header_value(name: str, default: str = "") -> str:
+    try:
+        ctx = getattr(st, "context", None)
+        headers = getattr(ctx, "headers", None) if ctx is not None else None
+        if headers is None:
+            return default
+        value = headers.get(name, default)
+        return str(value or default)
+    except Exception:
+        return default
+
+
+def _fpi_device_hash() -> str:
+    seed = _fpi_browser_device_seed()
+    coarse_context = "|".join([
+        seed,
+        _fpi_header_value("User-Agent"),
+        _fpi_header_value("Sec-CH-UA-Platform"),
+        _fpi_header_value("Sec-CH-UA-Mobile"),
+        _fpi_context_value("locale"),
+        _fpi_context_value("timezone"),
+    ])
+    salt = get_secret_value("DEVICE_HASH_SALT") or get_secret_value("LICENSE_SALT", "fpi-device-v420")
+    return hashlib.sha256((salt + "::" + coarse_context).encode("utf-8")).hexdigest()
+
+
+def _fpi_session_token_hash() -> str:
+    if "_fpi_runtime_session_token" not in st.session_state:
+        st.session_state["_fpi_runtime_session_token"] = secrets.token_urlsafe(32)
+    raw = str(st.session_state["_fpi_runtime_session_token"])
+    salt = get_secret_value("DEVICE_HASH_SALT") or get_secret_value("LICENSE_SALT", "fpi-session-v420")
+    return hashlib.sha256((salt + "::" + raw).encode("utf-8")).hexdigest()
+
+
+def _fpi_license_rpc(client) -> Dict[str, object]:
+    try:
+        resp = client.rpc("fpi_get_current_license", {}).execute()
+        return _fpi_rpc_dict(resp.data)
     except Exception as exc:
         return {"ok": False, "message": f"Licencellenőrzési hiba: {exc}"}
 
 
+def _fpi_register_device_rpc(client, device_hash: str) -> Dict[str, object]:
+    try:
+        ua = _fpi_header_value("User-Agent")[:500]
+        platform = _fpi_header_value("Sec-CH-UA-Platform")[:120]
+        label = platform.strip('"') or "FPI eszköz"
+        resp = client.rpc("fpi_register_device", {
+            "p_device_hash": device_hash,
+            "p_user_agent": ua,
+            "p_device_label": label,
+        }).execute()
+        return _fpi_rpc_dict(resp.data)
+    except Exception as exc:
+        return {"ok": False, "message": f"Eszközellenőrzési hiba: {exc}"}
+
+
+def _fpi_claim_session_rpc(client, device_hash: str, session_hash: str) -> Dict[str, object]:
+    try:
+        resp = client.rpc("fpi_claim_session", {
+            "p_device_hash": device_hash,
+            "p_session_token_hash": session_hash,
+        }).execute()
+        return _fpi_rpc_dict(resp.data)
+    except Exception as exc:
+        return {"ok": False, "message": f"Munkamenet-ellenőrzési hiba: {exc}"}
+
+
+def _fpi_clear_local_auth(keep_message: bool = True) -> None:
+    message = st.session_state.get("_fpi_auth_message") if keep_message else None
+    for key in [
+        "license_status", "_fpi_supabase_client", "_fpi_runtime_session_token",
+        "_fpi_auth_last_heartbeat", "_fpi_auth_user_id",
+        "_fpi_legacy_last_check",
+    ]:
+        st.session_state.pop(key, None)
+    if message:
+        st.session_state["_fpi_auth_message"] = message
+
+
+def login_named_user_supabase(email: str, password: str) -> Dict[str, object]:
+    email = str(email or "").strip().lower()
+    password = str(password or "")
+    if not email or not password:
+        return {"ok": False, "message": "Add meg az e-mail címet és a jelszót."}
+
+    client = _fpi_new_supabase_client()
+    if client is None:
+        return {"ok": False, "message": "Supabase kapcsolat nincs beállítva. Demo módban folytatható."}
+
+    try:
+        client.auth.sign_in_with_password({"email": email, "password": password})
+        user_resp = client.auth.get_user()
+        user = getattr(user_resp, "user", None)
+        if user is None or not getattr(user, "id", None):
+            return {"ok": False, "message": "A bejelentkezés nem ellenőrizhető."}
+    except Exception:
+        return {"ok": False, "message": "Hibás e-mail/jelszó, vagy a felhasználó még nincs aktiválva."}
+
+    lic = _fpi_license_rpc(client)
+    if not lic.get("ok"):
+        try:
+            client.auth.sign_out()
+        except Exception:
+            pass
+        return {"ok": False, "message": lic.get("message", "Ehhez a felhasználóhoz nincs aktív FPI licenc.")}
+
+    device_hash = _fpi_device_hash()
+    device = _fpi_register_device_rpc(client, device_hash)
+    if not device.get("ok"):
+        try:
+            client.auth.sign_out()
+        except Exception:
+            pass
+        return {"ok": False, "message": device.get("message", "Ez az eszköz nincs engedélyezve.")}
+
+    session_hash = _fpi_session_token_hash()
+    claimed = _fpi_claim_session_rpc(client, device_hash, session_hash)
+    if not claimed.get("ok"):
+        try:
+            client.auth.sign_out()
+        except Exception:
+            pass
+        return {"ok": False, "message": claimed.get("message", "A licenc egy másik aktív munkamenetben használatban van.")}
+
+    result = {
+        "ok": True,
+        "auth_mode": "named",
+        "user_id": str(lic.get("user_id") or getattr(user, "id", "")),
+        "email": str(lic.get("email") or email),
+        "full_name": str(lic.get("full_name") or ""),
+        "club_name": str(lic.get("club_name") or ""),
+        "licensed_teams": list(lic.get("licensed_teams") or []),
+        "plan": str(lic.get("plan") or "pro"),
+        "expires_at": lic.get("expires_at"),
+        "max_devices": lic.get("max_devices"),
+        "device_hash": device_hash,
+        "session_token_hash": session_hash,
+        "message": "Pro hozzáférés aktív.",
+    }
+    st.session_state["_fpi_supabase_client"] = client
+    st.session_state["_fpi_auth_user_id"] = result["user_id"]
+    st.session_state["_fpi_auth_last_heartbeat"] = time.time()
+    st.session_state["user_email"] = result["email"]
+    return result
+
+
+def _fpi_auth_heartbeat(force: bool = False) -> bool:
+    lic = st.session_state.get("license_status", {}) or {}
+    if not lic.get("ok"):
+        return False
+
+    auth_mode = str(lic.get("auth_mode") or "legacy").lower()
+    now = time.time()
+
+    # Legacy licences stay on the old validation path. Re-check every 5 minutes
+    # so an administrator can still deactivate/expire an old licence without
+    # waiting for browser logout. No device/single-session rule is imposed on
+    # grandfathered users unless they are migrated to named-user Auth.
+    if auth_mode in {"legacy", "legacy_fallback"}:
+        if auth_mode == "legacy_fallback":
+            return True
+        last = float(st.session_state.get("_fpi_legacy_last_check", 0.0) or 0.0)
+        if not force and (now - last) < 300:
+            return True
+        latest = _validate_legacy_license_hash_supabase(
+            str(lic.get("email") or ""),
+            str(lic.get("legacy_license_hash") or ""),
+        )
+        if not latest.get("ok"):
+            st.session_state["_fpi_auth_message"] = latest.get("message", "A meglévő licenc már nem aktív.")
+            _fpi_clear_local_auth()
+            return False
+        # Keep legacy metadata current without changing auth mode.
+        lic.update(latest)
+        st.session_state["license_status"] = lic
+        st.session_state["_fpi_legacy_last_check"] = now
+        return True
+
+    # Named-user Auth path.
+    last = float(st.session_state.get("_fpi_auth_last_heartbeat", 0.0) or 0.0)
+    if not force and (now - last) < 120:
+        return True
+
+    client = get_supabase_client()
+    if client is None:
+        st.session_state["_fpi_auth_message"] = "A Supabase kapcsolat megszakadt. Jelentkezz be újra."
+        _fpi_clear_local_auth()
+        return False
+
+    latest = _fpi_license_rpc(client)
+    if not latest.get("ok"):
+        st.session_state["_fpi_auth_message"] = latest.get("message", "A licenc már nem aktív.")
+        _fpi_clear_local_auth()
+        return False
+
+    device_hash = str(lic.get("device_hash") or _fpi_device_hash())
+    session_hash = str(lic.get("session_token_hash") or _fpi_session_token_hash())
+    claimed = _fpi_claim_session_rpc(client, device_hash, session_hash)
+    if not claimed.get("ok"):
+        st.session_state["_fpi_auth_message"] = claimed.get("message", "A licenc egy másik aktív munkamenetben használatban van.")
+        _fpi_clear_local_auth()
+        return False
+
+    lic.update({
+        "auth_mode": "named",
+        "email": str(latest.get("email") or lic.get("email") or ""),
+        "full_name": str(latest.get("full_name") or lic.get("full_name") or ""),
+        "club_name": str(latest.get("club_name") or lic.get("club_name") or ""),
+        "licensed_teams": list(latest.get("licensed_teams") or []),
+        "plan": str(latest.get("plan") or lic.get("plan") or "pro"),
+        "expires_at": latest.get("expires_at"),
+        "max_devices": latest.get("max_devices"),
+        "device_hash": device_hash,
+        "session_token_hash": session_hash,
+        "ok": True,
+    })
+    st.session_state["license_status"] = lic
+    st.session_state["_fpi_auth_last_heartbeat"] = now
+    return True
+
+
+def logout_fpi_access() -> None:
+    lic = st.session_state.get("license_status", {}) or {}
+    auth_mode = str(lic.get("auth_mode") or "legacy").lower()
+    client = st.session_state.get("_fpi_supabase_client")
+
+    if auth_mode == "named" and client is not None:
+        if lic.get("session_token_hash"):
+            try:
+                client.rpc("fpi_release_session", {
+                    "p_session_token_hash": str(lic.get("session_token_hash")),
+                }).execute()
+            except Exception:
+                pass
+        try:
+            client.auth.sign_out()
+        except Exception:
+            pass
+
+    _fpi_clear_local_auth(keep_message=False)
+
+
+# Backward-compatible function name for any remaining internal call sites.
+def logout_named_user_supabase() -> None:
+    logout_fpi_access()
+
+
 def is_pro_mode() -> bool:
-    lic = st.session_state.get("license_status", {})
-    return bool(lic.get("ok"))
+    lic = st.session_state.get("license_status", {}) or {}
+    if not lic.get("ok"):
+        return False
+    return _fpi_auth_heartbeat(force=False)
 
 
 def is_demo_mode() -> bool:
     return not is_pro_mode()
 
 
+def _fpi_license_teams_text(lic: Dict[str, object]) -> str:
+    teams = [str(x).strip() for x in (lic.get("licensed_teams") or []) if str(x).strip()]
+    if not teams and lic.get("team_name"):
+        teams = [str(lic.get("team_name")).strip()]
+    return ", ".join([x for x in teams if x])
+
+
 def render_mode_badge() -> None:
+    auth_message = st.session_state.pop("_fpi_auth_message", None)
+    if auth_message:
+        st.sidebar.warning(str(auth_message))
+
     if is_pro_mode():
-        lic = st.session_state.get("license_status", {})
-        st.sidebar.success("Pro hozzáférés aktív")
-        club = lic.get("club_name") or lic.get("email")
-        if club:
-            st.sidebar.caption(str(club))
-        if lic.get("team_name"):
-            st.sidebar.caption(f"Csapat: {lic.get('team_name')}")
+        lic = st.session_state.get("license_status", {}) or {}
+        auth_mode = str(lic.get("auth_mode") or "legacy").lower()
+        if auth_mode == "named":
+            st.sidebar.success("Pro hozzáférés aktív · névre szóló")
+        else:
+            st.sidebar.success("Pro hozzáférés aktív · meglévő licenc")
+        if lic.get("full_name"):
+            st.sidebar.caption(f"Felhasználó: {lic.get('full_name')}")
+        if lic.get("club_name"):
+            st.sidebar.caption(f"Klub: {lic.get('club_name')}")
+        teams = _fpi_license_teams_text(lic)
+        if teams:
+            st.sidebar.caption(f"Licencelt csapat(ok): {teams}")
     else:
         st.sidebar.success("Demo mód")
         st.sidebar.caption(f"Demo limit: max {DEMO_PLAYER_LIMIT} játékos · max {DEMO_WEEK_LIMIT} hét · max {DEMO_ROW_LIMIT} sor")
@@ -7909,23 +8281,60 @@ def render_license_panel() -> None:
     if is_pro_mode():
         render_mode_badge()
         if st.sidebar.button("Kijelentkezés", use_container_width=True, key="logout_license"):
-            st.session_state.pop("license_status", None)
+            logout_fpi_access()
             st.rerun()
         return
 
-    email = st.sidebar.text_input("E-mail", value=st.session_state.get("user_email", ""), placeholder="nev@klub.hu", key="license_email")
+    login_type = st.sidebar.radio(
+        "Belépés módja",
+        options=["E-mail + jelszó", "Meglévő aktiváló kód"],
+        index=0,
+        key="fpi_login_type_v420",
+        help="A korábbi felhasználók továbbra is használhatják a meglévő aktiváló kódjukat. Új előfizetőknek a névre szóló e-mail + jelszó belépést javasoljuk.",
+    )
+
+    email = st.sidebar.text_input(
+        "E-mail",
+        value=st.session_state.get("user_email", ""),
+        placeholder="nev@klub.hu",
+        key="license_email",
+    )
     if email:
         st.session_state["user_email"] = email
 
-    license_key = st.sidebar.text_input("Aktiváló kód", type="password", help="A klubhoz kapott aktiváló kód.", key="license_key")
-    if st.sidebar.button("Pro aktiválása", use_container_width=True, key="activate_license"):
-        result = validate_license_supabase(email, license_key)
-        if result.get("ok"):
-            st.session_state["license_status"] = result
-            st.sidebar.success("Pro hozzáférés aktiválva.")
-            st.rerun()
-        else:
-            st.sidebar.warning(result.get("message", "Sikertelen aktiválás."))
+    if login_type == "E-mail + jelszó":
+        password = st.sidebar.text_input(
+            "Jelszó",
+            type="password",
+            help="A névre szóló FPI-fiókod jelszava. A fiók más személynek nem adható át.",
+            key="license_password_v420",
+        )
+        if st.sidebar.button("Belépés", use_container_width=True, key="activate_named_license_v420"):
+            result = login_named_user_supabase(email, password)
+            if result.get("ok"):
+                st.session_state["license_status"] = result
+                st.sidebar.success("Sikeres belépés.")
+                st.rerun()
+            else:
+                st.sidebar.warning(result.get("message", "Sikertelen belépés."))
+        st.sidebar.caption("Új / névre szóló hozzáférés. Egy fiók egy szerződésben megjelölt felhasználóhoz tartozik.")
+    else:
+        activation_code = st.sidebar.text_input(
+            "Aktiváló kód",
+            type="password",
+            help="A korábban kapott aktiváló kód. A meglévő licencek változatlanul működnek.",
+            key="legacy_license_key_v420",
+        )
+        if st.sidebar.button("Régi licenc aktiválása", use_container_width=True, key="activate_legacy_license_v420"):
+            result = validate_legacy_license_supabase(email, activation_code)
+            if result.get("ok"):
+                st.session_state["license_status"] = result
+                st.session_state["_fpi_legacy_last_check"] = time.time()
+                st.sidebar.success("Meglévő Pro licenc aktiválva.")
+                st.rerun()
+            else:
+                st.sidebar.warning(result.get("message", "Sikertelen aktiválás."))
+        st.sidebar.caption("Átmeneti kompatibilitási mód a már kiadott e-mail + aktiváló kód licencekhez.")
 
     render_mode_badge()
 
@@ -14049,11 +14458,25 @@ def _fpi_landing_css_v100() -> None:
 
 
 def render_landing_login_panel_v103() -> None:
-    """Főoldali belépő / Demo-Pro állapot panel."""
+    """Főoldali backward-compatible Demo/Pro belépő panel."""
     mode_label = "PRO" if is_pro_mode() else "DEMO"
     mode_color = "#16A34A" if is_pro_mode() else "#2563EB"
     lic = st.session_state.get("license_status", {}) or {}
-    club = lic.get("club_name") or lic.get("email") or ""
+    club = lic.get("club_name") or ""
+    full_name = lic.get("full_name") or lic.get("email") or ""
+    teams = _fpi_license_teams_text(lic)
+    auth_mode = str(lic.get("auth_mode") or "").lower()
+
+    extra_bits = []
+    if full_name:
+        extra_bits.append(html.escape(str(full_name)))
+    if club:
+        extra_bits.append(html.escape(str(club)))
+    if teams:
+        extra_bits.append("Csapat: " + html.escape(str(teams)))
+    if is_pro_mode():
+        extra_bits.append("névre szóló fiók" if auth_mode == "named" else "meglévő aktiváló kód")
+    extra = (" · " + " · ".join(extra_bits)) if extra_bits else ""
 
     st.markdown(
         f"""
@@ -14067,34 +14490,77 @@ def render_landing_login_panel_v103() -> None:
                     </div>
                     <div style="color:#64748b;font-size:.95rem;margin-top:4px;">
                         {"Pro hozzáférés aktív" if is_pro_mode() else f"Demo limit: max {DEMO_PLAYER_LIMIT} játékos · max {DEMO_WEEK_LIMIT} hét · max {DEMO_ROW_LIMIT} sor"}
-                        {(" · " + html.escape(str(club))) if club else ""}
+                        {extra}
+                    </div>
+                </div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    auth_message = st.session_state.pop("_fpi_auth_message", None)
+    if auth_message:
+        st.warning(str(auth_message))
+
     if is_pro_mode():
-        c1, c2 = st.columns([1, 4])
+        c1, _ = st.columns([1, 4])
         with c1:
             if st.button("Kijelentkezés", use_container_width=True, key="landing_logout_license_v103"):
-                st.session_state.pop("license_status", None)
+                logout_fpi_access()
                 st.rerun()
         return
 
-    with st.expander("🔐 Pro belépés / aktiválás", expanded=False):
-        email = st.text_input("E-mail", value=st.session_state.get("user_email", ""), placeholder="nev@klub.hu", key="landing_license_email_v103")
+    with st.expander("🔐 Pro belépés", expanded=False):
+        st.caption("A korábban kiadott aktiváló kódok továbbra is érvényesek. Új licenceknél a névre szóló e-mail + jelszó belépést használd.")
+        login_type = st.radio(
+            "Belépés módja",
+            options=["E-mail + jelszó", "Meglévő aktiváló kód"],
+            horizontal=True,
+            key="landing_login_type_v420",
+        )
+        email = st.text_input(
+            "E-mail",
+            value=st.session_state.get("user_email", ""),
+            placeholder="nev@klub.hu",
+            key="landing_license_email_v103",
+        )
         if email:
             st.session_state["user_email"] = email
-        license_key = st.text_input("Aktiváló kód", type="password", help="A klubhoz kapott aktiváló kód.", key="landing_license_key_v103")
-        if st.button("Pro aktiválása", use_container_width=True, key="landing_activate_license_v103"):
-            result = validate_license_supabase(email, license_key)
-            if result.get("ok"):
-                st.session_state["license_status"] = result
-                st.success("Pro hozzáférés aktiválva.")
-                st.rerun()
-            else:
-                st.warning(result.get("message", "Sikertelen aktiválás."))
 
+        if login_type == "E-mail + jelszó":
+            password = st.text_input(
+                "Jelszó",
+                type="password",
+                help="A Supabase Auth-fiókod saját jelszava.",
+                key="landing_license_password_v420",
+            )
+            if st.button("Belépés", use_container_width=True, key="landing_activate_named_license_v420"):
+                result = login_named_user_supabase(email, password)
+                if result.get("ok"):
+                    st.session_state["license_status"] = result
+                    st.success("Sikeres Pro belépés.")
+                    st.rerun()
+                else:
+                    st.warning(result.get("message", "Sikertelen belépés."))
+            st.caption("Új / névre szóló licenc: az eszköz- és egyidejű session-korlát ezen a belépési módon érvényesül.")
+        else:
+            activation_code = st.text_input(
+                "Aktiváló kód",
+                type="password",
+                help="A korábban kapott aktiváló kód.",
+                key="landing_legacy_license_key_v420",
+            )
+            if st.button("Régi licenc aktiválása", use_container_width=True, key="landing_activate_legacy_license_v420"):
+                result = validate_legacy_license_supabase(email, activation_code)
+                if result.get("ok"):
+                    st.session_state["license_status"] = result
+                    st.session_state["_fpi_legacy_last_check"] = time.time()
+                    st.success("Meglévő Pro licenc aktiválva.")
+                    st.rerun()
+                else:
+                    st.warning(result.get("message", "Sikertelen aktiválás."))
+            st.caption("Régi kompatibilitási mód: a már kiküldött e-mail + aktiváló kód hozzáférésekhez.")
 
 
 def render_fpi_landing_page_v100() -> None:
@@ -21480,7 +21946,7 @@ def _fpi_v204_session_summary(df: pd.DataFrame, week: str, blocked: set) -> pd.D
 # =========================================================
 # V414 - Többfájlos / többmunkalapos eseménymotor + HU számformátum
 # =========================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V417_VALIDATION_FIXES_2026_08_09"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V419_NAMED_USER_AUTH_2026_08_13"
 FPI_FULL_PERIOD_KEY_V414 = "__FPI_FULL_PERIOD_V414__"
 
 
@@ -22222,7 +22688,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V418_REFERENCE_CONSISTENCY_AUDIT_2026_08_11"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V420_DUAL_AUTH_BACKWARD_COMPATIBLE_2026_08_13"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -23233,6 +23699,13 @@ if "fpi_active_page_v100" not in st.session_state:
     st.session_state["fpi_active_page_v100"] = "landing"
 
 active_page_v101 = st.session_state.get("fpi_active_page_v100", "landing")
+
+# V419: every Streamlit rerun refreshes the active named-user session at most
+# once per 120 seconds. This makes parallel-session blocking independent of
+# which FPI page the user is viewing.
+if (st.session_state.get("license_status", {}) or {}).get("ok"):
+    _fpi_auth_heartbeat(force=False)
+
 if active_page_v101 == "landing":
     render_fpi_landing_page_v100()
     st.stop()
@@ -27699,3 +28172,4 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
             )
     else:
         st.info("Mapping ellenőrzéshez előbb tölts fel egy Excel/CSV fájlt.")
+
