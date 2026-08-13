@@ -75,7 +75,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V421_DUAL_AUTH_INVITE_FLOW_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V422_PASSWORD_CHANGE_DUAL_AUTH_2026_08_13"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -8028,6 +8028,22 @@ def _fpi_license_rpc(client) -> Dict[str, object]:
         return {"ok": False, "message": f"Licencellenőrzési hiba: {exc}"}
 
 
+def _fpi_mark_password_changed_rpc(client) -> Dict[str, object]:
+    """Clear the named user's one-time must_change_password flag.
+
+    Requires the V422 Supabase migration, which exposes the authenticated-only
+    public.fpi_mark_password_changed() SECURITY DEFINER RPC.
+    """
+    try:
+        resp = client.rpc("fpi_mark_password_changed", {}).execute()
+        data = _fpi_rpc_dict(resp.data)
+        if data:
+            return data
+        return {"ok": False, "message": "A jelszócsere státusza nem frissíthető."}
+    except Exception as exc:
+        return {"ok": False, "message": f"A jelszócsere státuszának mentése nem sikerült: {exc}"}
+
+
 def _fpi_register_device_rpc(client, device_hash: str) -> Dict[str, object]:
     try:
         ua = _fpi_header_value("User-Agent")[:500]
@@ -8130,6 +8146,7 @@ def _fpi_complete_named_user_session(client, email_hint: str = "") -> Dict[str, 
         "plan": str(lic.get("plan") or "pro"),
         "expires_at": lic.get("expires_at"),
         "max_devices": lic.get("max_devices"),
+        "must_change_password": bool(lic.get("must_change_password", False)),
         "device_hash": device_hash,
         "session_token_hash": session_hash,
         "message": "Pro hozzáférés aktív.",
@@ -8333,6 +8350,143 @@ def login_named_user_supabase(email: str, password: str) -> Dict[str, object]:
     return result
 
 
+def _fpi_validate_new_password_v422(p1: str, p2: str) -> Dict[str, object]:
+    p1 = str(p1 or "")
+    p2 = str(p2 or "")
+    if len(p1) < 10:
+        return {"ok": False, "message": "Az új jelszó legyen legalább 10 karakter."}
+    if p1 != p2:
+        return {"ok": False, "message": "A két új jelszó nem egyezik."}
+    return {"ok": True}
+
+
+def _fpi_change_named_user_password_v422(
+    new_password: str,
+    new_password_again: str,
+    current_password: str = "",
+    verify_current: bool = False,
+) -> Dict[str, object]:
+    """Change the currently authenticated named user's password.
+
+    For forced first-login changes the user has just authenticated with the
+    temporary password, so verify_current=False is sufficient. For voluntary
+    changes from the sidebar V422 re-verifies the current password first.
+    """
+    lic = st.session_state.get("license_status", {}) or {}
+    if not lic.get("ok") or str(lic.get("auth_mode") or "").lower() != "named":
+        return {"ok": False, "message": "Jelszót csak névre szóló, bejelentkezett FPI-fiók módosíthat."}
+
+    valid = _fpi_validate_new_password_v422(new_password, new_password_again)
+    if not valid.get("ok"):
+        return valid
+
+    client = get_supabase_client()
+    if client is None:
+        return {"ok": False, "message": "A Supabase kapcsolat megszakadt. Jelentkezz be újra."}
+
+    email = str(lic.get("email") or st.session_state.get("user_email") or "").strip().lower()
+    if verify_current:
+        current_password = str(current_password or "")
+        if not current_password:
+            return {"ok": False, "message": "Add meg a jelenlegi jelszót is."}
+        try:
+            client.auth.sign_in_with_password({"email": email, "password": current_password})
+        except Exception:
+            return {"ok": False, "message": "A jelenlegi jelszó nem megfelelő."}
+
+    try:
+        client.auth.update_user({"password": str(new_password)})
+    except Exception as exc:
+        return {"ok": False, "message": f"A jelszó módosítása nem sikerült: {exc}"}
+
+    # Clearing this flag is intentionally server-side. Users cannot directly
+    # update their licence row through RLS.
+    marked = _fpi_mark_password_changed_rpc(client)
+    if not marked.get("ok"):
+        return {
+            "ok": False,
+            "password_changed": True,
+            "message": (
+                "Az új jelszó már beállításra került, de a must_change_password jelzőt "
+                "nem sikerült törölni. Futtasd le a V422 Supabase migrációt. Részlet: "
+                + str(marked.get("message") or "ismeretlen hiba")
+            ),
+        }
+
+    lic["must_change_password"] = False
+    st.session_state["license_status"] = lic
+    st.session_state["_fpi_auth_last_heartbeat"] = 0.0
+    return {"ok": True, "message": "A jelszó sikeresen módosítva."}
+
+
+def render_forced_password_change_v422() -> None:
+    """Block normal FPI navigation until the temporary password is replaced."""
+    lic = st.session_state.get("license_status", {}) or {}
+    st.markdown(
+        """
+        <div style="max-width:760px;margin:30px auto 16px auto;padding:26px 28px;border-radius:24px;
+                    background:#ffffff;border:1px solid #dbeafe;box-shadow:0 18px 46px rgba(15,23,42,.12);">
+            <div style="font-size:.82rem;font-weight:900;letter-spacing:.07em;color:#0f766e;">ELSŐ BELÉPÉS</div>
+            <div style="font-size:1.8rem;font-weight:950;color:#0f172a;margin-top:5px;">Állíts be saját jelszót</div>
+            <div style="color:#475569;margin-top:8px;line-height:1.45;">
+                A fiókod jelenleg ideiglenes jelszóval használható. A továbblépéshez állíts be egy saját, egyedi jelszót.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if lic.get("email"):
+        st.info(f"FPI-fiók: {lic.get('email')}")
+
+    p1 = st.text_input("Új jelszó", type="password", key="forced_password_1_v422")
+    p2 = st.text_input("Új jelszó még egyszer", type="password", key="forced_password_2_v422")
+    if st.button("Új jelszó mentése", type="primary", use_container_width=True, key="forced_password_save_v422"):
+        result = _fpi_change_named_user_password_v422(p1, p2, verify_current=False)
+        if result.get("ok"):
+            st.session_state["_fpi_auth_message"] = "A saját jelszavad beállítva. Az FPI használható."
+            st.session_state["fpi_active_page_v100"] = "landing"
+            st.rerun()
+        else:
+            if result.get("password_changed"):
+                st.error(str(result.get("message")))
+            else:
+                st.warning(str(result.get("message", "A jelszó módosítása nem sikerült.")))
+
+    if st.button("Kijelentkezés", use_container_width=True, key="forced_password_logout_v422"):
+        logout_fpi_access()
+        st.rerun()
+
+
+def render_sidebar_password_change_v422() -> None:
+    """Voluntary password change for an already active named-user licence."""
+    lic = st.session_state.get("license_status", {}) or {}
+    if str(lic.get("auth_mode") or "").lower() != "named":
+        return
+
+    if st.sidebar.button("Jelszó módosítása", use_container_width=True, key="open_password_change_v422"):
+        st.session_state["_fpi_password_change_open_v422"] = not bool(
+            st.session_state.get("_fpi_password_change_open_v422", False)
+        )
+
+    if not st.session_state.get("_fpi_password_change_open_v422", False):
+        return
+
+    st.sidebar.markdown("#### Saját jelszó módosítása")
+    current = st.sidebar.text_input("Jelenlegi jelszó", type="password", key="current_password_v422")
+    p1 = st.sidebar.text_input("Új jelszó", type="password", key="new_password_1_v422")
+    p2 = st.sidebar.text_input("Új jelszó még egyszer", type="password", key="new_password_2_v422")
+    if st.sidebar.button("Jelszó mentése", type="primary", use_container_width=True, key="save_password_v422"):
+        result = _fpi_change_named_user_password_v422(
+            p1, p2, current_password=current, verify_current=True
+        )
+        if result.get("ok"):
+            st.session_state["_fpi_password_change_open_v422"] = False
+            st.session_state["_fpi_auth_message"] = "A jelszó sikeresen módosítva."
+            st.rerun()
+        else:
+            st.sidebar.warning(str(result.get("message", "A jelszó módosítása nem sikerült.")))
+
+
 def _fpi_auth_heartbeat(force: bool = False) -> bool:
     lic = st.session_state.get("license_status", {}) or {}
     if not lic.get("ok"):
@@ -8399,6 +8553,7 @@ def _fpi_auth_heartbeat(force: bool = False) -> bool:
         "plan": str(latest.get("plan") or lic.get("plan") or "pro"),
         "expires_at": latest.get("expires_at"),
         "max_devices": latest.get("max_devices"),
+        "must_change_password": bool(latest.get("must_change_password", False)),
         "device_hash": device_hash,
         "session_token_hash": session_hash,
         "ok": True,
@@ -8480,6 +8635,9 @@ def render_license_panel() -> None:
     st.sidebar.markdown("### Belépés")
     if is_pro_mode():
         render_mode_badge()
+        lic = st.session_state.get("license_status", {}) or {}
+        if str(lic.get("auth_mode") or "").lower() == "named":
+            render_sidebar_password_change_v422()
         if st.sidebar.button("Kijelentkezés", use_container_width=True, key="logout_license"):
             logout_fpi_access()
             st.rerun()
@@ -8517,7 +8675,7 @@ def render_license_panel() -> None:
                 st.rerun()
             else:
                 st.sidebar.warning(result.get("message", "Sikertelen belépés."))
-        st.sidebar.caption("Új / névre szóló hozzáférés. Meghívás után a V421 aktiváló oldalon kell először saját jelszót beállítani.")
+        st.sidebar.caption("Új / névre szóló hozzáférés. Ideiglenes jelszóval létrehozott fióknál az első belépés után kötelező saját jelszót beállítani.")
     else:
         activation_code = st.sidebar.text_input(
             "Aktiváló kód",
@@ -22596,7 +22754,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V421_DUAL_AUTH_INVITE_FLOW_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V422_PASSWORD_CHANGE_DUAL_AUTH_2026_08_13"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -22888,7 +23046,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V421_DUAL_AUTH_INVITE_FLOW_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V422_PASSWORD_CHANGE_DUAL_AUTH_2026_08_13"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -23912,6 +24070,17 @@ active_page_v101 = st.session_state.get("fpi_active_page_v100", "landing")
 # which FPI page the user is viewing.
 if (st.session_state.get("license_status", {}) or {}).get("ok"):
     _fpi_auth_heartbeat(force=False)
+
+# V422: named users created with a temporary password cannot enter the FPI
+# until they replace it. Legacy activation-code users are unaffected.
+_fpi_v422_lic = st.session_state.get("license_status", {}) or {}
+if (
+    _fpi_v422_lic.get("ok")
+    and str(_fpi_v422_lic.get("auth_mode") or "").lower() == "named"
+    and bool(_fpi_v422_lic.get("must_change_password", False))
+):
+    render_forced_password_change_v422()
+    st.stop()
 
 if active_page_v101 == "landing":
     render_fpi_landing_page_v100()
