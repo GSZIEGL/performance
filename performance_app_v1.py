@@ -26623,7 +26623,7 @@ def _fpi_v429_landing_css() -> None:
 #
 # Tartalmi logika nem változik.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V436_FAST_INPUT_OUTPUT_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V437_INPUT_OUTPUT_READABILITY_2026_08_16"
 FPI_SAMPLE_CACHE_VERSION_V434 = "V434_PDF_VISUAL_2026_08_16"
 
 # Az aktuális, V433-ig felépített production sample builderek eltárolása.
@@ -26713,7 +26713,7 @@ def build_fpi_sample_pdf_bytes(
 # Ugyanaz a jól látható forgó státuszjelző minden FPI oldalon:
 # landing / Input-Output / Metodika / Haladó elemző app.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V436_FAST_INPUT_OUTPUT_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V437_INPUT_OUTPUT_READABILITY_2026_08_16"
 
 
 def _fpi_v435_global_running_indicator_css() -> None:
@@ -26812,7 +26812,7 @@ _fpi_v435_global_running_indicator_css()
 # =============================================================================
 # V436 – FAST INPUT / OUTPUT PERFORMANCE LAYER
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V436_FAST_INPUT_OUTPUT_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V437_INPUT_OUTPUT_READABILITY_2026_08_16"
 FPI_V436_CACHE_VERSION = "2026_08_16_A"
 
 
@@ -27016,6 +27016,205 @@ def _fpi_v436_clean_report_signature(df: pd.DataFrame, settings: Dict[str, objec
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+
+# =============================================================================
+# V437 – INPUT / OUTPUT FINAL READABILITY FIX
+# Csak vizuális javítás a vezetői döntéselőkészítő oldalon.
+# A V436 performance-optimalizálás és minden funkció változatlan.
+# =============================================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V437_INPUT_OUTPUT_READABILITY_2026_08_16"
+
+_fpi_v437_base_clean_workspace = render_fpi_clean_workspace_v101
+
+
+def _fpi_v437_clean_readability_css() -> None:
+    st.markdown(
+        """
+        <style>
+        /* ------------------------------------------------------------
+           FELSŐ HERO – explicit kontraszt, hogy korábbi globális CSS
+           semmilyen körülmények között ne tudja sötétre írni.
+        ------------------------------------------------------------ */
+        .stApp .block-container .fpi-work-hero {
+            background:
+                radial-gradient(circle at 88% 20%, rgba(15,167,122,.25), transparent 28%),
+                linear-gradient(135deg,#071521 0%,#0B2235 58%,#103149 100%) !important;
+            color:#FFFFFF !important;
+        }
+
+        .stApp .block-container .fpi-work-hero .fpi-work-title,
+        .stApp .block-container .fpi-work-hero .fpi-work-title *,
+        .stApp .block-container .fpi-work-hero h1,
+        .stApp .block-container .fpi-work-hero h2,
+        .stApp .block-container .fpi-work-hero h3 {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            opacity:1 !important;
+            text-shadow:none !important;
+        }
+
+        .stApp .block-container .fpi-work-hero .fpi-work-sub,
+        .stApp .block-container .fpi-work-hero .fpi-work-sub *,
+        .stApp .block-container .fpi-work-hero p {
+            color:#D6E3EA !important;
+            -webkit-text-fill-color:#D6E3EA !important;
+            opacity:1 !important;
+        }
+
+        .stApp .block-container .fpi-work-hero .fpi-work-kicker,
+        .stApp .block-container .fpi-work-hero .fpi-work-kicker * {
+            color:#F0CE80 !important;
+            -webkit-text-fill-color:#F0CE80 !important;
+            opacity:1 !important;
+            background:rgba(255,255,255,.055) !important;
+            border-color:rgba(228,191,107,.52) !important;
+        }
+
+        /* ------------------------------------------------------------
+           FELSŐ MUNKAFOLYAMAT SÁV
+        ------------------------------------------------------------ */
+        .stApp .block-container .fpi-workflow-box,
+        .stApp .block-container .fpi-workflow-box *,
+        .stApp .block-container .fpi-workflow-box span,
+        .stApp .block-container .fpi-workflow-box b {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            opacity:1 !important;
+            text-shadow:none !important;
+        }
+
+        .stApp .block-container .fpi-workflow-box {
+            background:linear-gradient(135deg,#0D665F 0%,#2563EB 100%) !important;
+        }
+
+        /* ------------------------------------------------------------
+           LETÖLTŐGOMBOK – pl. Általános Excel sablon
+        ------------------------------------------------------------ */
+        .stApp .block-container .stDownloadButton > button {
+            background:linear-gradient(135deg,#0B2235,#16435E) !important;
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            border:1px solid rgba(15,167,122,.34) !important;
+            opacity:1 !important;
+        }
+
+        .stApp .block-container .stDownloadButton > button *,
+        .stApp .block-container .stDownloadButton > button p,
+        .stApp .block-container .stDownloadButton > button span,
+        .stApp .block-container .stDownloadButton > button svg {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            fill:#FFFFFF !important;
+            opacity:1 !important;
+            background:transparent !important;
+        }
+
+        /* ------------------------------------------------------------
+           FILE UPLOADER – a Browse/Fájl tallózása gomb szövege is látszódjon
+        ------------------------------------------------------------ */
+        .stApp .block-container [data-testid="stFileUploader"] button,
+        .stApp .block-container [data-testid="stFileUploader"] button[kind],
+        .stApp .block-container [data-testid="stFileUploader"] button[data-testid] {
+            background:#0B2235 !important;
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            border:1px solid #16435E !important;
+            opacity:1 !important;
+        }
+
+        .stApp .block-container [data-testid="stFileUploader"] button *,
+        .stApp .block-container [data-testid="stFileUploader"] button span,
+        .stApp .block-container [data-testid="stFileUploader"] button p,
+        .stApp .block-container [data-testid="stFileUploader"] button svg {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            fill:#FFFFFF !important;
+            opacity:1 !important;
+            background:transparent !important;
+        }
+
+        /* Dropzone szövegek maradjanak sötétek a világos kártyán. */
+        .stApp .block-container [data-testid="stFileUploader"] section,
+        .stApp .block-container [data-testid="stFileUploader"] section > div,
+        .stApp .block-container [data-testid="stFileUploader"] section small,
+        .stApp .block-container [data-testid="stFileUploader"] section span,
+        .stApp .block-container [data-testid="stFileUploader"] section p {
+            color:#334155 !important;
+            -webkit-text-fill-color:#334155 !important;
+            opacity:1 !important;
+        }
+
+        /* A feltöltő gomb szabálya legyen az utolsó, ne örökölje a fenti sötét szöveget. */
+        .stApp .block-container [data-testid="stFileUploader"] section button,
+        .stApp .block-container [data-testid="stFileUploader"] section button * {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            fill:#FFFFFF !important;
+        }
+
+        /* ------------------------------------------------------------
+           WIDGET LABEL / RADIO / TOGGLE – világos body-n biztos sötét szöveg
+        ------------------------------------------------------------ */
+        .stApp .block-container [data-testid="stWidgetLabel"] *,
+        .stApp .block-container [role="radiogroup"] label *,
+        .stApp .block-container [data-testid="stToggle"] label *,
+        .stApp .block-container [data-testid="stCheckbox"] label * {
+            color:#24364A !important;
+            -webkit-text-fill-color:#24364A !important;
+            opacity:1 !important;
+        }
+
+        /* Selectbox mező és opciók */
+        .stApp .block-container [data-baseweb="select"] *,
+        [data-baseweb="popover"] *,
+        [role="listbox"] *,
+        [role="option"] * {
+            color:#0E2031 !important;
+            -webkit-text-fill-color:#0E2031 !important;
+            opacity:1 !important;
+        }
+
+        /* Infó/section kártyák szövege teljes kontraszton. */
+        .stApp .block-container .fpi-step-card,
+        .stApp .block-container .fpi-step-card *,
+        .stApp .block-container .fpi-quick-panel,
+        .stApp .block-container .fpi-quick-panel *,
+        .stApp .block-container div[data-testid="stExpander"],
+        .stApp .block-container div[data-testid="stExpander"] > * {
+            opacity:1 !important;
+            filter:none !important;
+        }
+
+        .stApp .block-container .fpi-step-card b,
+        .stApp .block-container .fpi-quick-panel h3 {
+            color:#0E2031 !important;
+            -webkit-text-fill-color:#0E2031 !important;
+        }
+
+        .stApp .block-container .fpi-step-card span,
+        .stApp .block-container .fpi-step-card p,
+        .stApp .block-container .fpi-quick-panel p {
+            color:#475569 !important;
+            -webkit-text-fill-color:#475569 !important;
+        }
+
+        /* Disabled elemek maradjanak felismerhetőek, de ne tűnjenek eltűntnek. */
+        .stApp .block-container button:disabled,
+        .stApp .block-container button:disabled * {
+            opacity:.68 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_fpi_clean_workspace_v101() -> None:
+    """V437: V436 funkciók + végső Input/Output kontrasztjavítás."""
+    _fpi_v437_base_clean_workspace()
+    _fpi_v437_clean_readability_css()
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
