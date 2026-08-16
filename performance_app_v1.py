@@ -76,7 +76,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V425_BRANDING_METHODOLOGY_CLEANUP_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V426_LARGE_PDF_HEADER_LOGO_2026_08_16"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -4292,29 +4292,147 @@ def _fpi_pdf_logo_path_v425() -> Optional[Path]:
     return None
 
 
-def _fpi_pdf_page_branding_v425(canvas_obj, doc_obj) -> None:
-    """Egységes FPI logó minden PDF minden oldalának jobb felső sarkában."""
+def _fpi_pdf_logo_dimensions_v426(max_w: float, max_h: float) -> Tuple[Optional[Path], float, float]:
+    """Aránytartó logóméret ReportLabhoz."""
     logo_path = _fpi_pdf_logo_path_v425()
     if logo_path is None:
+        return None, 0.0, 0.0
+    try:
+        from reportlab.lib.utils import ImageReader
+        img = ImageReader(str(logo_path))
+        iw, ih = img.getSize()
+        if not iw or not ih:
+            return None, 0.0, 0.0
+        scale = min(float(max_w) / float(iw), float(max_h) / float(ih))
+        return logo_path, float(iw) * scale, float(ih) * scale
+    except Exception:
+        return None, 0.0, 0.0
+
+
+def _fpi_pdf_split_title_v426(raw_title: str) -> Tuple[str, str]:
+    """Az FPI címet két, stabilan elférő sorra bontja."""
+    clean = fpi_pdf_sanitize_v406(str(raw_title or "").strip())
+    if not clean:
+        return "Football Performance Intelligence", ""
+
+    # A legtöbb riport címe: Football Performance Intelligence – <riport neve>.
+    # Ezt tudatosan két sorba törjük, hogy a jobb oldali logó nagy lehessen.
+    m = re.match(r"^Football Performance Intelligence\s*[–—-]\s*(.+)$", clean, flags=re.I)
+    if m:
+        return "Football Performance Intelligence", m.group(1).strip()
+    if clean.lower() == "football performance intelligence":
+        return "Football Performance Intelligence", ""
+    return "Football Performance Intelligence", clean
+
+
+def _fpi_pdf_first_page_header_v426(doc_obj, story: list) -> list:
+    """
+    Nagy, egységes első oldali fejléc minden FPI PDF-hez.
+
+    Bal oldalon két soros cím, jobb oldalon nagy logo.png. Ha az első story-elem
+    már FPI-cím Paragraph, azt kivesszük és ugyanazt a szöveget a fejlécbe emeljük.
+    """
+    items = list(story or [])
+    raw_title = ""
+    try:
+        if items and Paragraph is not None and isinstance(items[0], Paragraph):
+            first = items[0]
+            plain = first.getPlainText() if hasattr(first, "getPlainText") else getattr(first, "text", "")
+            style = getattr(first, "style", None)
+            style_name = str(getattr(style, "name", "") or "").lower()
+            font_size = float(getattr(style, "fontSize", 0.0) or 0.0)
+            looks_like_title = (
+                "football performance intelligence" in str(plain).lower()
+                or "title" in style_name
+                or font_size >= 14.0
+            )
+            if looks_like_title:
+                raw_title = str(plain or "")
+                items = items[1:]
+    except Exception:
+        raw_title = ""
+
+    line1, line2 = _fpi_pdf_split_title_v426(raw_title)
+    try:
+        styles = getSampleStyleSheet()
+        p1 = ParagraphStyle(
+            "FPI_V426_BRAND_LINE1",
+            parent=styles["Title"],
+            fontSize=17.5,
+            leading=20.5,
+            textColor=colors.HexColor("#0F172A"),
+            spaceAfter=0,
+            alignment=0,
+        )
+        p2 = ParagraphStyle(
+            "FPI_V426_BRAND_LINE2",
+            parent=styles["Heading2"],
+            fontSize=12.8,
+            leading=15.5,
+            textColor=colors.HexColor("#334155"),
+            spaceBefore=2,
+            spaceAfter=0,
+            alignment=0,
+        )
+        left_bits = [Paragraph(line1, p1)]
+        if line2:
+            left_bits += [Spacer(1, 0.04 * cm), Paragraph(line2, p2)]
+
+        # Portraitban is elfér, landscape-ben pedig kifejezetten hangsúlyos.
+        available_w = float(getattr(doc_obj, "width", 0.0) or (A4[0] - 2.4 * cm))
+        portrait_like = available_w < 20.0 * cm
+        logo_max_w = 4.15 * cm if portrait_like else 4.75 * cm
+        logo_max_h = 2.75 * cm if portrait_like else 3.05 * cm
+        logo_path, logo_w, logo_h = _fpi_pdf_logo_dimensions_v426(logo_max_w, logo_max_h)
+
+        if logo_path is not None and logo_w > 0 and logo_h > 0:
+            from reportlab.platypus import Image as RLImage
+            logo_flow = RLImage(str(logo_path), width=logo_w, height=logo_h)
+            logo_col_w = max(4.35 * cm if portrait_like else 4.95 * cm, logo_w + 0.12 * cm)
+            title_col_w = max(4.0 * cm, available_w - logo_col_w)
+            hdr = Table([[left_bits, logo_flow]], colWidths=[title_col_w, logo_col_w], hAlign="LEFT")
+            hdr.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (0, 0), 0),
+                ("RIGHTPADDING", (0, 0), (0, 0), 8),
+                ("LEFTPADDING", (1, 0), (1, 0), 4),
+                ("RIGHTPADDING", (1, 0), (1, 0), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.65, colors.HexColor("#CBD5E1")),
+            ]))
+            return [hdr, Spacer(1, 0.16 * cm)] + items
+
+        # Logó hiányában is megmarad az egységes két soros fejléc.
+        header_only = Table([[left_bits]], colWidths=[available_w], hAlign="LEFT")
+        header_only.setStyle(TableStyle([
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.65, colors.HexColor("#CBD5E1")),
+        ]))
+        return [header_only, Spacer(1, 0.16 * cm)] + items
+    except Exception:
+        # PDF-export soha ne álljon meg pusztán a branding miatt.
+        return story
+
+
+def _fpi_pdf_later_page_branding_v426(canvas_obj, doc_obj) -> None:
+    """Kisebb, de jól olvasható FPI logó a 2. oldaltól, mindig jobb felül."""
+    logo_path, draw_w, draw_h = _fpi_pdf_logo_dimensions_v426(2.95 * cm, 0.95 * cm)
+    if logo_path is None or draw_w <= 0 or draw_h <= 0:
         return
     try:
         from reportlab.lib.utils import ImageReader
         canvas_obj.saveState()
-        img = ImageReader(str(logo_path))
-        iw, ih = img.getSize()
-        if not iw or not ih:
-            canvas_obj.restoreState()
-            return
-        max_w = 2.35 * cm
-        max_h = 0.82 * cm
-        scale = min(max_w / float(iw), max_h / float(ih))
-        draw_w = float(iw) * scale
-        draw_h = float(ih) * scale
         page_w, page_h = canvas_obj._pagesize
-        x = page_w - 0.45 * cm - draw_w
-        y = page_h - 0.16 * cm - draw_h
+        x = page_w - 0.55 * cm - draw_w
+        y = page_h - 0.24 * cm - draw_h
         canvas_obj.drawImage(
-            img, x, y, width=draw_w, height=draw_h,
+            ImageReader(str(logo_path)), x, y,
+            width=draw_w, height=draw_h,
             preserveAspectRatio=True, mask="auto"
         )
         canvas_obj.restoreState()
@@ -4325,17 +4443,23 @@ def _fpi_pdf_page_branding_v425(canvas_obj, doc_obj) -> None:
             pass
 
 
+def _fpi_pdf_first_page_branding_v426(canvas_obj, doc_obj) -> None:
+    """Az első oldali nagy logó a story fejlécben van; itt nem duplázzuk meg."""
+    return
+
+
 def _fpi_pdf_build_v406(doc, story: list) -> None:
-    """Minden FPI PDF közös, végső build-kapuja + egységes logózás."""
-    # A logó a felső margóban ül; biztosítjuk, hogy a tartalom ne fusson alá.
+    """Minden FPI PDF közös végső build-kapuja + V426 egységes PDF-fejléc."""
+    branded_story = _fpi_pdf_first_page_header_v426(doc, story)
     try:
-        doc.topMargin = max(float(getattr(doc, "topMargin", 0.0) or 0.0), 1.15 * cm)
+        # Első oldalon a fejléc maga foglal helyet; későbbi oldalakon a kis felső logóhoz kell hely.
+        doc.topMargin = max(float(getattr(doc, "topMargin", 0.0) or 0.0), 1.25 * cm)
     except Exception:
         pass
     doc.build(
-        _fpi_v406_sanitize_pdf_story(story),
-        onFirstPage=_fpi_pdf_page_branding_v425,
-        onLaterPages=_fpi_pdf_page_branding_v425,
+        _fpi_v406_sanitize_pdf_story(branded_story),
+        onFirstPage=_fpi_pdf_first_page_branding_v426,
+        onLaterPages=_fpi_pdf_later_page_branding_v426,
     )
 
 
@@ -22851,7 +22975,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V425_BRANDING_METHODOLOGY_CLEANUP_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V426_LARGE_PDF_HEADER_LOGO_2026_08_16"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -23143,7 +23267,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V425_BRANDING_METHODOLOGY_CLEANUP_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V426_LARGE_PDF_HEADER_LOGO_2026_08_16"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -28648,10 +28772,10 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
 
 
 # =========================================================
-# V425 – Branding + methodology consistency cleanup
-# - logo.png minden PDF minden oldalán, jobb felső sarokban
+# V426 – Large PDF header logo + branding consistency
+# - első oldal: nagy logo.png jobb oldalon, két soros cím bal oldalon; további oldalakon kisebb jobb felső logó
 # - a főoldalon kapcsolattartó: Sziegl Gábor, +36 30/451-7614
 # - a korábbi, nem használt csapatszintű normalizálás eltávolítva
 # - aktív meccsreferencia: játékosonkénti /90 -> mezőnyjátékos-medián
 # =========================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V425_BRANDING_METHODOLOGY_CLEANUP_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V426_LARGE_PDF_HEADER_LOGO_2026_08_16"
