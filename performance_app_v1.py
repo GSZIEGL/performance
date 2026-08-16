@@ -16458,7 +16458,7 @@ def render_fpi_clean_workspace_v101() -> None:
     clean_tactical_context = _fpi_clean_tactical_import_v102(tactical_gps_context_clean)
     st.session_state["fpi_clean_tactical_context_v115"] = clean_tactical_context
 
-    # 4. Exportok – minden GPS-alapú export ugyanazt a kiválasztott időszakot használja.
+    # 4. Exportok – V436: gyors oldalbetöltés, riportok csak kérésre készülnek.
     _fpi_section_header_v113(
         "4. Export",
         "A GPS-only, GPS+taktikai és Saját csapat riport ugyanabból a kiválasztott időszakból, benchmarkprofilból és játékmodellből készül.",
@@ -16470,9 +16470,6 @@ def render_fpi_clean_workspace_v101() -> None:
     )
     scope_filename_v411 = str(analysis_scope_meta_clean.get("label") or analysis_report_key_clean or "riport")
     safe_week_clean = re.sub(r"[^0-9A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű_-]+", "_", scope_filename_v411).strip("_")[:80] or "riport"
-    canonical_bundle_v156 = _fpi_canonical_report_bundle_v156(
-        analysis_clean, analysis_report_key_clean, selected_playstyle_clean, clean_tactical_context
-    )
 
     trend_state_v411 = ctx_clean.get("trend_status_v411", {}) if "ctx_clean" in locals() else {}
     analysis_mode_state_v411 = ctx_clean.get("analysis_mode_v411", {}) if "ctx_clean" in locals() else {}
@@ -16482,52 +16479,152 @@ def render_fpi_clean_workspace_v101() -> None:
         f"Referencia: {ref_profile_clean}"
     )
 
-    ex1, ex2, ex3, ex4, ex5 = st.columns(5)
-    with ex1:
-        gps_pdf_clean = build_fpi_gps_only_pdf_bytes(
-            analysis_clean, gps_pdf_period_clean_v205, selected_playstyle_clean
+    # A riport-cache kulcsa az aktuális elemzett adat + beállítások + taktikai input.
+    report_signature_v436 = _fpi_v436_clean_report_signature(
+        analysis_clean,
+        {
+            "gps_period": gps_pdf_period_clean_v205,
+            "report_key": analysis_report_key_clean,
+            "analysis_mode": analysis_mode_selection_clean,
+            "playstyle": selected_playstyle_clean,
+            "reference_profile": ref_profile_clean,
+            "opponent": opponent_clean,
+            "next_match_date": str(next_match_date_clean),
+            "reference_age": reference_age_clean,
+            "reference_level": reference_level_clean,
+            "benchmark_preset": benchmark_preset_clean_v303,
+            "playmodel_label": playmodel_label_clean_v411,
+            "safe_week": safe_week_clean,
+        },
+    )
+
+    report_cache_key_v436 = "fpi_v436_clean_report_cache"
+    report_cache_v436 = st.session_state.get(report_cache_key_v436) or {}
+    cache_matches_v436 = report_cache_v436.get("signature") == report_signature_v436
+    reports_v436 = dict(report_cache_v436.get("reports") or {}) if cache_matches_v436 else {}
+
+    if report_cache_v436 and not cache_matches_v436:
+        st.info("Az input vagy valamelyik elemzési beállítás megváltozott. A korábbi PDF-ek helyett friss riport készítése szükséges.")
+
+    tactical_signal_v436 = bool(_fpi_has_tactical_signal_v95(clean_tactical_context))
+
+    def _fpi_v436_generate_one_report_local(report_code: str):
+        try:
+            if report_code == "gps":
+                return build_fpi_gps_only_pdf_bytes(
+                    analysis_clean, gps_pdf_period_clean_v205, selected_playstyle_clean
+                )
+            if report_code == "tactical":
+                if not tactical_signal_v436:
+                    return None
+                return build_fpi_tactical_only_pdf_bytes_v156(clean_tactical_context)
+            if report_code == "integrated":
+                return build_fpi_product_pdf_bytes(
+                    analysis_clean, analysis_report_key_clean, selected_playstyle_clean,
+                    report_type="executive", tactical_context=clean_tactical_context,
+                )
+            if report_code == "own":
+                return build_fpi_own_team_profile_pdf_bytes(
+                    analysis_clean, analysis_report_key_clean, selected_playstyle_clean,
+                    tactical_context=clean_tactical_context,
+                )
+            if report_code == "method":
+                return build_fpi_methodology_pdf_bytes_v143()
+        except Exception as exc:
+            st.error(f"Riportkészítési hiba ({report_code}): {exc}")
+        return None
+
+    def _fpi_v436_store_reports_local(updated_reports: Dict[str, object]) -> None:
+        st.session_state[report_cache_key_v436] = {
+            "signature": report_signature_v436,
+            "reports": updated_reports,
+            "safe_week": safe_week_clean,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    ready_count_v436 = sum(
+        1 for k in ["gps", "tactical", "integrated", "own", "method"]
+        if isinstance(reports_v436.get(k), (bytes, bytearray)) and len(reports_v436.get(k) or b"") > 1000
+    )
+
+    top_export_left_v436, top_export_right_v436 = st.columns([1.35, 3.65])
+    with top_export_left_v436:
+        generate_all_v436 = st.button(
+            "⚡ Összes riport elkészítése",
+            use_container_width=True,
+            type="primary",
+            key="clean_generate_all_reports_v436",
         )
-        if gps_pdf_clean is not None:
-            st.download_button(
-                "⬇️ GPS-only", gps_pdf_clean, f"fpi_gps_only_{safe_week_clean}.pdf",
-                "application/pdf", use_container_width=True, key="clean_export_gps_v411",
-            )
-    with ex2:
-        tactical_only_pdf_clean_v156 = build_fpi_tactical_only_pdf_bytes_v156(clean_tactical_context)
-        if tactical_only_pdf_clean_v156 is not None:
-            st.download_button(
-                "⬇️ Taktikai-only", tactical_only_pdf_clean_v156, f"fpi_taktikai_only_{safe_week_clean}.pdf",
-                "application/pdf", use_container_width=True, key="clean_export_tactical_only_v411",
-            )
+    with top_export_right_v436:
+        if ready_count_v436:
+            st.success(f"{ready_count_v436} riport kész. Azonos input mellett nem generálódnak újra.")
         else:
-            st.caption("Nincs taktikai input.")
-    with ex3:
-        integrated_pdf_clean_v156 = build_fpi_product_pdf_bytes(
-            analysis_clean, analysis_report_key_clean, selected_playstyle_clean,
-            report_type="executive", tactical_context=clean_tactical_context,
-        )
-        if integrated_pdf_clean_v156 is not None:
-            st.download_button(
-                "⬇️ GPS + taktikai", integrated_pdf_clean_v156, f"fpi_gps_taktikai_{safe_week_clean}.pdf",
-                "application/pdf", use_container_width=True, key="clean_export_integrated_v411",
+            st.caption(
+                "Gyors mód: az oldal betöltésekor nem készül PDF. "
+                "Készítsd el csak azt a riportot, amelyikre ténylegesen szükséged van."
             )
-    with ex4:
-        own_team_pdf_clean_v156 = build_fpi_own_team_profile_pdf_bytes(
-            analysis_clean, analysis_report_key_clean, selected_playstyle_clean,
-            tactical_context=clean_tactical_context,
-        )
-        if own_team_pdf_clean_v156 is not None:
-            st.download_button(
-                "⬇️ Saját csapat", own_team_pdf_clean_v156, f"fpi_sajat_csapat_{safe_week_clean}.pdf",
-                "application/pdf", use_container_width=True, key="clean_export_own_v411",
-            )
-    with ex5:
-        method_pdf_clean_v156 = build_fpi_methodology_pdf_bytes_v143()
-        if method_pdf_clean_v156 is not None:
-            st.download_button(
-                "⬇️ Metodika", method_pdf_clean_v156, "fpi_metodika.pdf",
-                "application/pdf", use_container_width=True, key="clean_export_method_v411",
-            )
+
+    if generate_all_v436:
+        targets_v436 = ["gps", "integrated", "own", "method"]
+        if tactical_signal_v436:
+            targets_v436.insert(1, "tactical")
+        progress_v436 = st.progress(0, text="Riportok előkészítése…")
+        for idx_v436, code_v436 in enumerate(targets_v436, start=1):
+            if not isinstance(reports_v436.get(code_v436), (bytes, bytearray)):
+                progress_v436.progress(
+                    int((idx_v436 - 1) / max(1, len(targets_v436)) * 100),
+                    text=f"Riport készül: {code_v436}…",
+                )
+                value_v436 = _fpi_v436_generate_one_report_local(code_v436)
+                if isinstance(value_v436, (bytes, bytearray)) and len(value_v436) > 1000:
+                    reports_v436[code_v436] = bytes(value_v436)
+                    _fpi_v436_store_reports_local(reports_v436)
+        progress_v436.progress(100, text="Riportok elkészültek.")
+        _fpi_v436_store_reports_local(reports_v436)
+
+    report_specs_v436 = [
+        ("gps", "GPS-only", f"fpi_gps_only_{safe_week_clean}.pdf"),
+        ("tactical", "Taktikai-only", f"fpi_taktikai_only_{safe_week_clean}.pdf"),
+        ("integrated", "GPS + taktikai", f"fpi_gps_taktikai_{safe_week_clean}.pdf"),
+        ("own", "Saját csapat", f"fpi_sajat_csapat_{safe_week_clean}.pdf"),
+        ("method", "Metodika", "fpi_metodika.pdf"),
+    ]
+
+    ex_cols_v436 = st.columns(5)
+    for col_v436, (code_v436, label_v436, filename_v436) in zip(ex_cols_v436, report_specs_v436):
+        with col_v436:
+            if code_v436 == "tactical" and not tactical_signal_v436:
+                st.markdown(f"**{label_v436}**")
+                st.caption("Nincs taktikai input.")
+                continue
+
+            data_v436 = reports_v436.get(code_v436)
+            if isinstance(data_v436, (bytes, bytearray)) and len(data_v436) > 1000:
+                st.download_button(
+                    f"⬇️ {label_v436}",
+                    data_v436,
+                    filename_v436,
+                    "application/pdf",
+                    use_container_width=True,
+                    key=f"clean_download_{code_v436}_v436",
+                    on_click="ignore",
+                )
+            else:
+                st.markdown(f"**{label_v436}**")
+                if st.button(
+                    "⚙️ Elkészítés",
+                    use_container_width=True,
+                    key=f"clean_generate_{code_v436}_v436",
+                ):
+                    with st.spinner(f"{label_v436} riport készítése…"):
+                        value_v436 = _fpi_v436_generate_one_report_local(code_v436)
+                    if isinstance(value_v436, (bytes, bytearray)) and len(value_v436) > 1000:
+                        reports_v436[code_v436] = bytes(value_v436)
+                        _fpi_v436_store_reports_local(reports_v436)
+                        st.success("Kész – a letöltőgomb a következő pillanatban megjelenik.")
+                        st.rerun()
+                    else:
+                        st.error("A riport nem készült el.")
 
 
 # =========================================================
@@ -26526,7 +26623,7 @@ def _fpi_v429_landing_css() -> None:
 #
 # Tartalmi logika nem változik.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V435_GLOBAL_SPINNER_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V436_FAST_INPUT_OUTPUT_2026_08_16"
 FPI_SAMPLE_CACHE_VERSION_V434 = "V434_PDF_VISUAL_2026_08_16"
 
 # Az aktuális, V433-ig felépített production sample builderek eltárolása.
@@ -26616,7 +26713,7 @@ def build_fpi_sample_pdf_bytes(
 # Ugyanaz a jól látható forgó státuszjelző minden FPI oldalon:
 # landing / Input-Output / Metodika / Haladó elemző app.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V435_GLOBAL_SPINNER_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V436_FAST_INPUT_OUTPUT_2026_08_16"
 
 
 def _fpi_v435_global_running_indicator_css() -> None:
@@ -26709,6 +26806,216 @@ def _fpi_v435_global_running_indicator_css() -> None:
 
 # FONTOS: routing ELŐTT fut, ezért akkor is aktív, ha az oldal később st.stop()-pal megáll.
 _fpi_v435_global_running_indicator_css()
+
+
+
+# =============================================================================
+# V436 – FAST INPUT / OUTPUT PERFORMANCE LAYER
+# =============================================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V436_FAST_INPUT_OUTPUT_2026_08_16"
+FPI_V436_CACHE_VERSION = "2026_08_16_A"
+
+
+class _FPIV436BytesUpload:
+    def __init__(self, name: str, data: bytes):
+        self.name = str(name or "upload.bin")
+        self._data = bytes(data or b"")
+    def getvalue(self):
+        return self._data
+    def read(self):
+        return self._data
+
+
+def _fpi_v436_upload_payload(files) -> tuple:
+    out = []
+    for f in files or []:
+        try:
+            b = f.getvalue()
+        except Exception:
+            try:
+                b = f.read()
+            except Exception:
+                b = b""
+        if b:
+            out.append((str(getattr(f, "name", "upload.bin")), bytes(b)))
+    return tuple(out)
+
+
+def _fpi_v436_payload_wrappers(payload: tuple):
+    return [_FPIV436BytesUpload(name, data) for name, data in (payload or ())]
+
+
+# -----------------------------------------------------------------------------
+# GPS IMPORT CACHE
+# Ugyanazt a nagy Excel/ZIP csomagot ne parse-olja újra minden widget-rerunnál.
+# -----------------------------------------------------------------------------
+_fpi_v436_raw_read_many_gps = _fpi_read_many_gps_files_v143
+
+
+@st.cache_data(show_spinner=False, max_entries=6)
+def _fpi_v436_cached_read_many_gps(
+    training_payload: tuple,
+    match_payload: tuple,
+    mixed_payload: tuple,
+    provider_override: str,
+    cache_version: str,
+):
+    return _fpi_v436_raw_read_many_gps(
+        _fpi_v436_payload_wrappers(training_payload),
+        _fpi_v436_payload_wrappers(match_payload),
+        _fpi_v436_payload_wrappers(mixed_payload),
+        provider_override,
+    )
+
+
+def _fpi_read_many_gps_files_v143(
+    training_files: Optional[List[object]],
+    match_files: Optional[List[object]],
+    mixed_files: Optional[List[object]],
+    provider_override: str = "Automatikus felismerés",
+):
+    return _fpi_v436_cached_read_many_gps(
+        _fpi_v436_upload_payload(training_files),
+        _fpi_v436_upload_payload(match_files),
+        _fpi_v436_upload_payload(mixed_files),
+        str(provider_override),
+        FPI_V436_CACHE_VERSION,
+    )
+
+
+# -----------------------------------------------------------------------------
+# TACTICAL EXCEL/CSV READ CACHE
+# -----------------------------------------------------------------------------
+_fpi_v436_raw_clean_read_table = _fpi_clean_read_table_file_v142
+
+
+@st.cache_data(show_spinner=False, max_entries=24)
+def _fpi_v436_cached_clean_read_table(
+    file_name: str,
+    file_bytes: bytes,
+    cache_version: str,
+):
+    return _fpi_v436_raw_clean_read_table(_FPIV436BytesUpload(file_name, file_bytes))
+
+
+def _fpi_clean_read_table_file_v142(uploaded_file) -> Tuple[pd.DataFrame, str]:
+    payload = _fpi_v436_upload_payload([uploaded_file])
+    if not payload:
+        return pd.DataFrame(), str(getattr(uploaded_file, "name", "nem olvasható"))
+    name, data = payload[0]
+    return _fpi_v436_cached_clean_read_table(name, data, FPI_V436_CACHE_VERSION)
+
+
+# -----------------------------------------------------------------------------
+# TACTICAL PDF PARSE CACHE
+# A feltöltött PDF szövegkinyerése csak akkor fusson újra, ha a fájl változott.
+# -----------------------------------------------------------------------------
+_fpi_v436_raw_set_pdf_upload_state = _fpi_set_pdf_upload_state_v92
+
+
+def _fpi_v436_full_file_signature(files) -> str:
+    h = hashlib.sha256()
+    count = 0
+    for name, data in _fpi_v436_upload_payload(files):
+        count += 1
+        h.update(name.encode("utf-8", errors="ignore"))
+        h.update(b"\0")
+        h.update(data)
+        h.update(b"\0")
+    return f"{count}:{h.hexdigest()}" if count else "EMPTY"
+
+
+def _fpi_set_pdf_upload_state_v92(side: str, files: List[object]) -> Dict[str, object]:
+    if not files:
+        return _fpi_v436_raw_set_pdf_upload_state(side, files)
+
+    signature = _fpi_v436_full_file_signature(files)
+    cache_key = f"fpi_v436_pdf_parse_cache_{side}"
+    cached = st.session_state.get(cache_key) or {}
+    if cached.get("signature") == signature and isinstance(cached.get("state"), dict):
+        state = cached["state"]
+        st.session_state[_fpi_pdf_upload_state_key_v92(side)] = state
+        st.session_state[f"tactical_pro_{side}_pdf_bytes_v88"] = state.get("items", []) or []
+        try:
+            _fpi_store_current_pdf_text_v89(
+                side,
+                state.get("text", "") or "",
+                state.get("pages", []) or [],
+                state.get("items", []) or [],
+            )
+        except Exception:
+            pass
+        return state
+
+    state = _fpi_v436_raw_set_pdf_upload_state(side, files)
+    st.session_state[cache_key] = {"signature": signature, "state": state}
+    return state
+
+
+# -----------------------------------------------------------------------------
+# REPORT SIGNATURE
+# A már elkészült PDF csak azonos input + beállítás esetén használható újra.
+# -----------------------------------------------------------------------------
+def _fpi_v436_dataframe_digest(df: pd.DataFrame) -> str:
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return "EMPTY_DF"
+    preferred = [
+        "player_name", "session_type", "start_time", "week", "md_label",
+        "position", "position_group", "is_goalkeeper", "duration", "duration_min",
+        "match_minutes", "player_minutes", "total_distance", "distance_per_min",
+        "max_speed", "sprints", "sprint_distance", "hsr_distance",
+        "speed_zone_4", "speed_zone_5", "training_load", "acc_high", "dec_high",
+        "high_efforts",
+    ]
+    cols = [c for c in preferred if c in df.columns]
+    if not cols:
+        cols = list(df.columns[:12])
+    work = df[cols].copy()
+    for c in work.columns:
+        if work[c].dtype == "object":
+            work[c] = work[c].map(lambda x: "" if x is None else str(x))
+    try:
+        hashed = pd.util.hash_pandas_object(work, index=True, categorize=True).values.tobytes()
+        return hashlib.sha256(hashed).hexdigest()
+    except Exception:
+        sample = work.head(200).astype(str).to_csv(index=True).encode("utf-8", errors="ignore")
+        tail = work.tail(200).astype(str).to_csv(index=True).encode("utf-8", errors="ignore")
+        return hashlib.sha256(sample + b"||" + tail + str(work.shape).encode()).hexdigest()
+
+
+def _fpi_v436_session_upload_signature(key: str) -> str:
+    value = st.session_state.get(key)
+    if value is None:
+        return ""
+    files = value if isinstance(value, (list, tuple)) else [value]
+    return _fpi_v436_full_file_signature(files)
+
+
+def _fpi_v436_clean_report_signature(df: pd.DataFrame, settings: Dict[str, object]) -> str:
+    own_pdf = _fpi_get_pdf_upload_state_v92("own") or {}
+    opp_pdf = _fpi_get_pdf_upload_state_v92("opp") or {}
+    pdf_sig = {
+        "own": [(x.get("name"), x.get("size"), x.get("md5")) for x in own_pdf.get("items", []) or []],
+        "opp": [(x.get("name"), x.get("size"), x.get("md5")) for x in opp_pdf.get("items", []) or []],
+    }
+    tactical_excel_sig = {
+        key: _fpi_v436_session_upload_signature(key)
+        for key in [
+            "clean_own_team_excels_v142", "clean_own_player_excels_v142",
+            "clean_opp_team_excels_v142", "clean_opp_player_excels_v142",
+        ]
+    }
+    payload = {
+        "version": FPI_IMPORT_ENGINE_VERSION,
+        "df": _fpi_v436_dataframe_digest(df),
+        "gps_upload": st.session_state.get("clean_active_upload_signature_v105", "demo"),
+        "manual_mapping": st.session_state.get("clean_manual_mapping_v105", {}),
+        "settings": settings or {},
+        "pdf": pdf_sig,
+        "tactical_excel": tactical_excel_sig,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
