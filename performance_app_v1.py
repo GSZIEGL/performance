@@ -76,7 +76,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -22975,7 +22975,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -23267,7 +23267,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -24293,7 +24293,7 @@ if st.session_state.get("_fpi_invite_pending_v421"):
 # - landing, clean workspace, hub, methodology és full app egy közös design systemet kap;
 # - minden PDF fehér report body + navy/emerald/gold executive brandinget kap.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
 
 FPI_V428_NAVY = "#071521"
 FPI_V428_NAVY_2 = "#0B2235"
@@ -25217,7 +25217,7 @@ def _fpi_pdf_build_v406(doc, story: list) -> None:
 # - a PDF-ek tipográfiáját, fejlécét, tábláit és oldalközöket újratémázza;
 # - elsődleges logó: logo2.PNG.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
 
 
 def _fpi_v429_landing_css() -> None:
@@ -25379,7 +25379,7 @@ def render_fpi_landing_page_v100() -> None:
               <div class="fpi-v429-title">Vezetői riport <span class="accent">30 másodperc alatt.</span></div>
               <div class="fpi-v429-sub">GPS exportból – és opcionálisan taktikai PDF/Excel anyagokból – azonnal kapsz heti állapotképet, játékoskockázatot, referencia-összevetést, ellenfél-specifikus fókuszokat és mikrociklus-javaslatot.</div>
               <div class="fpi-v429-flow"><span>1. GPS / ZIP feltöltés</span><span>2. Heti kontextus</span><span>3. Tactical Pro+ input</span><span>4. Executive PDF</span></div>
-              <div class="fpi-v429-contact"><b>Sziegl Gábor</b> · +36 30/451-7614</div>
+              <div class="fpi-v429-contact"><b>Sziegl Gábor</b><span class="fpi-v432-contact-sep"> · </span><span class="fpi-v432-phone">+36 30/451-7614</span></div>
             </div>
             <div class="fpi-v429-preview">
               <div class="fpi-v429-preview-top"><b>Vezetői riport</b><span class="fpi-v429-dots"><i></i><i></i><i></i></span></div>
@@ -25793,7 +25793,7 @@ def _fpi_pdf_build_v406(doc, story: list) -> None:
 # - olvashatóvá teszi a sidebar mindkét belépési módját;
 # - biztosítja, hogy a CTA-k és minta-PDF letöltők a hero alatt megjelenjenek.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
 
 _fpi_v430_base_landing_css = _fpi_v429_landing_css
 
@@ -26087,7 +26087,7 @@ def _fpi_v429_landing_css() -> None:
 # V431 – VISIBILITY POLISH / spinner + hero fit + crisp feature cards
 # =============================================================================
 # Csak vizuális javítás. Funkció, tartalom, jogosultság, demo és exportlogika változatlan.
-FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
 
 _fpi_v431_base_landing_css = _fpi_v429_landing_css
 
@@ -26263,6 +26263,135 @@ def _fpi_v429_landing_css() -> None:
     """V431 wrapper: V430 design + célzott láthatósági finomhangolás."""
     _fpi_v431_base_landing_css()
     _fpi_v431_visibility_css()
+
+
+
+
+# =============================================================================
+# V432 – FINAL LANDING LAYOUT POLISH
+# - valóban látható, animált Streamlit futásjelző
+# - landing tetején a style-only elemek ne foglaljanak üres függőleges helyet
+# - 4 workflow chip biztosan egy sorban desktopon
+# - kontakt kontraszt javítás
+# - feature blokk: két bal kártya egymás alatt, Tactical Pro+ jobbra, azonos összmagasságban
+# =============================================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
+
+_fpi_v432_base_landing_css = _fpi_v429_landing_css
+
+
+def _fpi_v432_layout_polish_css() -> None:
+    st.markdown(
+        """
+        <style>
+        @keyframes fpi-v432-spin {
+            from { transform: translate(-50%,-50%) rotate(0deg); }
+            to   { transform: translate(-50%,-50%) rotate(360deg); }
+        }
+        [data-testid="stStatusWidget"],
+        div[data-testid="stStatusWidget"] {
+            position:relative !important;background:#0B2235 !important;
+            border:1px solid rgba(97,225,179,.48) !important;border-radius:999px !important;
+            min-width:38px !important;min-height:38px !important;
+            box-shadow:0 7px 18px rgba(11,34,53,.22) !important;opacity:1 !important;
+        }
+        [data-testid="stStatusWidget"]::after,
+        div[data-testid="stStatusWidget"]::after {
+            content:"" !important;position:absolute !important;left:50% !important;top:50% !important;
+            width:20px !important;height:20px !important;border-radius:50% !important;
+            border:3px solid rgba(255,255,255,.28) !important;border-top-color:#E4BF6B !important;
+            border-right-color:#61E1B3 !important;box-sizing:border-box !important;
+            animation:fpi-v432-spin .72s linear infinite !important;z-index:10 !important;pointer-events:none !important;
+        }
+        [data-testid="stStatusWidget"] svg,div[data-testid="stStatusWidget"] svg {opacity:.08 !important;}
+        [data-testid="stToolbar"] [aria-label*="Running"],
+        [data-testid="stToolbar"] [aria-label*="running"],
+        [data-testid="stToolbar"] [aria-label*="Rerun"],
+        [data-testid="stToolbar"] [aria-label*="rerun"] {
+            position:relative !important;background:#0B2235 !important;border:1px solid rgba(97,225,179,.48) !important;
+            border-radius:999px !important;min-width:38px !important;min-height:38px !important;
+            color:transparent !important;box-shadow:0 7px 18px rgba(11,34,53,.18) !important;
+        }
+        [data-testid="stToolbar"] [aria-label*="Running"]::after,
+        [data-testid="stToolbar"] [aria-label*="running"]::after,
+        [data-testid="stToolbar"] [aria-label*="Rerun"]::after,
+        [data-testid="stToolbar"] [aria-label*="rerun"]::after {
+            content:"" !important;position:absolute !important;left:50% !important;top:50% !important;
+            width:19px !important;height:19px !important;border-radius:50% !important;
+            border:3px solid rgba(255,255,255,.26) !important;border-top-color:#E4BF6B !important;
+            border-right-color:#61E1B3 !important;box-sizing:border-box !important;
+            animation:fpi-v432-spin .72s linear infinite !important;pointer-events:none !important;
+        }
+        [data-testid="stToolbar"] [aria-label*="Running"] svg,
+        [data-testid="stToolbar"] [aria-label*="running"] svg,
+        [data-testid="stToolbar"] [aria-label*="Rerun"] svg,
+        [data-testid="stToolbar"] [aria-label*="rerun"] svg {opacity:.08 !important;}
+
+        .stApp .block-container {margin-top:0 !important;padding-top:.75rem !important;}
+        .stApp .block-container div[data-testid="stElementContainer"]:has(style),
+        .stApp .block-container div[data-testid="stMarkdown"]:has(style),
+        .stApp .block-container div[data-testid="stMarkdownContainer"]:has(style) {
+            margin:0 !important;padding:0 !important;min-height:0 !important;height:0 !important;
+            line-height:0 !important;overflow:visible !important;
+        }
+        .stApp .block-container .fpi-v429-hero {margin-top:0 !important;padding-top:0 !important;}
+        .stApp .block-container .fpi-v429-brand-logo {margin-top:0 !important;}
+
+        .stApp .block-container .fpi-v429-flow {
+            display:grid !important;grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+            gap:7px !important;width:100% !important;margin-top:17px !important;
+        }
+        .stApp .block-container .fpi-v429-flow span {
+            display:flex !important;align-items:center !important;justify-content:center !important;text-align:center !important;
+            padding:8px 6px !important;min-width:0 !important;width:100% !important;white-space:nowrap !important;
+            font-size:clamp(.66rem,.70vw,.77rem) !important;line-height:1.08 !important;overflow:hidden !important;
+        }
+
+        .stApp .block-container .fpi-v429-contact {
+            color:#DCE8F0 !important;-webkit-text-fill-color:#DCE8F0 !important;opacity:1 !important;
+            font-weight:760 !important;letter-spacing:.01em !important;margin-top:15px !important;
+        }
+        .stApp .block-container .fpi-v429-contact b {color:#FFFFFF !important;-webkit-text-fill-color:#FFFFFF !important;opacity:1 !important;}
+        .stApp .block-container .fpi-v432-contact-sep {color:#6F8798 !important;-webkit-text-fill-color:#6F8798 !important;}
+        .stApp .block-container .fpi-v432-phone {color:#A9F0D5 !important;-webkit-text-fill-color:#A9F0D5 !important;font-weight:850 !important;opacity:1 !important;}
+
+        .stApp .block-container .fpi-v429-feature-grid {
+            display:grid !important;grid-template-columns:minmax(280px,.72fr) minmax(0,1.28fr) !important;
+            grid-template-rows:minmax(150px,1fr) minmax(150px,1fr) !important;gap:14px !important;
+            align-items:stretch !important;opacity:1 !important;filter:none !important;
+        }
+        .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card {
+            min-height:0 !important;height:auto !important;margin:0 !important;padding:18px 20px !important;
+        }
+        .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card:nth-child(1) {grid-column:1 !important;grid-row:1 !important;}
+        .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card:nth-child(2) {grid-column:1 !important;grid-row:2 !important;}
+        .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card:nth-child(3) {grid-column:2 !important;grid-row:1 / span 2 !important;}
+        .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card:nth-child(1) .fpi-v429-icon,
+        .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card:nth-child(2) .fpi-v429-icon {
+            width:38px !important;height:38px !important;margin-bottom:10px !important;
+        }
+        .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card:nth-child(1) p,
+        .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card:nth-child(2) p {margin-bottom:0 !important;}
+
+        @media(max-width:1050px) {
+            .stApp .block-container .fpi-v429-flow {grid-template-columns:repeat(2,minmax(0,1fr)) !important;}
+            .stApp .block-container .fpi-v429-feature-grid {grid-template-columns:1fr !important;grid-template-rows:auto !important;}
+            .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card:nth-child(1),
+            .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card:nth-child(2),
+            .stApp .block-container .fpi-v429-feature-grid > .fpi-v429-dark-card:nth-child(3) {
+                grid-column:1 !important;grid-row:auto !important;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _fpi_v429_landing_css() -> None:
+    """V432 wrapper: V431 megjelenés + célzott layout/visibility finomhangolás."""
+    _fpi_v432_base_landing_css()
+    _fpi_v432_layout_polish_css()
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
@@ -30763,4 +30892,4 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
 # - a korábbi, nem használt csapatszintű normalizálás eltávolítva
 # - aktív meccsreferencia: játékosonkénti /90 -> mezőnyjátékos-medián
 # =========================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
