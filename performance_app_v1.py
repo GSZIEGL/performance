@@ -76,7 +76,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V423_CLEAN_DEMO_PRODUCTION_SAMPLES_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V425_BRANDING_METHODOLOGY_CLEANUP_2026_08_16"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -3949,7 +3949,6 @@ def aggregate_weekly(df: pd.DataFrame) -> pd.DataFrame:
     for metric in ["total_distance", "hsr_distance", "sprint_distance", "sprints", "high_efforts", "training_load"]:
         if metric in res.columns and "field_team_minutes" in res.columns:
             res[f"{metric}_per90_player_avg"] = np.where(res["field_team_minutes"] > 0, res[metric] / res["field_team_minutes"] * 90, np.nan)
-            res[f"{metric}_per90_team"] = np.where(res["field_team_minutes"] > 0, res[metric] / res["field_team_minutes"] * 900, np.nan)
         if metric in res.columns and "field_player_count" in res.columns:
             res[f"{metric}_per_field_player"] = np.where(res["field_player_count"] > 0, res[metric] / res["field_player_count"], np.nan)
     return res
@@ -4278,9 +4277,66 @@ def _fpi_v406_sanitize_pdf_story(story: list) -> list:
     return [_fpi_v406_sanitize_pdf_flowable(item) for item in (story or [])]
 
 
+def _fpi_pdf_logo_path_v425() -> Optional[Path]:
+    """Az összes FPI PDF közös logóforrása: a repo gyökerében lévő logo.png."""
+    try:
+        candidates = [
+            Path(__file__).resolve().parent / "logo.png",
+            Path.cwd() / "logo.png",
+        ]
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file() and candidate.stat().st_size > 0:
+                return candidate
+    except Exception:
+        pass
+    return None
+
+
+def _fpi_pdf_page_branding_v425(canvas_obj, doc_obj) -> None:
+    """Egységes FPI logó minden PDF minden oldalának jobb felső sarkában."""
+    logo_path = _fpi_pdf_logo_path_v425()
+    if logo_path is None:
+        return
+    try:
+        from reportlab.lib.utils import ImageReader
+        canvas_obj.saveState()
+        img = ImageReader(str(logo_path))
+        iw, ih = img.getSize()
+        if not iw or not ih:
+            canvas_obj.restoreState()
+            return
+        max_w = 2.35 * cm
+        max_h = 0.82 * cm
+        scale = min(max_w / float(iw), max_h / float(ih))
+        draw_w = float(iw) * scale
+        draw_h = float(ih) * scale
+        page_w, page_h = canvas_obj._pagesize
+        x = page_w - 0.45 * cm - draw_w
+        y = page_h - 0.16 * cm - draw_h
+        canvas_obj.drawImage(
+            img, x, y, width=draw_w, height=draw_h,
+            preserveAspectRatio=True, mask="auto"
+        )
+        canvas_obj.restoreState()
+    except Exception:
+        try:
+            canvas_obj.restoreState()
+        except Exception:
+            pass
+
+
 def _fpi_pdf_build_v406(doc, story: list) -> None:
-    """Minden FPI PDF közös, végső build-kapuja."""
-    doc.build(_fpi_v406_sanitize_pdf_story(story))
+    """Minden FPI PDF közös, végső build-kapuja + egységes logózás."""
+    # A logó a felső margóban ül; biztosítjuk, hogy a tartalom ne fusson alá.
+    try:
+        doc.topMargin = max(float(getattr(doc, "topMargin", 0.0) or 0.0), 1.15 * cm)
+    except Exception:
+        pass
+    doc.build(
+        _fpi_v406_sanitize_pdf_story(story),
+        onFirstPage=_fpi_pdf_page_branding_v425,
+        onLaterPages=_fpi_pdf_page_branding_v425,
+    )
 
 
 def day_label_from_delta(delta_days: int) -> str:
@@ -9238,12 +9294,12 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 
 
 def _fpi_v300_match_reference(master: pd.DataFrame) -> Dict[str, object]:
-    """Tényleges játékperces meccsreferencia.
+    """Tényleges játékperces, mezőnyjátékos-alapú meccsreferencia.
 
-    Játékosszint: mezőnyjátékos /90 medián, minimum 10 játékperc.
-    Csapatszint: kizárólag mezőnyjátékosok eseményösszege, 10×90 = 900 mezőnyjátékos-percre
-    normalizálva, majd a mérkőzések mediánja. A kapus külön szerepkörként megmarad az adatbázisban,
-    de nem torzítja a mezőnyjátékos fizikai csapatbenchmarkot.
+    Módszer: Half 1 + Half 2 játékosonként előbb összeadódik; a legalább
+    10 percet játszó mezőnyjátékosok mutatóit ezután egyenként /90-re
+    normalizáljuk, majd ezek mediánja adja a meccsreferenciát.
+    A referencia kizárólag ezen játékosszintű /90 logikán alapul.
     """
     if master is None or master.empty:
         return {"available": False}
@@ -9266,7 +9322,6 @@ def _fpi_v300_match_reference(master: pd.DataFrame) -> Dict[str, object]:
         agg["is_goalkeeper"] = "max"
     pm = matches.groupby(["match_event_id", "player_name"], dropna=False).agg(agg).reset_index()
 
-    # Mezőnyjátékosok: a csapatreferenciában is ugyanaz a populáció legyen, mint a fizikai benchmarkban.
     field_all = pm.copy()
     if "is_goalkeeper" in pm.columns and (~pm["is_goalkeeper"].fillna(False)).any():
         field_all = pm[~pm["is_goalkeeper"].fillna(False)].copy()
@@ -9285,26 +9340,7 @@ def _fpi_v300_match_reference(master: pd.DataFrame) -> Dict[str, object]:
         per90[c] = float(vals.median()) if not vals.empty else None
         raw_med[c] = per90[c]
 
-    # A teljes csapat-mezőnyprofil minden meccsen az összes mezőnyjátékos tényleges perceiből készül.
-    # 10 mezőnyjátékos × 90 perc = 900. A cserék ettől nem növelik a csapatbenchmarkot.
-    team_rows = []
-    for event_id, event in field_all.groupby("match_event_id", dropna=False):
-        mins = pd.to_numeric(event["player_minutes"], errors="coerce").sum(min_count=1)
-        row = {"match_event_id": event_id, "field_team_minutes": mins}
-        for c in sum_metrics:
-            v = pd.to_numeric(event[c], errors="coerce").sum(min_count=1)
-            row[c] = v / mins * 900.0 if pd.notna(mins) and mins > 0 else np.nan
-        for c in max_metrics:
-            row[c] = pd.to_numeric(event[c], errors="coerce").max()
-        team_rows.append(row)
-    team_df = pd.DataFrame(team_rows)
-    team_metrics = {}
-    for c in sum_metrics + max_metrics:
-        vals = pd.to_numeric(team_df[c], errors="coerce").dropna() if c in team_df.columns else pd.Series(dtype=float)
-        team_metrics[c] = float(vals.median()) if not vals.empty else None
-
     minute_vals = pd.to_numeric(field_eligible["player_minutes"], errors="coerce").dropna()
-    team_minute_vals = pd.to_numeric(team_df["field_team_minutes"], errors="coerce").dropna() if not team_df.empty else pd.Series(dtype=float)
     return {
         "available": True,
         "match_events": int(matches["match_event_id"].dropna().nunique()),
@@ -9313,15 +9349,9 @@ def _fpi_v300_match_reference(master: pd.DataFrame) -> Dict[str, object]:
         "metrics": per90,
         "metrics_per90": per90,
         "metrics_actual_median": raw_med,
-        "team_metrics_per90_10": team_metrics,
-        # kompatibilitási alias régebbi kódrészeknek; tartalma már 10×90 mezőnyprofil
-        "team_metrics_per90_11": team_metrics,
         "player_minutes_median": float(minute_vals.median()) if not minute_vals.empty else None,
-        "field_team_minutes_median": float(team_minute_vals.median()) if not team_minute_vals.empty else None,
-        "team_player_minutes_median": float(team_minute_vals.median()) if not team_minute_vals.empty else None,
-        "reference_note": "Játékos: mezőnyjátékos /90 medián (min. 10 perc); csapat: mezőnyjátékos 10×90, azaz 900 percre normalizált meccsenkénti profil, majd meccsmedián.",
+        "reference_note": "Mezőnyjátékos /90 medián (min. 10 perc); Half 1 + Half 2 előbb játékosonként összeadódik.",
     }
-
 
 
 def _fpi_v302_week_context_factor(analysis_df: pd.DataFrame, selected_week: str) -> Dict[str, object]:
@@ -11950,7 +11980,7 @@ def _build_fpi_product_pdf_bytes_v402_base(
             [P("Adatimport", small), P("A Data/Adat lap elsődleges. A segédlapokat az app igyekszik kizárni. A Smart Mapper magyar és angol GPS oszlopneveket is kezel. Minden feltöltött forrásfájl alapértelmezetten egy csapatesemény; az egyes játékosok eltérő eszközindítási ideje nem hoz létre külön sessiont. Ugyanazon fájlon belül csak legalább 120 perces időrés választ szét két valódi eseményt. PlayerTeknél az all összesítő split az elsődleges; HSR = Zone 4+5, sprinttáv = Zone 5, a km-es zónák méterre váltódnak.", small)],
             [P("Dátum és hét", small), P("A Week Rescue Engine a dátumot időponttal vagy extra szöveggel együtt is értelmezi, majd ISO hétre csoportosít. Rövid dátumtartományból képződő irreálisan sok hét esetén védelmi újraértelmezést alkalmaz.", small)],
             [P("Kapusok", small), P("Ha van Poszt/Position oszlop, a kapusok automatikusan felismerhetők. Ha nincs, az app kézi kapusválasztást kér. A kapusok sprint/HSR értelmezése csökkentett súlyú.", small)],
-            [P("Játékpercek", small), P("A meccsterhelésnél az app a tényleges játékospercet használja. A játékosreferencia per90 medián, a csapatreferencia 10×90 mezőnyjátékos-percre normalizált; a 10 percnél rövidebb szereplés nem torzítja a fő benchmarkot.", small)],
+            [P("Játékpercek", small), P("A meccsterhelésnél az app a tényleges játékospercet használja. A fő referencia a legalább 10 percet játszó mezőnyjátékosok játékosonkénti /90 értékeinek mediánja; a rövid cserejáték nem torzítja a fő benchmarkot.", small)],
             [P("Edzés-meccs normalizálás", small), P("Az összevetés nem csak nyers csapatösszeg alapján történik, mert edzésen és meccsen eltérhet a játékosszám és a játékidő. A résztvevők száma és az időtartam is számít.", small)],
             [P("Sebességzónák", small), P("A 4-es és 5-ös zóna külön vagy összevont 4+5 exportként is kezelhető. Összevont oszlopnál az app HSR-ként használja az értéket.", small)],
             [P("High Efforts", small), P("Ha külön High Efforts oszlop van, azt használja. Ha nincs, gyorsulás/lassítás jellegű mutatókból becsült nagy intenzitású akciót képez.", small)],
@@ -14860,9 +14890,9 @@ def render_landing_login_panel_v103() -> None:
 
 
 def _fpi_landing_logo_data_uri_v424() -> str:
-    """Repo-root logo2.PNG -> data URI. Hiány esetén üres string, az app nem hibázik."""
+    """Repo-root logo.png -> data URI. Hiány esetén üres string, az app nem hibázik."""
     try:
-        logo_path = Path(__file__).resolve().parent / "logo2.PNG"
+        logo_path = Path(__file__).resolve().parent / "logo.png"
         if not logo_path.exists() or not logo_path.is_file():
             return ""
         raw = logo_path.read_bytes()
@@ -14888,6 +14918,8 @@ def render_fpi_landing_page_v100() -> None:
         .fpi-v137-sub{font-size:1.12rem;line-height:1.46;color:#334155;max-width:900px;margin-bottom:14px;}
         .fpi-v137-flow{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}
         .fpi-v137-flow span{display:inline-block;padding:8px 12px;border-radius:999px;background:#ffffff;border:1px solid #dbeafe;color:#0f172a;font-weight:850;font-size:.88rem;}
+        .fpi-v425-contact{margin-top:15px;color:#334155;font-size:.95rem;font-weight:800;letter-spacing:.01em;}
+        .fpi-v425-contact b{color:#0f172a;font-weight:950;}
         @media (max-width: 760px){
             .fpi-v137-hero{padding:26px 24px;}
             .fpi-v137-hero-row{grid-template-columns:1fr;gap:14px;}
@@ -14924,6 +14956,7 @@ def render_fpi_landing_page_v100() -> None:
                     <div class="fpi-v137-title">Vezetői riport 30 másodperc alatt.</div>
                     <div class="fpi-v137-sub">GPS exportból – és opcionálisan taktikai PDF/Excel anyagokból – azonnal kapsz heti állapotképet, játékoskockázatot, referencia-összevetést, ellenfél-specifikus fókuszokat és mikrociklus-javaslatot.</div>
                     <div class="fpi-v137-flow"><span>1. GPS / ZIP feltöltés</span><span>2. Heti kontextus</span><span>3. Tactical Pro+ input</span><span>4. Executive PDF</span></div>
+                    <div class="fpi-v425-contact"><b>Sziegl Gábor</b> · +36 30/451-7614</div>
                 </div>
                 {logo_html_v424}
             </div>
@@ -20656,7 +20689,7 @@ FPI_EXTENDED_METHODOLOGY_BLOCKS_V415 = [{'title': '1. A riport eredményeinek ol
                         'Csak edzés / csak meccs / teljes hét / csonka hét.',
                         'Egyetlen edzés nem értelmezhető alacsony heti terhelésként.'],
                        ['2. Mi az aggregáció?',
-                        'Játékosösszeg, játékosmedián, sessionmedián, /90 vagy 10×90.',
+                        'Játékosösszeg, játékosmedián, sessionmedián vagy játékosonkénti /90.',
                         'Ugyanaz a 6 000 m mást jelent egy játékosnál és a csapat összesítésében.'],
                        ['3. Mi a referencia?',
                         'Saját 3 meccses medián, előző 4 hét vagy profilbenchmark.',
@@ -20728,7 +20761,7 @@ FPI_EXTENDED_METHODOLOGY_BLOCKS_V415 = [{'title': '1. A riport eredményeinek ol
                        ['Egyetlen esemény',
                         'Sessionvolumen, intenzitás, kereteloszlás, meccsarány ha van referencia.',
                         'Heti trend, teljes heti readiness, heti deficit.'],
-                       ['Meccs-only', 'Játékos /90, csapat 10×90, poszt- és keretprofil.', 'Edzésstruktúra és tapering.'],
+                       ['Meccs-only', 'Játékosonkénti /90, mezőnyjátékos-medián, poszt- és keretprofil.', 'Edzésstruktúra és tapering.'],
                        ['Edzésblokk meccs nélkül',
                         'Edzésenkénti és kumulált terhelés, saját előzmény, profilbenchmark.',
                         'Biztos meccsrelatív cél, ha nincs korábbi meccs.'],
@@ -20787,12 +20820,7 @@ FPI_EXTENDED_METHODOLOGY_BLOCKS_V415 = [{'title': '1. A riport eredményeinek ol
              {'type': 'paragraph',
               'text': 'A nyers meccsmedián az összes szereplő tényleges távolságának középső értéke. Ha sok cserejátékos 20-60 percet játszik, ez 5-7 km körülire eshet akkor is, ha a teljes meccset játszók 9-10 km-t teljesítenek. Ez nem félidő-összeadási hiba, hanem eltérő játékpercek hatása. A sessiontábla ezért V1.2-től meccsnél /90 mediánt mutat.'},
              {'type': 'table', 'rows': [['Példa: nyers medián 6 668 m; medián játékperc 70,8; játékosonkénti /90 normalizálás után a tipikus meccsprofil kb. 8 927 m /90. A számítás játékosonként történik, nem a két medián egyszerű osztásával.']]},
-             {'type': 'subheading', 'text': '5.3. Csapatszintű 10×90 normalizálás'},
-             {'type': 'table', 'rows': [['Csapat 10×90 = mezőnyjátékosok eseményösszege ÷ összes mezőnyjátékos-perc × 900. A 900 = 10 mezőnyjátékos × 90 perc.']]},
-             {'type': 'paragraph',
-              'text': 'Ez megakadályozza, hogy a több csere vagy a fájlban szereplő több játékos mesterségesen megnövelje a csapatterhelést. A mezőnyjátékos-'
-                      'csapatprofil meccsenként készül, majd a mérkőzések mediánja lesz a csapatreferencia.'},
-             {'type': 'subheading', 'text': '5.4. Saját meccsreferencia bizonyossága'},
+             {'type': 'subheading', 'text': '5.3. Saját meccsreferencia bizonyossága'},
              {'type': 'table',
               'rows': [['Meccsszám', 'Használat', 'Értelmezés'],
                        ['0', 'Profilbenchmark és saját edzéselőzmény.', 'Nincs stabil abszolút meccsrelatív cél.'],
@@ -20870,8 +20898,7 @@ FPI_EXTENDED_METHODOLOGY_BLOCKS_V415 = [{'title': '1. A riport eredményeinek ol
              {'type': 'subheading', 'text': '7.3. Posztfaktorok'},
              {'type': 'paragraph',
               'text': 'A posztfaktor mutatónként eltér. A középpályás például össztávban magasabb, a szélső HSR-ben és sprintben magasabb referenciazónát kap. '
-                      'A kapus nem tűnik el az adatbázisból és külön kapusprofilban továbbra is értékelhető, de a mezőnyjátékos csapatbenchmarkból és a 10×90 '
-                      'csapatnormalizálásból kimarad.'},
+                      'A kapus nem tűnik el az adatbázisból és külön kapusprofilban továbbra is értékelhető, de a mezőnyjátékos fizikai benchmarkból kimarad.'},
              {'type': 'table',
               'rows': [['Poszt', 'Össztáv', 'Load', 'HSR', 'Sprinttáv', 'Sprint db', 'High Eff.'],
                        ['Kapus', '0,62', '0,65', '0,35', '0,25', '0,35', '0,55'],
@@ -21063,7 +21090,7 @@ FPI_EXTENDED_METHODOLOGY_BLOCKS_V415 = [{'title': '1. A riport eredményeinek ol
                        ['Load', 'Szolgáltatóspecifikus külső terhelési pont; nem univerzális mértékegység.'],
                        ['Readiness', 'Szabályalapú terhelési szerkezetindex, nem orvosi állapot.'],
                        ['Player Risk', 'Szokatlan egyéni terhelési minta jelzése, nem sérülésjóslat.'],
-                       ['Meccsreferencia', 'A saját mérkőzésekből képzett /90 vagy 10×90 medián.'],
+                       ['Meccsreferencia', 'A saját mérkőzésekből képzett mezőnyjátékos /90 medián.'],
                        ['Profilbenchmark', 'Korosztály/szint/poszt/játékmodell alapján skálázott FPI-célzóna.'],
                        ['MD-3', 'A mérkőzés előtti harmadik nap.'],
                        ['Tapering', 'A terhelés csökkentése a mérkőzés közeledtével az élesség megtartása mellett.']]}]},
@@ -21237,7 +21264,7 @@ def build_fpi_methodology_pdf_bytes_v143() -> Optional[bytes]:
     doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=1.25*cm, leftMargin=1.25*cm, topMargin=1.2*cm, bottomMargin=1.2*cm)
     story = [
         Paragraph("Football Performance Intelligence – GPS-only kibővített szakmai metodika", title),
-        Paragraph("Hogyan készülnek az eredmények, milyen aggregációt és referenciahierarchiát használ a rendszer, és mit szabad – illetve mit nem szabad – kiolvasni a pontszámokból? V1.2 / 2026.08.07.", subtitle),
+        Paragraph("Hogyan készülnek az eredmények, milyen aggregációt és referenciahierarchiát használ a rendszer, és mit szabad – illetve mit nem szabad – kiolvasni a pontszámokból? V1.3 / 2026.08.16.", subtitle),
         Paragraph("Fontos: az FPI döntéstámogató rendszer, nem orvosi diagnosztika, nem sérülés-előrejelző modell és nem automatikus edzői döntés.", subtitle),
         Spacer(1,0.12*cm),
     ]
@@ -21289,13 +21316,13 @@ def render_fpi_methodology_center_v143() -> None:
         st.caption("Kibővített szakmai metodika: képletek, aggregációk, benchmarkok, adatminimumok és korlátok.")
     st.markdown("""
     <div style="border-radius:26px;padding:24px 28px;background:linear-gradient(135deg,#ffffff,#e0f2fe,#ecfdf5);border:1px solid #bfdbfe;box-shadow:0 16px 44px rgba(15,23,42,.12);margin:8px 0 18px 0;">
-      <div style="font-size:.8rem;font-weight:950;color:#0f766e;letter-spacing:.07em;">FPI METHODOLOGY CENTER · V1.2</div>
+      <div style="font-size:.8rem;font-weight:950;color:#0f766e;letter-spacing:.07em;">FPI METHODOLOGY CENTER · V1.3</div>
       <div style="font-size:2.15rem;font-weight:980;color:#0f172a;letter-spacing:-.04em;margin-top:5px;">Hogyan jönnek ki az eredmények?</div>
-      <div style="color:#475569;margin-top:7px;">Az adatimporttól a /90 és 10×90 normalizáláson át a benchmarkhierarchiáig, readinessig és trendminimumig.</div>
+      <div style="color:#475569;margin-top:7px;">Az adatimporttól a játékosonkénti /90 normalizáláson át a benchmarkhierarchiáig, readinessig és trendminimumig.</div>
     </div>""",unsafe_allow_html=True)
     method_pdf=build_fpi_methodology_pdf_bytes_v143()
     if method_pdf:
-        st.download_button("⬇️ Teljes, kibővített metodika PDF",data=method_pdf,file_name="FPI_GPS_only_kibovitett_szakmai_metodika_V1_2.pdf",mime="application/pdf",use_container_width=True,key="method_pdf_download_v143")
+        st.download_button("⬇️ Teljes, kibővített metodika PDF",data=method_pdf,file_name="FPI_GPS_only_kibovitett_szakmai_metodika_V1_3.pdf",mime="application/pdf",use_container_width=True,key="method_pdf_download_v143")
     for si,section_data in enumerate(FPI_EXTENDED_METHODOLOGY_BLOCKS_V415):
         with st.expander(section_data.get("title",""),expanded=(si==0)):
             for bi,block in enumerate(section_data.get("blocks",[])):
@@ -22824,7 +22851,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V423_CLEAN_DEMO_PRODUCTION_SAMPLES_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V425_BRANDING_METHODOLOGY_CLEANUP_2026_08_16"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -23116,7 +23143,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V423_CLEAN_DEMO_PRODUCTION_SAMPLES_2026_08_13"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V425_BRANDING_METHODOLOGY_CLEANUP_2026_08_16"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -28618,3 +28645,13 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
             )
     else:
         st.info("Mapping ellenőrzéshez előbb tölts fel egy Excel/CSV fájlt.")
+
+
+# =========================================================
+# V425 – Branding + methodology consistency cleanup
+# - logo.png minden PDF minden oldalán, jobb felső sarokban
+# - a főoldalon kapcsolattartó: Sziegl Gábor, +36 30/451-7614
+# - a korábbi, nem használt csapatszintű normalizálás eltávolítva
+# - aktív meccsreferencia: játékosonkénti /90 -> mezőnyjátékos-medián
+# =========================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V425_BRANDING_METHODOLOGY_CLEANUP_2026_08_16"
