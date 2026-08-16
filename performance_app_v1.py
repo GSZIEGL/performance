@@ -76,7 +76,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V426_LARGE_PDF_HEADER_LOGO_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V427_PREMIUM_VISUAL_IDENTITY_2026_08_16"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -22975,7 +22975,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V426_LARGE_PDF_HEADER_LOGO_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V427_PREMIUM_VISUAL_IDENTITY_2026_08_16"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -23267,7 +23267,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V426_LARGE_PDF_HEADER_LOGO_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V427_PREMIUM_VISUAL_IDENTITY_2026_08_16"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -24279,6 +24279,539 @@ _fpi_handle_invite_callback_v421()
 if st.session_state.get("_fpi_invite_pending_v421"):
     render_invite_activation_panel_v421()
     st.stop()
+
+
+
+# =============================================================================
+# V427 – Premium visual identity (VISUAL-ONLY)
+# =============================================================================
+# Cél:
+# - semmilyen elemzési, benchmark-, readiness-, risk-, taktikai vagy exporttartalom
+#   nem változik;
+# - a landing page és az összes PDF egységes, prémium FPI arculatot kap;
+# - a repo gyökerében lévő Logo.PNG az elsődleges márkajelzés az appban és PDF-ben;
+# - kis-/nagybetűs fájlrendszeren is működik a korábbi logo.png elnevezéssel.
+# =============================================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V427_PREMIUM_VISUAL_IDENTITY_2026_08_16"
+
+FPI_V427_NAVY = "#061725"
+FPI_V427_NAVY_2 = "#0A2235"
+FPI_V427_NAVY_3 = "#0F2B40"
+FPI_V427_EMERALD = "#12A67A"
+FPI_V427_EMERALD_2 = "#0F8C6B"
+FPI_V427_GOLD = "#C99A43"
+FPI_V427_GOLD_SOFT = "#E8C77A"
+FPI_V427_INK = "#102133"
+FPI_V427_MUTED = "#66788A"
+FPI_V427_LINE = "#D9E3EA"
+FPI_V427_SOFT = "#F5F8FA"
+
+
+def _fpi_brand_logo_path_v427() -> Optional[Path]:
+    """A teljes termék egyetlen logófeloldója. Elsőbbség: Logo.PNG."""
+    try:
+        roots = [Path(__file__).resolve().parent, Path.cwd()]
+        names = ("Logo.PNG", "logo.png", "Logo.png", "logo.PNG", "FPI_logo.png", "fpi_logo.png")
+        seen = set()
+        for root in roots:
+            for name in names:
+                candidate = (root / name).resolve()
+                key = str(candidate)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if candidate.exists() and candidate.is_file() and candidate.stat().st_size > 0:
+                    return candidate
+    except Exception:
+        pass
+    return None
+
+
+# A korábbi hívási pontokat változatlanul hagyjuk: csak a közös logóforrást írjuk felül.
+def _fpi_pdf_logo_path_v425() -> Optional[Path]:
+    return _fpi_brand_logo_path_v427()
+
+
+def _fpi_landing_logo_data_uri_v424() -> str:
+    """Logo.PNG -> data URI; hiány esetén az app logó nélkül is tovább működik."""
+    try:
+        logo_path = _fpi_brand_logo_path_v427()
+        if logo_path is None:
+            return ""
+        raw = logo_path.read_bytes()
+        if not raw:
+            return ""
+        return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+    except Exception:
+        return ""
+
+
+def _fpi_v427_landing_visual_css() -> None:
+    """Prémium executive + sport-tech landing arculat. Csak vizuális réteg."""
+    st.markdown(
+        f"""
+        <style>
+        /* ===== FPI V427 LANDING / PREMIUM EXECUTIVE ===== */
+        .stApp {{
+            background:
+                radial-gradient(circle at 11% 6%, rgba(18,166,122,.16), transparent 27%),
+                radial-gradient(circle at 88% 3%, rgba(201,154,67,.10), transparent 23%),
+                linear-gradient(150deg, {FPI_V427_NAVY} 0%, #081D2E 47%, #071623 100%) !important;
+            color:#F5F8FA !important;
+        }}
+        .block-container {{
+            max-width:1480px !important;
+            padding-top:1.15rem !important;
+            padding-bottom:3rem !important;
+        }}
+        header[data-testid="stHeader"] {{background:rgba(6,23,37,.78) !important;backdrop-filter:blur(14px);}}
+        [data-testid="stToolbar"], [data-testid="stDecoration"] {{background:transparent !important;}}
+        .stApp h1,.stApp h2,.stApp h3,.stApp h4,.stApp p,.stApp label,.stApp span {{color:#F5F8FA;}}
+
+        /* subtle football/data pattern – no extra content, only decoration */
+        .fpi-v427-shell {{position:relative;isolation:isolate;}}
+        .fpi-v427-shell:before {{
+            content:""; position:fixed; inset:72px 0 auto 0; height:420px; z-index:-1; pointer-events:none;
+            opacity:.22;
+            background-image:
+                linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+            background-size:54px 54px;
+            mask-image:linear-gradient(to bottom,rgba(0,0,0,.9),transparent 92%);
+        }}
+
+        .fpi-v137-hero {{
+            position:relative; overflow:hidden;
+            border-radius:34px !important;
+            padding:42px 44px 38px 44px !important;
+            margin:10px 0 20px 0 !important;
+            background:
+                radial-gradient(circle at 82% 22%, rgba(18,166,122,.22), transparent 31%),
+                radial-gradient(circle at 13% 96%, rgba(201,154,67,.11), transparent 30%),
+                linear-gradient(135deg, rgba(5,20,33,.99), rgba(10,34,53,.96)) !important;
+            border:1px solid rgba(232,199,122,.26) !important;
+            box-shadow:0 34px 95px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.06) !important;
+            color:#fff !important;
+        }}
+        .fpi-v137-hero:before {{
+            content:""; position:absolute; right:-95px; bottom:-150px; width:520px; height:520px;
+            border:1px solid rgba(18,166,122,.18); border-radius:50%;
+            box-shadow:0 0 0 58px rgba(18,166,122,.035),0 0 0 118px rgba(18,166,122,.024);
+            pointer-events:none;
+        }}
+        .fpi-v137-hero:after {{
+            content:""; position:absolute; left:0; right:0; bottom:0; height:3px;
+            background:linear-gradient(90deg,transparent,{FPI_V427_GOLD}, {FPI_V427_EMERALD},transparent);
+            opacity:.95;
+        }}
+        .fpi-v137-hero-row {{display:grid !important;grid-template-columns:minmax(0,1fr) minmax(270px,390px) !important;gap:46px !important;align-items:center !important;}}
+        .fpi-v137-hero-copy {{min-width:0;position:relative;z-index:2;}}
+        .fpi-v137-logo-wrap {{display:flex !important;justify-content:center !important;align-items:center !important;min-height:230px !important;position:relative;z-index:2;}}
+        .fpi-v137-logo-wrap:before {{
+            content:""; position:absolute; width:310px;height:310px;border-radius:50%;
+            background:radial-gradient(circle,rgba(201,154,67,.14),rgba(18,166,122,.05) 48%,transparent 70%);
+            filter:blur(1px); z-index:-1;
+        }}
+        .fpi-v137-logo {{
+            display:block !important;width:min(360px,100%) !important;max-height:255px !important;object-fit:contain !important;
+            filter:drop-shadow(0 20px 34px rgba(0,0,0,.35)) drop-shadow(0 0 16px rgba(232,199,122,.08)) !important;
+        }}
+        .fpi-v137-kicker {{
+            display:inline-block !important;padding:8px 14px !important;border-radius:999px !important;
+            background:rgba(255,255,255,.055) !important;border:1px solid rgba(232,199,122,.32) !important;
+            color:{FPI_V427_GOLD_SOFT} !important;font-weight:900 !important;letter-spacing:.115em !important;
+            font-size:.78rem !important;margin-bottom:16px !important;
+        }}
+        .fpi-v137-title {{
+            font-size:clamp(2.65rem,4.35vw,4.55rem) !important;line-height:.98 !important;font-weight:950 !important;
+            letter-spacing:-.052em !important;color:#FFFFFF !important;margin:0 0 17px 0 !important;max-width:980px !important;
+        }}
+        .fpi-v427-accent {{color:#35D39F !important;}}
+        .fpi-v137-sub {{font-size:1.08rem !important;line-height:1.62 !important;color:#C9D7E2 !important;max-width:900px !important;margin-bottom:18px !important;}}
+        .fpi-v137-flow {{display:flex !important;flex-wrap:wrap !important;gap:9px !important;margin-top:18px !important;}}
+        .fpi-v137-flow span {{
+            display:inline-block !important;padding:9px 13px !important;border-radius:999px !important;
+            background:rgba(12,43,64,.80) !important;border:1px solid rgba(18,166,122,.28) !important;
+            color:#EAF5F1 !important;font-weight:800 !important;font-size:.87rem !important;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+        }}
+        .fpi-v137-flow span:first-child {{border-color:rgba(201,154,67,.36) !important;}}
+        .fpi-v425-contact {{margin-top:18px !important;color:#AFC1CF !important;font-size:.93rem !important;font-weight:750 !important;}}
+        .fpi-v425-contact b {{color:{FPI_V427_GOLD_SOFT} !important;font-weight:900 !important;}}
+
+        /* login / activation area */
+        .fpi-v137-login {{
+            border-radius:22px !important;padding:19px 21px !important;
+            background:linear-gradient(135deg,rgba(13,39,58,.92),rgba(9,30,46,.94)) !important;
+            border:1px solid rgba(148,163,184,.20) !important;
+            box-shadow:0 18px 46px rgba(0,0,0,.24) !important;margin-bottom:18px !important;
+        }}
+        .fpi-v137-login b,.fpi-v137-login span {{color:#F5F8FA !important;}}
+        div[data-testid="stExpander"] {{background:rgba(255,255,255,.96) !important;border:1px solid rgba(201,154,67,.24) !important;border-radius:18px !important;}}
+        div[data-testid="stExpander"] *, div[data-testid="stExpander"] p, div[data-testid="stExpander"] span, div[data-testid="stExpander"] label {{color:{FPI_V427_INK} !important;}}
+        div[data-baseweb="input"] input, div[data-baseweb="select"] > div, input, textarea {{background:#fff !important;color:{FPI_V427_INK} !important;-webkit-text-fill-color:{FPI_V427_INK} !important;}}
+
+        /* CTA: primary = gold, secondary = dark/emerald */
+        .stButton > button {{
+            border-radius:15px !important;min-height:54px !important;font-weight:900 !important;
+            letter-spacing:.005em !important;border:1px solid rgba(255,255,255,.14) !important;
+            box-shadow:0 12px 28px rgba(0,0,0,.20) !important;
+            transition:all .16s ease !important;
+        }}
+        .stButton > button:hover {{transform:translateY(-2px) !important;box-shadow:0 18px 38px rgba(0,0,0,.27) !important;}}
+        button[data-testid="baseButton-primary"],button[kind="primary"] {{
+            background:linear-gradient(135deg,#D5AA57,#B9832E) !important;color:#071623 !important;border-color:#E8C77A !important;
+        }}
+        button[data-testid="baseButton-primary"] *,button[kind="primary"] * {{color:#071623 !important;-webkit-text-fill-color:#071623 !important;}}
+        button[data-testid="baseButton-secondary"],button[kind="secondary"] {{
+            background:linear-gradient(135deg,#0D344B,#0D5B54) !important;color:#FFFFFF !important;border-color:rgba(53,211,159,.34) !important;
+        }}
+        button[data-testid="baseButton-secondary"] *,button[kind="secondary"] * {{color:#FFFFFF !important;-webkit-text-fill-color:#FFFFFF !important;}}
+
+        .fpi-v137-section-title {{
+            font-size:1.30rem !important;font-weight:900 !important;color:#F7FAFC !important;margin:28px 0 12px 0 !important;
+            letter-spacing:-.02em !important;position:relative;padding-left:14px;
+        }}
+        .fpi-v137-section-title:before {{content:"";position:absolute;left:0;top:5px;bottom:4px;width:3px;border-radius:3px;background:linear-gradient({FPI_V427_GOLD},{FPI_V427_EMERALD});}}
+        .fpi-v137-card {{
+            border-radius:22px !important;padding:22px 23px !important;
+            background:linear-gradient(145deg,rgba(14,40,59,.97),rgba(8,28,43,.98)) !important;
+            border:1px solid rgba(148,163,184,.18) !important;
+            box-shadow:0 20px 48px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.035) !important;
+            min-height:170px !important;position:relative;overflow:hidden;
+        }}
+        .fpi-v137-card:after {{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,{FPI_V427_EMERALD},transparent 55%);opacity:.7;}}
+        .fpi-v137-card h3,.fpi-v137-card b {{color:#FFFFFF !important;}}
+        .fpi-v137-card p,.fpi-v137-card li,.fpi-v137-card ul {{color:#BFD0DC !important;}}
+        .fpi-v137-card li::marker {{color:{FPI_V427_EMERALD} !important;}}
+
+        .stDownloadButton > button {{
+            border-radius:14px !important;min-height:48px !important;font-weight:900 !important;
+            background:linear-gradient(135deg,#0F8C6B,#0A6858) !important;color:#FFFFFF !important;
+            border:1px solid rgba(53,211,159,.28) !important;box-shadow:0 12px 26px rgba(0,0,0,.18) !important;
+        }}
+        .stDownloadButton > button * {{color:#FFFFFF !important;-webkit-text-fill-color:#FFFFFF !important;}}
+        .stAlert,.stAlert * {{color:{FPI_V427_INK} !important;}}
+        hr {{border-color:rgba(148,163,184,.18) !important;}}
+
+        @media (max-width:900px) {{
+            .fpi-v137-hero {{padding:29px 25px 27px 25px !important;}}
+            .fpi-v137-hero-row {{grid-template-columns:1fr !important;gap:18px !important;}}
+            .fpi-v137-logo-wrap {{grid-row:1 !important;justify-content:flex-start !important;min-height:0 !important;}}
+            .fpi-v137-logo {{width:min(240px,74vw) !important;max-height:170px !important;}}
+            .fpi-v137-logo-wrap:before {{width:220px;height:220px;}}
+            .fpi-v137-title {{font-size:2.65rem !important;}}
+        }}
+        </style>
+        <div class="fpi-v427-shell"></div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_fpi_landing_page_v100() -> None:
+    """V427: ugyanaz a landing-tartalom, új prémium vizuális megjelenéssel."""
+    _fpi_landing_css_v100()
+    _fpi_v427_landing_visual_css()
+
+    logo_uri_v424 = _fpi_landing_logo_data_uri_v424()
+    logo_html_v424 = (
+        f'<div class="fpi-v137-logo-wrap"><img class="fpi-v137-logo" src="{logo_uri_v424}" alt="FPI logo"></div>'
+        if logo_uri_v424 else ""
+    )
+    st.markdown(
+        f"""
+        <div class="fpi-v137-hero">
+            <div class="fpi-v137-hero-row">
+                <div class="fpi-v137-hero-copy">
+                    <div class="fpi-v137-kicker">FOOTBALL PERFORMANCE INTELLIGENCE</div>
+                    <div class="fpi-v137-title">Vezetői riport <span class="fpi-v427-accent">30 másodperc alatt.</span></div>
+                    <div class="fpi-v137-sub">GPS exportból – és opcionálisan taktikai PDF/Excel anyagokból – azonnal kapsz heti állapotképet, játékoskockázatot, referencia-összevetést, ellenfél-specifikus fókuszokat és mikrociklus-javaslatot.</div>
+                    <div class="fpi-v137-flow"><span>1. GPS / ZIP feltöltés</span><span>2. Heti kontextus</span><span>3. Tactical Pro+ input</span><span>4. Executive PDF</span></div>
+                    <div class="fpi-v425-contact"><b>Sziegl Gábor</b> · +36 30/451-7614</div>
+                </div>
+                {logo_html_v424}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # A tartalom és a belépési logika változatlan.
+    render_landing_login_panel_v103()
+
+    cta1, cta2, cta3 = st.columns([2.2, 1.2, 1.1])
+    with cta1:
+        if st.button("🚀 Vezetői riport készítése", use_container_width=True, type="primary", key="landing_go_clean_v137"):
+            _fpi_set_page_v100("clean")
+    with cta2:
+        if st.button("📊 Haladó elemző app", use_container_width=True, key="landing_go_app_v137"):
+            st.session_state["fpi_app_hub_seen_v137"] = False
+            _fpi_set_page_v100("app")
+    with cta3:
+        if st.button("📚 Metodika", use_container_width=True, key="landing_method_v138"):
+            _fpi_set_page_v100("method")
+
+    st.markdown('<div class="fpi-v137-section-title">Mit kapsz a riportban?</div>', unsafe_allow_html=True)
+    left_col, right_col = st.columns([1.05, 1.75])
+    with left_col:
+        st.markdown('<div class="fpi-v137-card" style="min-height:96px;margin-bottom:12px;"><h3>Heti állapotkép</h3><p>Readiness, terhelési kép, trendek és heti kockázati összefoglaló.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="fpi-v137-card" style="min-height:96px;"><h3>Játékos-kockázat</h3><p>Magas/közepes jelzések, túl- vagy alulterhelési mintázatok és figyelendő játékosok.</p></div>', unsafe_allow_html=True)
+    with right_col:
+        st.markdown("""
+        <div class="fpi-v137-card" style="min-height:216px;">
+            <h3>Tactical Pro+ Intelligence Engine</h3>
+            <p><b>GPS + játékmodell + ellenfélanyag + heti periodizáció egy rendszerben.</b></p>
+            <ul style="margin:10px 0 0 18px;line-height:1.46;padding-left:0;">
+                <li><b>Ellenfél-specifikus edzésfókusz:</b> mire készüljön a stáb a héten.</li>
+                <li><b>Taktikai prioritások:</b> presszing, rest defense, átmenetek, szélső játék.</li>
+                <li><b>Játékosszintű veszélyek:</b> kulcsemberek, progresszorok, befejezők, gyenge láncszemek.</li>
+                <li><b>Mikrociklus-terv:</b> GPS-állapothoz és meccstervhez igazított napi fókusz.</li>
+            </ul>
+            <p style="margin-top:11px;"><b>Nem csak adatokat mutat: edzői döntéseket strukturál.</b></p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown('<div class="fpi-v137-section-title">Minta riportok – az éles exporttal azonos szerkezetben</div>', unsafe_allow_html=True)
+    m1, m2, m3, m4, m5 = st.columns(5)
+
+    def _fpi_safe_sample_v153(builder):
+        try:
+            value = builder()
+            return value if isinstance(value, (bytes, bytearray)) and len(value) > 1000 else None
+        except Exception:
+            return None
+
+    sample_gps_v156 = _fpi_safe_sample_v153(build_fpi_gps_only_sample_pdf_bytes)
+    sample_tactical_v156 = _fpi_safe_sample_v153(build_fpi_tactical_only_sample_pdf_bytes_v156)
+    sample_integrated_v156 = _fpi_safe_sample_v153(build_fpi_integrated_sample_pdf_bytes_v156)
+    sample_own_v156 = _fpi_safe_sample_v153(build_fpi_own_team_profile_sample_pdf_bytes)
+    sample_method_v156 = _fpi_safe_sample_v153(build_fpi_methodology_pdf_bytes_v143)
+
+    with m1:
+        if sample_gps_v156:
+            st.download_button("⬇️ GPS-only", sample_gps_v156, "fpi_minta_gps_only.pdf", "application/pdf", use_container_width=True, key="sample_gps_v156")
+        else:
+            st.error("GPS-only minta hiba.")
+    with m2:
+        if sample_tactical_v156:
+            st.download_button("⬇️ Taktikai-only", sample_tactical_v156, "fpi_minta_taktikai_only.pdf", "application/pdf", use_container_width=True, key="sample_tactical_v156")
+        else:
+            st.error("Taktikai-only minta hiba.")
+    with m3:
+        if sample_integrated_v156:
+            st.download_button("⬇️ GPS + taktikai", sample_integrated_v156, "fpi_minta_gps_taktikai.pdf", "application/pdf", use_container_width=True, key="sample_integrated_v156")
+        else:
+            st.error("Integrált minta hiba.")
+    with m4:
+        if sample_own_v156:
+            st.download_button("⬇️ Saját csapat", sample_own_v156, "fpi_minta_sajat_csapat.pdf", "application/pdf", use_container_width=True, key="sample_own_v156")
+        else:
+            st.error("Saját csapat minta hiba.")
+    with m5:
+        if sample_method_v156:
+            st.download_button("⬇️ Metodika", sample_method_v156, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="sample_method_v156")
+        else:
+            st.error("Metodika minta hiba.")
+
+
+# -----------------------------------------------------------------------------
+# V427 PDF – common premium visual layer for every PDF
+# -----------------------------------------------------------------------------
+def _fpi_pdf_logo_dimensions_v426(max_w: float, max_h: float) -> Tuple[Optional[Path], float, float]:
+    """Aránytartó Logo.PNG-méret ReportLabhoz."""
+    logo_path = _fpi_brand_logo_path_v427()
+    if logo_path is None:
+        return None, 0.0, 0.0
+    try:
+        from reportlab.lib.utils import ImageReader
+        img = ImageReader(str(logo_path))
+        iw, ih = img.getSize()
+        if not iw or not ih:
+            return None, 0.0, 0.0
+        scale = min(float(max_w) / float(iw), float(max_h) / float(ih))
+        return logo_path, float(iw) * scale, float(ih) * scale
+    except Exception:
+        return None, 0.0, 0.0
+
+
+def _fpi_v427_pdf_canvas_base(canvas_obj, doc_obj, first_page: bool) -> None:
+    """Csak dekoráció: finom executive keret, felső brand sáv és footer accent."""
+    try:
+        canvas_obj.saveState()
+        page_w, page_h = canvas_obj._pagesize
+        navy = colors.HexColor(FPI_V427_NAVY)
+        navy2 = colors.HexColor(FPI_V427_NAVY_2)
+        gold = colors.HexColor(FPI_V427_GOLD)
+        emerald = colors.HexColor(FPI_V427_EMERALD)
+        line = colors.HexColor(FPI_V427_LINE)
+
+        # Tiszta fehér riportfelület.
+        canvas_obj.setFillColor(colors.white)
+        canvas_obj.rect(0, 0, page_w, page_h, stroke=0, fill=1)
+
+        # Vékony prémium oldalkeret.
+        canvas_obj.setStrokeColor(line)
+        canvas_obj.setLineWidth(0.45)
+        canvas_obj.roundRect(0.42 * cm, 0.42 * cm, page_w - 0.84 * cm, page_h - 0.84 * cm, 8, stroke=1, fill=0)
+
+        if not first_page:
+            # Belső oldalakon fix, keskeny brand sáv; tartalmat nem fed el.
+            band_h = 1.12 * cm
+            canvas_obj.setFillColor(navy)
+            canvas_obj.rect(0, page_h - band_h, page_w, band_h, stroke=0, fill=1)
+            canvas_obj.setFillColor(navy2)
+            canvas_obj.rect(0, page_h - band_h, page_w * 0.42, band_h, stroke=0, fill=1)
+            canvas_obj.setStrokeColor(gold)
+            canvas_obj.setLineWidth(1.25)
+            canvas_obj.line(0.55 * cm, page_h - band_h - 0.05 * cm, page_w - 0.55 * cm, page_h - band_h - 0.05 * cm)
+
+        # Alsó zöld/arany márkavonal – szöveg nélkül, tehát tartalom nem változik.
+        y = 0.58 * cm
+        canvas_obj.setStrokeColor(emerald)
+        canvas_obj.setLineWidth(1.35)
+        canvas_obj.line(0.62 * cm, y, page_w * 0.62, y)
+        canvas_obj.setStrokeColor(gold)
+        canvas_obj.setLineWidth(1.35)
+        canvas_obj.line(page_w * 0.62, y, page_w - 0.62 * cm, y)
+        canvas_obj.restoreState()
+    except Exception:
+        try:
+            canvas_obj.restoreState()
+        except Exception:
+            pass
+
+
+def _fpi_pdf_first_page_header_v426(doc_obj, story: list) -> list:
+    """V427: domináns Logo.PNG + sötét prémium brand header, változatlan riportcím."""
+    items = list(story or [])
+    raw_title = ""
+    try:
+        if items and Paragraph is not None and isinstance(items[0], Paragraph):
+            first = items[0]
+            plain = first.getPlainText() if hasattr(first, "getPlainText") else getattr(first, "text", "")
+            style = getattr(first, "style", None)
+            style_name = str(getattr(style, "name", "") or "").lower()
+            font_size = float(getattr(style, "fontSize", 0.0) or 0.0)
+            looks_like_title = (
+                "football performance intelligence" in str(plain).lower()
+                or "title" in style_name
+                or font_size >= 14.0
+            )
+            if looks_like_title:
+                raw_title = str(plain or "")
+                items = items[1:]
+    except Exception:
+        raw_title = ""
+
+    line1, line2 = _fpi_pdf_split_title_v426(raw_title)
+    try:
+        regular_font, bold_font = _register_pdf_font()
+        styles = getSampleStyleSheet()
+        brand_style = ParagraphStyle(
+            "FPI_V427_BRAND_NAME", parent=styles["Normal"], fontName=bold_font,
+            fontSize=9.2, leading=11.2, textColor=colors.HexColor(FPI_V427_GOLD_SOFT),
+            spaceAfter=3, tracking=0.4,
+        )
+        title_style = ParagraphStyle(
+            "FPI_V427_REPORT_TITLE", parent=styles["Title"], fontName=bold_font,
+            fontSize=18.2, leading=21.6, textColor=colors.white,
+            spaceAfter=0, alignment=0,
+        )
+        subtitle_style = ParagraphStyle(
+            "FPI_V427_REPORT_SUBTITLE", parent=styles["Normal"], fontName=regular_font,
+            fontSize=10.1, leading=12.8, textColor=colors.HexColor("#C5D3DE"),
+            spaceBefore=2, spaceAfter=0,
+        )
+
+        available_w = float(getattr(doc_obj, "width", 0.0) or (A4[0] - 2.4 * cm))
+        portrait_like = available_w < 20.0 * cm
+        logo_max_w = 5.15 * cm if portrait_like else 5.75 * cm
+        logo_max_h = 2.35 * cm if portrait_like else 2.55 * cm
+        logo_path, logo_w, logo_h = _fpi_pdf_logo_dimensions_v426(logo_max_w, logo_max_h)
+
+        title_bits = [Paragraph(line1, brand_style)]
+        if line2:
+            title_bits += [Paragraph(line2, title_style)]
+        else:
+            title_bits += [Paragraph(line1, title_style)]
+
+        # Ha a split eredménye csak brandnév + riportcím, az első, kicsi brand sor után
+        # a riportcím kerül nagy méretben. Ha nincs külön riportcím, a brandnév marad nagy.
+        if not line2:
+            title_bits = [Paragraph(line1, title_style)]
+
+        if logo_path is not None and logo_w > 0 and logo_h > 0:
+            from reportlab.platypus import Image as RLImage
+            logo_flow = RLImage(str(logo_path), width=logo_w, height=logo_h)
+            logo_col_w = max(5.35 * cm if portrait_like else 6.0 * cm, logo_w + 0.20 * cm)
+            title_col_w = max(5.0 * cm, available_w - logo_col_w)
+            header_rows = [[logo_flow, title_bits]]
+            hdr = Table(header_rows, colWidths=[logo_col_w, title_col_w], rowHeights=[2.9 * cm], hAlign="LEFT")
+        else:
+            hdr = Table([[title_bits]], colWidths=[available_w], rowHeights=[2.9 * cm], hAlign="LEFT")
+
+        hdr.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(FPI_V427_NAVY)),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (0, 0), (0, 0), "LEFT"),
+            ("LEFTPADDING", (0, 0), (0, 0), 13),
+            ("RIGHTPADDING", (0, 0), (0, 0), 10),
+            ("LEFTPADDING", (1, 0), (-1, 0), 8),
+            ("RIGHTPADDING", (1, 0), (-1, 0), 14),
+            ("TOPPADDING", (0, 0), (-1, -1), 9),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+            ("LINEBELOW", (0, 0), (-1, -1), 1.45, colors.HexColor(FPI_V427_GOLD)),
+            ("BOX", (0, 0), (-1, -1), 0.65, colors.HexColor("#1D3A50")),
+        ]))
+        return [hdr, Spacer(1, 0.22 * cm)] + items
+    except Exception:
+        return story
+
+
+def _fpi_pdf_first_page_branding_v426(canvas_obj, doc_obj) -> None:
+    _fpi_v427_pdf_canvas_base(canvas_obj, doc_obj, first_page=True)
+
+
+def _fpi_pdf_later_page_branding_v426(canvas_obj, doc_obj) -> None:
+    _fpi_v427_pdf_canvas_base(canvas_obj, doc_obj, first_page=False)
+    logo_path, draw_w, draw_h = _fpi_pdf_logo_dimensions_v426(3.30 * cm, 0.76 * cm)
+    if logo_path is None or draw_w <= 0 or draw_h <= 0:
+        return
+    try:
+        from reportlab.lib.utils import ImageReader
+        canvas_obj.saveState()
+        page_w, page_h = canvas_obj._pagesize
+        x = page_w - 0.68 * cm - draw_w
+        y = page_h - 0.18 * cm - draw_h
+        canvas_obj.drawImage(
+            ImageReader(str(logo_path)), x, y,
+            width=draw_w, height=draw_h,
+            preserveAspectRatio=True, mask="auto"
+        )
+        canvas_obj.restoreState()
+    except Exception:
+        try:
+            canvas_obj.restoreState()
+        except Exception:
+            pass
+
+
+def _fpi_pdf_build_v406(doc, story: list) -> None:
+    """V427: minden korábbi PDF-tartalom változatlan, csak az egységes premium shell új."""
+    branded_story = _fpi_pdf_first_page_header_v426(doc, story)
+    try:
+        # A belső oldali sötét brandsávnak hagyunk biztos helyet.
+        doc.topMargin = max(float(getattr(doc, "topMargin", 0.0) or 0.0), 1.42 * cm)
+        doc.bottomMargin = max(float(getattr(doc, "bottomMargin", 0.0) or 0.0), 0.78 * cm)
+    except Exception:
+        pass
+    doc.build(
+        _fpi_v406_sanitize_pdf_story(branded_story),
+        onFirstPage=_fpi_pdf_first_page_branding_v426,
+        onLaterPages=_fpi_pdf_later_page_branding_v426,
+    )
+
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
 if "fpi_active_page_v100" not in st.session_state:
@@ -28778,4 +29311,4 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
 # - a korábbi, nem használt csapatszintű normalizálás eltávolítva
 # - aktív meccsreferencia: játékosonkénti /90 -> mezőnyjátékos-medián
 # =========================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V426_LARGE_PDF_HEADER_LOGO_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V427_PREMIUM_VISUAL_IDENTITY_2026_08_16"
