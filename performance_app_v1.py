@@ -76,7 +76,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -22975,7 +22975,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -23267,7 +23267,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -24293,7 +24293,7 @@ if st.session_state.get("_fpi_invite_pending_v421"):
 # - landing, clean workspace, hub, methodology és full app egy közös design systemet kap;
 # - minden PDF fehér report body + navy/emerald/gold executive brandinget kap.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
 
 FPI_V428_NAVY = "#071521"
 FPI_V428_NAVY_2 = "#0B2235"
@@ -25217,7 +25217,7 @@ def _fpi_pdf_build_v406(doc, story: list) -> None:
 # - a PDF-ek tipográfiáját, fejlécét, tábláit és oldalközöket újratémázza;
 # - elsődleges logó: logo2.PNG.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
 
 
 def _fpi_v429_landing_css() -> None:
@@ -25793,7 +25793,7 @@ def _fpi_pdf_build_v406(doc, story: list) -> None:
 # - olvashatóvá teszi a sidebar mindkét belépési módját;
 # - biztosítja, hogy a CTA-k és minta-PDF letöltők a hero alatt megjelenjenek.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
 
 _fpi_v430_base_landing_css = _fpi_v429_landing_css
 
@@ -26087,7 +26087,7 @@ def _fpi_v429_landing_css() -> None:
 # V431 – VISIBILITY POLISH / spinner + hero fit + crisp feature cards
 # =============================================================================
 # Csak vizuális javítás. Funkció, tartalom, jogosultság, demo és exportlogika változatlan.
-FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
 
 _fpi_v431_base_landing_css = _fpi_v429_landing_css
 
@@ -26275,7 +26275,7 @@ def _fpi_v429_landing_css() -> None:
 # - kontakt kontraszt javítás
 # - feature blokk: két bal kártya egymás alatt, Tactical Pro+ jobbra, azonos összmagasságban
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
 
 _fpi_v432_base_landing_css = _fpi_v429_landing_css
 
@@ -26392,6 +26392,76 @@ def _fpi_v429_landing_css() -> None:
     """V432 wrapper: V431 megjelenés + célzott layout/visibility finomhangolás."""
     _fpi_v432_base_landing_css()
     _fpi_v432_layout_polish_css()
+
+
+
+
+# =============================================================================
+# V433 – HERO FIT POLISH
+# Vizuális-only finomhangolás:
+# - a bal hero tartalom néhány pixellel feljebb kerül
+# - a függőleges térközök tömörebbek
+# - a név + telefonszám biztosan a prémium panelen belül marad
+# =============================================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
+
+_fpi_v433_base_landing_css = _fpi_v429_landing_css
+
+
+def _fpi_v433_hero_fit_css() -> None:
+    st.markdown(
+        """
+        <style>
+        /* A teljes bal oldali hero-blokk enyhén feljebb. */
+        .stApp .block-container .fpi-v429-hero-grid > div:first-child {
+            transform: translateY(-12px) !important;
+        }
+
+        /* Kicsit kompaktabb, de vizuálisan azonos vertikális ritmus. */
+        .stApp .block-container .fpi-v429-brand-logo {
+            margin-bottom:12px !important;
+        }
+
+        .stApp .block-container .fpi-v429-title {
+            margin-top:14px !important;
+            margin-bottom:11px !important;
+        }
+
+        .stApp .block-container .fpi-v429-sub {
+            line-height:1.52 !important;
+        }
+
+        .stApp .block-container .fpi-v429-flow {
+            margin-top:12px !important;
+        }
+
+        .stApp .block-container .fpi-v429-contact {
+            margin-top:9px !important;
+            margin-bottom:0 !important;
+            line-height:1.15 !important;
+        }
+
+        /* A hero alsó belső ráhagyása kisebb, a kontakt nem lóg ki. */
+        .stApp .block-container .fpi-v429-hero {
+            padding-bottom:10px !important;
+        }
+
+        /* Keskenyebb képernyőn ne használjunk negatív eltolást. */
+        @media(max-width:1050px) {
+            .stApp .block-container .fpi-v429-hero-grid > div:first-child {
+                transform:none !important;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _fpi_v429_landing_css() -> None:
+    """V433 wrapper: V432 megjelenés + hero tartalom pontos illesztése."""
+    _fpi_v433_base_landing_css()
+    _fpi_v433_hero_fit_css()
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
@@ -30892,4 +30962,4 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
 # - a korábbi, nem használt csapatszintű normalizálás eltávolítva
 # - aktív meccsreferencia: játékosonkénti /90 -> mezőnyjátékos-medián
 # =========================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V432_LAYOUT_POLISH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
