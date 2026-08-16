@@ -76,7 +76,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -22975,7 +22975,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -23267,7 +23267,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -24293,7 +24293,7 @@ if st.session_state.get("_fpi_invite_pending_v421"):
 # - landing, clean workspace, hub, methodology és full app egy közös design systemet kap;
 # - minden PDF fehér report body + navy/emerald/gold executive brandinget kap.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
 
 FPI_V428_NAVY = "#071521"
 FPI_V428_NAVY_2 = "#0B2235"
@@ -25217,7 +25217,7 @@ def _fpi_pdf_build_v406(doc, story: list) -> None:
 # - a PDF-ek tipográfiáját, fejlécét, tábláit és oldalközöket újratémázza;
 # - elsődleges logó: logo2.PNG.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
 
 
 def _fpi_v429_landing_css() -> None:
@@ -25793,7 +25793,7 @@ def _fpi_pdf_build_v406(doc, story: list) -> None:
 # - olvashatóvá teszi a sidebar mindkét belépési módját;
 # - biztosítja, hogy a CTA-k és minta-PDF letöltők a hero alatt megjelenjenek.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
 
 _fpi_v430_base_landing_css = _fpi_v429_landing_css
 
@@ -26081,6 +26081,188 @@ def _fpi_v429_landing_css() -> None:
     _fpi_v430_base_landing_css()
     _fpi_v430_landing_fix_css()
 
+
+
+# =============================================================================
+# V431 – VISIBILITY POLISH / spinner + hero fit + crisp feature cards
+# =============================================================================
+# Csak vizuális javítás. Funkció, tartalom, jogosultság, demo és exportlogika változatlan.
+FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
+
+_fpi_v431_base_landing_css = _fpi_v429_landing_css
+
+
+def _fpi_v431_visibility_css() -> None:
+    st.markdown(
+        """
+        <style>
+        /* =============================================================
+           1) STREAMLIT RUNNING / STATUS INDICATOR
+           Világos headeren is azonnal látható legyen.
+        ============================================================= */
+        [data-testid="stStatusWidget"],
+        div[data-testid="stStatusWidget"] {
+            background:#0B2235 !important;
+            color:#FFFFFF !important;
+            border:1px solid rgba(97,225,179,.48) !important;
+            border-radius:999px !important;
+            box-shadow:0 7px 18px rgba(11,34,53,.22) !important;
+            opacity:1 !important;
+        }
+        [data-testid="stStatusWidget"] *,
+        div[data-testid="stStatusWidget"] * {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            opacity:1 !important;
+        }
+        [data-testid="stStatusWidget"] svg,
+        [data-testid="stStatusWidget"] svg *,
+        div[data-testid="stStatusWidget"] svg,
+        div[data-testid="stStatusWidget"] svg * {
+            color:#61E1B3 !important;
+            fill:#61E1B3 !important;
+            stroke:#61E1B3 !important;
+            opacity:1 !important;
+        }
+        /* Újabb Streamlit verziók futási állapot ikonja. */
+        [data-testid="stToolbar"] [aria-label*="Running"],
+        [data-testid="stToolbar"] [aria-label*="running"],
+        [data-testid="stToolbar"] [aria-label*="Rerun"],
+        [data-testid="stToolbar"] [aria-label*="rerun"] {
+            background:#0B2235 !important;
+            color:#61E1B3 !important;
+            border-radius:999px !important;
+            opacity:1 !important;
+        }
+        [data-testid="stToolbar"] [aria-label*="Running"] svg,
+        [data-testid="stToolbar"] [aria-label*="running"] svg,
+        [data-testid="stToolbar"] [aria-label*="Rerun"] svg,
+        [data-testid="stToolbar"] [aria-label*="rerun"] svg {
+            color:#61E1B3 !important;
+            fill:#61E1B3 !important;
+            stroke:#61E1B3 !important;
+        }
+
+        /* =============================================================
+           2) HERO – a négy folyamatlépés desktopon egy sorban marad.
+           Így a 4. Executive PDF nem csúszik a nagy sötét panel alá.
+        ============================================================= */
+        .stApp .block-container .fpi-v429-flow {
+            display:flex !important;
+            flex-wrap:nowrap !important;
+            gap:7px !important;
+            margin-top:18px !important;
+            width:100% !important;
+        }
+        .stApp .block-container .fpi-v429-flow span {
+            padding:7px 10px !important;
+            font-size:.77rem !important;
+            line-height:1.15 !important;
+            white-space:nowrap !important;
+            flex:0 1 auto !important;
+        }
+        .stApp .block-container .fpi-v429-contact {
+            margin-top:14px !important;
+        }
+        .stApp .block-container .fpi-v429-brand-logo {
+            margin-bottom:14px !important;
+        }
+        .stApp .block-container .fpi-v429-title {
+            margin-top:17px !important;
+            margin-bottom:13px !important;
+        }
+
+        /* =============================================================
+           3) FEATURE CARDS – a jelenlegi fehér kártyás elrendezés marad,
+           de nincs több fakítás / blur / fehér betű fehér alapon.
+        ============================================================= */
+        .stApp .block-container .fpi-v429-feature-grid {
+            opacity:1 !important;
+            filter:none !important;
+            backdrop-filter:none !important;
+            -webkit-backdrop-filter:none !important;
+        }
+        .stApp .block-container .fpi-v429-dark-card {
+            background:#FFFFFF !important;
+            background-image:none !important;
+            border:1px solid #CBD8E2 !important;
+            box-shadow:0 12px 30px rgba(14,32,49,.10) !important;
+            opacity:1 !important;
+            filter:none !important;
+            backdrop-filter:none !important;
+            -webkit-backdrop-filter:none !important;
+            color:#0E2031 !important;
+            -webkit-text-fill-color:#0E2031 !important;
+        }
+        .stApp .block-container .fpi-v429-dark-card:after {
+            height:3px !important;
+            background:linear-gradient(90deg,#0FA77A,#61E1B3 58%,transparent 92%) !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container .fpi-v429-dark-card h3,
+        .stApp .block-container .fpi-v429-dark-card h3 *,
+        .stApp .block-container .fpi-v429-dark-card b,
+        .stApp .block-container .fpi-v429-dark-card strong {
+            color:#0B2235 !important;
+            -webkit-text-fill-color:#0B2235 !important;
+            opacity:1 !important;
+            text-shadow:none !important;
+        }
+        .stApp .block-container .fpi-v429-dark-card p,
+        .stApp .block-container .fpi-v429-dark-card li,
+        .stApp .block-container .fpi-v429-dark-card span,
+        .stApp .block-container .fpi-v429-dark-card ul {
+            color:#4B6273 !important;
+            -webkit-text-fill-color:#4B6273 !important;
+            opacity:1 !important;
+            text-shadow:none !important;
+        }
+        .stApp .block-container .fpi-v429-dark-card li::marker {
+            color:#0FA77A !important;
+        }
+        .stApp .block-container .fpi-v429-icon {
+            background:#EAF8F2 !important;
+            border:1px solid #C5EBDD !important;
+            color:#0FA77A !important;
+            -webkit-text-fill-color:#0FA77A !important;
+            box-shadow:none !important;
+            opacity:1 !important;
+            filter:none !important;
+        }
+
+        /* A feature blokk már a világos alsó területen látszik, ezért a
+           szekciócím is sötét, kontrasztos executive heading legyen. */
+        .stApp .block-container .fpi-v429-feature-grid ~ * .fpi-v429-section-head,
+        .stApp .block-container .fpi-v429-section-head {
+            opacity:1 !important;
+            text-shadow:none !important;
+        }
+
+        /* Natív Streamlit fade / disabled jellegű öröklés kizárása a landing
+           tartalmi részein. A tényleges disabled kontrollokat nem aktiváljuk. */
+        .stApp .block-container .fpi-v429-feature-grid,
+        .stApp .block-container .fpi-v429-feature-grid *,
+        .stApp .block-container .fpi-v429-preview,
+        .stApp .block-container .fpi-v429-preview * {
+            visibility:visible !important;
+            opacity:1 !important;
+        }
+
+        @media(max-width:1220px) {
+            .stApp .block-container .fpi-v429-flow {
+                flex-wrap:wrap !important;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _fpi_v429_landing_css() -> None:
+    """V431 wrapper: V430 design + célzott láthatósági finomhangolás."""
+    _fpi_v431_base_landing_css()
+    _fpi_v431_visibility_css()
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
@@ -30581,4 +30763,4 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
 # - a korábbi, nem használt csapatszintű normalizálás eltávolítva
 # - aktív meccsreferencia: játékosonkénti /90 -> mezőnyjátékos-medián
 # =========================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V431_VISIBILITY_POLISH_2026_08_16"
