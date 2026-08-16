@@ -76,7 +76,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V428_WOW_VISUAL_IDENTITY_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -22975,7 +22975,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V428_WOW_VISUAL_IDENTITY_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -23267,7 +23267,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V428_WOW_VISUAL_IDENTITY_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -24293,7 +24293,7 @@ if st.session_state.get("_fpi_invite_pending_v421"):
 # - landing, clean workspace, hub, methodology és full app egy közös design systemet kap;
 # - minden PDF fehér report body + navy/emerald/gold executive brandinget kap.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V428_WOW_VISUAL_IDENTITY_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
 
 FPI_V428_NAVY = "#071521"
 FPI_V428_NAVY_2 = "#0B2235"
@@ -25204,6 +25204,581 @@ def _fpi_pdf_build_v406(doc, story: list) -> None:
     )
 
 
+
+
+
+# =============================================================================
+# V429 – CONCEPT MATCH / full-page shell + PDF executive redesign (VISUAL-ONLY)
+# =============================================================================
+# A V428 teljes üzleti és elemzési tartalma változatlan. Ez a réteg csak:
+# - a landinget egyetlen, teljes oldalas prémium shellé alakítja;
+# - megszünteti a kontraszt- és gombfelirat hibákat;
+# - az internal oldalakat egységes kártyás termékfelületté húzza össze;
+# - a PDF-ek tipográfiáját, fejlécét, tábláit és oldalközöket újratémázza;
+# - elsődleges logó: logo2.PNG.
+# =============================================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
+
+
+def _fpi_v429_landing_css() -> None:
+    """A teljes landing maga a nagy prémium panel; nincs külön 'panel a panelben'."""
+    st.markdown(
+        """
+        <style>
+        html, body, .stApp, [data-testid="stAppViewContainer"], .main {
+            background:
+                radial-gradient(circle at 8% 3%, rgba(15,167,122,.09), transparent 25%),
+                radial-gradient(circle at 92% 2%, rgba(201,149,61,.08), transparent 24%),
+                linear-gradient(180deg,#EEF3F7 0%,#E7EEF3 100%) !important;
+        }
+        header[data-testid="stHeader"] {background:rgba(238,243,247,.84) !important;backdrop-filter:blur(14px);}
+        .block-container {
+            max-width:1580px !important;
+            margin:1.05rem auto 2.2rem auto !important;
+            padding:2.2rem 2.35rem 2.6rem 2.35rem !important;
+            border-radius:40px !important;
+            position:relative !important;
+            overflow:hidden !important;
+            background:
+                radial-gradient(circle at 84% 17%,rgba(15,167,122,.20),transparent 28%),
+                radial-gradient(circle at 8% 92%,rgba(201,149,61,.08),transparent 26%),
+                linear-gradient(142deg,#06131F 0%,#081C2B 50%,#071521 100%) !important;
+            border:1px solid rgba(228,191,107,.28) !important;
+            box-shadow:0 34px 86px rgba(7,21,33,.28), inset 0 1px 0 rgba(255,255,255,.05) !important;
+        }
+        .block-container:before {
+            content:"";position:absolute;right:-260px;top:160px;width:760px;height:760px;border-radius:50%;
+            border:1px solid rgba(66,215,165,.13);box-shadow:0 0 0 78px rgba(66,215,165,.020),0 0 0 166px rgba(66,215,165,.014);pointer-events:none;
+        }
+        .block-container:after {
+            content:"";position:absolute;left:2.3rem;right:2.3rem;top:0;height:3px;
+            background:linear-gradient(90deg,transparent,#C9953D 30%,#42D7A5 68%,transparent);pointer-events:none;
+        }
+
+        /* LANDING: minden normál szöveg magas kontrasztú. */
+        .block-container h1,.block-container h2,.block-container h3,.block-container h4,
+        .block-container p,.block-container label,.block-container .stCaption,
+        .block-container [data-testid="stMarkdownContainer"] p,
+        .block-container [data-testid="stMarkdownContainer"] li {
+            color:#F4F8FB !important;-webkit-text-fill-color:#F4F8FB !important;opacity:1 !important;
+        }
+        .block-container [data-testid="stCaptionContainer"] * {color:#B8C9D5 !important;-webkit-text-fill-color:#B8C9D5 !important;}
+
+        /* A hero most már a teljes shell része: nincs újabb külső box. */
+        .fpi-v429-hero {position:relative;z-index:2;padding:10px 4px 24px;margin:0;background:transparent;border:0;box-shadow:none;}
+        .fpi-v429-hero-grid {display:grid;grid-template-columns:minmax(0,1.05fr) minmax(500px,.95fr);gap:46px;align-items:center;}
+        .fpi-v429-brand-logo {
+            display:block;width:min(420px,78%);height:auto;max-height:145px;object-fit:contain;object-position:left center;
+            margin:0 0 18px 0;filter:drop-shadow(0 18px 34px rgba(0,0,0,.28));
+        }
+        .fpi-v429-kicker {display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;background:rgba(255,255,255,.045);border:1px solid rgba(228,191,107,.40);color:#E4BF6B !important;-webkit-text-fill-color:#E4BF6B !important;font-size:.78rem;font-weight:900;letter-spacing:.12em;}
+        .fpi-v429-title {margin:20px 0 15px;font-size:clamp(2.7rem,4.2vw,4.7rem);line-height:.98;letter-spacing:-.055em;font-weight:950;color:#FFFFFF !important;-webkit-text-fill-color:#FFFFFF !important;max-width:850px;}
+        .fpi-v429-title .accent {color:#61E1B3 !important;-webkit-text-fill-color:#61E1B3 !important;}
+        .fpi-v429-sub {max-width:870px;color:#C6D5DF !important;-webkit-text-fill-color:#C6D5DF !important;font-size:1.08rem;line-height:1.62;font-weight:500;}
+        .fpi-v429-flow {display:flex;flex-wrap:wrap;gap:9px;margin-top:21px;}
+        .fpi-v429-flow span {display:inline-flex;align-items:center;padding:8px 13px;border-radius:999px;background:rgba(10,31,47,.74) !important;border:1px solid rgba(66,215,165,.30);color:#F3FBF8 !important;-webkit-text-fill-color:#F3FBF8 !important;font-size:.84rem;font-weight:850;}
+        .fpi-v429-flow span:first-child {border-color:rgba(228,191,107,.48);}
+        .fpi-v429-contact {margin-top:20px;color:#B5C7D3 !important;-webkit-text-fill-color:#B5C7D3 !important;font-weight:750;}
+        .fpi-v429-contact b {color:#E4BF6B !important;-webkit-text-fill-color:#E4BF6B !important;}
+
+        /* Dashboard-preview: a koncepcióképhez közelebb. */
+        .fpi-v429-preview {border-radius:25px;background:linear-gradient(145deg,#081725,#07131F);border:1px solid rgba(166,194,211,.26);box-shadow:0 28px 68px rgba(0,0,0,.33);overflow:hidden;transform:perspective(1600px) rotateY(-1deg);}
+        .fpi-v429-preview-top {height:54px;padding:0 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.09);}
+        .fpi-v429-preview-top b {color:#F8FAFC !important;-webkit-text-fill-color:#F8FAFC !important;font-size:.94rem;}
+        .fpi-v429-dots {display:flex;gap:6px}.fpi-v429-dots i{width:8px;height:8px;border-radius:50%;display:block;background:#31536A}.fpi-v429-dots i:nth-child(2){background:#C9953D}.fpi-v429-dots i:nth-child(3){background:#42B991}
+        .fpi-v429-preview-body {display:grid;grid-template-columns:78px 1fr;min-height:350px;}
+        .fpi-v429-preview-nav {border-right:1px solid rgba(255,255,255,.08);padding:16px 11px;display:flex;flex-direction:column;gap:11px;}
+        .fpi-v429-preview-nav span {height:43px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:#0D2031;color:#AFC5D3 !important;-webkit-text-fill-color:#AFC5D3 !important;font-size:1.05rem;}
+        .fpi-v429-preview-nav span:first-child {background:linear-gradient(135deg,#4FAD84,#5DB88D);color:white !important;-webkit-text-fill-color:white !important;box-shadow:0 10px 22px rgba(15,167,122,.20);}
+        .fpi-v429-preview-main {padding:18px;}
+        .fpi-v429-preview-title {display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.fpi-v429-preview-title b{color:#fff !important;-webkit-text-fill-color:#fff !important;font-size:1.03rem}.fpi-v429-preview-title span{color:#8FA7B8 !important;-webkit-text-fill-color:#8FA7B8 !important;font-size:.74rem}
+        .fpi-v429-mini-grid {display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+        .fpi-v429-mini {min-height:104px;padding:12px;border-radius:15px;background:#10283B;border:1px solid rgba(166,194,211,.16)}
+        .fpi-v429-mini label {display:block;color:#91A8B8 !important;-webkit-text-fill-color:#91A8B8 !important;font-size:.65rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+        .fpi-v429-mini strong {display:block;color:#F8FAFC !important;-webkit-text-fill-color:#F8FAFC !important;font-size:1.04rem;margin-top:9px;line-height:1.25}
+        .fpi-v429-spark {height:28px;margin-top:10px;position:relative}.fpi-v429-spark:after{content:"";position:absolute;left:0;right:0;bottom:8px;height:2px;background:linear-gradient(90deg,#0FA77A 0 15%,#55D6A8 15% 31%,#0FA77A 31% 47%,#55D6A8 47% 68%,#0FA77A 68% 84%,#55D6A8 84%);transform:skewY(-5deg)}
+        .fpi-v429-preview-panels {display:grid;grid-template-columns:1.05fr .95fr;gap:10px;margin-top:10px}
+        .fpi-v429-preview-panel {min-height:132px;border-radius:15px;background:#0C2132;border:1px solid rgba(166,194,211,.15);padding:12px;position:relative;overflow:hidden}
+        .fpi-v429-preview-panel b {color:#DDE9F0 !important;-webkit-text-fill-color:#DDE9F0 !important;font-size:.73rem}
+        .fpi-v429-bars {display:flex;align-items:flex-end;gap:6px;height:77px;margin-top:11px}.fpi-v429-bars i{flex:1;background:linear-gradient(#60D7A9,#137B61);border-radius:4px 4px 1px 1px;opacity:.88}.fpi-v429-bars i:nth-child(1){height:35%}.fpi-v429-bars i:nth-child(2){height:52%}.fpi-v429-bars i:nth-child(3){height:42%}.fpi-v429-bars i:nth-child(4){height:76%}.fpi-v429-bars i:nth-child(5){height:58%}.fpi-v429-bars i:nth-child(6){height:88%}
+        .fpi-v429-pitch {position:absolute;left:15px;right:15px;top:40px;bottom:14px;border:1px solid rgba(85,214,168,.34);background:radial-gradient(circle at 34% 64%,rgba(228,191,107,.34),transparent 15%),radial-gradient(circle at 58% 44%,rgba(85,214,168,.28),transparent 18%),radial-gradient(circle at 72% 70%,rgba(15,167,122,.22),transparent 16%)}
+        .fpi-v429-pitch:before{content:"";position:absolute;left:50%;top:0;bottom:0;border-left:1px solid rgba(85,214,168,.27)}.fpi-v429-pitch:after{content:"";position:absolute;width:38px;height:38px;border:1px solid rgba(85,214,168,.27);border-radius:50%;left:50%;top:50%;transform:translate(-50%,-50%)}
+
+        /* Login / demo – ugyanaz a funkció, de glass panelként a shell része. */
+        .block-container div[data-testid="stVerticalBlockBorderWrapper"] {
+            background:linear-gradient(135deg,rgba(11,34,53,.88),rgba(9,28,43,.80)) !important;
+            border:1px solid rgba(159,188,205,.20) !important;border-radius:20px !important;
+            box-shadow:0 14px 34px rgba(0,0,0,.17) !important;
+        }
+        .block-container div[data-testid="stVerticalBlockBorderWrapper"] h1,
+        .block-container div[data-testid="stVerticalBlockBorderWrapper"] h2,
+        .block-container div[data-testid="stVerticalBlockBorderWrapper"] h3,
+        .block-container div[data-testid="stVerticalBlockBorderWrapper"] p,
+        .block-container div[data-testid="stVerticalBlockBorderWrapper"] label,
+        .block-container div[data-testid="stVerticalBlockBorderWrapper"] span {
+            color:#F2F7FA !important;-webkit-text-fill-color:#F2F7FA !important;
+        }
+        .block-container input,.block-container textarea,
+        .block-container [data-baseweb="input"],.block-container [data-baseweb="input"] *,
+        .block-container [data-baseweb="select"],.block-container [data-baseweb="select"] *,
+        .block-container [data-baseweb="popover"],.block-container [data-baseweb="popover"] *,
+        .block-container [role="listbox"],.block-container [role="listbox"] *,
+        .block-container [role="option"],.block-container [role="option"] * {
+            background:#FFFFFF !important;color:#0E2031 !important;-webkit-text-fill-color:#0E2031 !important;
+        }
+        .block-container .stAlert,.block-container .stAlert * {color:#0E2031 !important;-webkit-text-fill-color:#0E2031 !important;}
+
+        /* CTA-k: nincs több fehér felirat fehér belső kapszulán. */
+        .block-container .stButton > button,
+        .block-container button[data-testid^="baseButton"] {
+            min-height:56px !important;border-radius:16px !important;background:linear-gradient(135deg,#0D2A3E,#123B55) !important;
+            border:1px solid rgba(66,215,165,.34) !important;color:#FFFFFF !important;-webkit-text-fill-color:#FFFFFF !important;
+            font-weight:900 !important;box-shadow:0 12px 28px rgba(0,0,0,.18) !important;
+        }
+        .block-container .stButton > button *,
+        .block-container button[data-testid^="baseButton"] * {
+            background:transparent !important;background-color:transparent !important;background-image:none !important;
+            color:#FFFFFF !important;-webkit-text-fill-color:#FFFFFF !important;fill:#FFFFFF !important;border:0 !important;box-shadow:none !important;
+        }
+        .block-container button[data-testid="baseButton-primary"],
+        .block-container button[kind="primary"] {background:linear-gradient(135deg,#E2B65E,#B77D29) !important;border-color:#E8C77F !important;color:#08131D !important;-webkit-text-fill-color:#08131D !important;}
+        .block-container button[data-testid="baseButton-primary"] *,
+        .block-container button[kind="primary"] * {color:#08131D !important;-webkit-text-fill-color:#08131D !important;fill:#08131D !important;background:transparent !important;}
+        .block-container .stDownloadButton > button {background:linear-gradient(135deg,#0FA77A,#08785C) !important;color:white !important;-webkit-text-fill-color:white !important;border:1px solid rgba(97,225,179,.34) !important;border-radius:14px !important;}
+        .block-container .stDownloadButton > button * {background:transparent !important;color:white !important;-webkit-text-fill-color:white !important;fill:white !important;}
+
+        .fpi-v429-section-head {display:flex;align-items:center;gap:11px;margin:28px 0 13px;color:#F7FAFC !important;-webkit-text-fill-color:#F7FAFC !important;font-size:1.20rem;font-weight:950;letter-spacing:-.02em;position:relative;z-index:2}
+        .fpi-v429-section-head:before {content:"";width:36px;height:3px;border-radius:3px;background:linear-gradient(90deg,#C9953D,#42D7A5)}
+        .fpi-v429-feature-grid {display:grid;grid-template-columns:1fr 1fr 1.45fr;gap:14px;position:relative;z-index:2}
+        .fpi-v429-dark-card {position:relative;overflow:hidden;padding:19px 20px;border-radius:19px;background:linear-gradient(145deg,rgba(15,40,59,.86),rgba(9,28,43,.82));border:1px solid rgba(159,188,205,.18);box-shadow:0 14px 32px rgba(0,0,0,.14)}
+        .fpi-v429-dark-card:after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,#0FA77A,transparent 72%)}
+        .fpi-v429-dark-card h3 {margin:0 0 8px;color:#F8FAFC !important;-webkit-text-fill-color:#F8FAFC !important;font-size:1.02rem}.fpi-v429-dark-card p,.fpi-v429-dark-card li{color:#BFD0DB !important;-webkit-text-fill-color:#BFD0DB !important;line-height:1.48}.fpi-v429-dark-card b{color:#F3F8FB !important;-webkit-text-fill-color:#F3F8FB !important}
+        .fpi-v429-icon {width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:rgba(15,167,122,.14);border:1px solid rgba(97,225,179,.23);color:#61E1B3 !important;-webkit-text-fill-color:#61E1B3 !important;font-size:1.15rem;margin-bottom:13px}
+
+        @media(max-width:1050px){.fpi-v429-hero-grid{grid-template-columns:1fr}.fpi-v429-preview{transform:none}.fpi-v429-feature-grid{grid-template-columns:1fr}.block-container{border-radius:28px !important;padding:1.35rem !important}.fpi-v429-brand-logo{width:min(360px,85%)}}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_fpi_landing_page_v100() -> None:
+    """V429 landing – ugyanaz a tartalom/funkció, teljes oldalas concept-match shellben."""
+    _fpi_landing_css_v100()
+    _fpi_v428_core_css()
+    _fpi_v429_landing_css()
+
+    logo_html = _fpi_v428_logo_html("fpi-v429-brand-logo")
+    st.markdown(
+        f"""
+        <div class="fpi-v429-hero">
+          <div class="fpi-v429-hero-grid">
+            <div>
+              {logo_html}
+              <div class="fpi-v429-kicker">FOOTBALL PERFORMANCE INTELLIGENCE</div>
+              <div class="fpi-v429-title">Vezetői riport <span class="accent">30 másodperc alatt.</span></div>
+              <div class="fpi-v429-sub">GPS exportból – és opcionálisan taktikai PDF/Excel anyagokból – azonnal kapsz heti állapotképet, játékoskockázatot, referencia-összevetést, ellenfél-specifikus fókuszokat és mikrociklus-javaslatot.</div>
+              <div class="fpi-v429-flow"><span>1. GPS / ZIP feltöltés</span><span>2. Heti kontextus</span><span>3. Tactical Pro+ input</span><span>4. Executive PDF</span></div>
+              <div class="fpi-v429-contact"><b>Sziegl Gábor</b> · +36 30/451-7614</div>
+            </div>
+            <div class="fpi-v429-preview">
+              <div class="fpi-v429-preview-top"><b>Vezetői riport</b><span class="fpi-v429-dots"><i></i><i></i><i></i></span></div>
+              <div class="fpi-v429-preview-body">
+                <div class="fpi-v429-preview-nav"><span>⌂</span><span>⌁</span><span>◎</span><span>▤</span><span>⚙</span></div>
+                <div class="fpi-v429-preview-main">
+                  <div class="fpi-v429-preview-title"><b>Football Performance Intelligence</b><span>Executive view</span></div>
+                  <div class="fpi-v429-mini-grid">
+                    <div class="fpi-v429-mini"><label>Readiness</label><strong>Heti állapotkép</strong><div class="fpi-v429-spark"></div></div>
+                    <div class="fpi-v429-mini"><label>Risk</label><strong>Játékos-kockázat</strong><div class="fpi-v429-spark"></div></div>
+                    <div class="fpi-v429-mini"><label>Intelligence</label><strong>Tactical Pro+</strong><div class="fpi-v429-spark"></div></div>
+                  </div>
+                  <div class="fpi-v429-preview-panels">
+                    <div class="fpi-v429-preview-panel"><b>Terhelési profil</b><div class="fpi-v429-bars"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+                    <div class="fpi-v429-preview-panel"><b>Játékmodell / mikrociklus</b><div class="fpi-v429-pitch"></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Tartalmilag változatlan: named-user + legacy aktiváló kód + demo.
+    render_landing_login_panel_v103()
+
+    cta1, cta2, cta3 = st.columns([2.2, 1.2, 1.1])
+    with cta1:
+        if st.button("🚀 Vezetői riport készítése", use_container_width=True, type="primary", key="landing_go_clean_v137"):
+            _fpi_set_page_v100("clean")
+    with cta2:
+        if st.button("📊 Haladó elemző app", use_container_width=True, key="landing_go_app_v137"):
+            st.session_state["fpi_app_hub_seen_v137"] = False
+            _fpi_set_page_v100("app")
+    with cta3:
+        if st.button("📚 Metodika", use_container_width=True, key="landing_method_v138"):
+            _fpi_set_page_v100("method")
+
+    st.markdown('<div class="fpi-v429-section-head">Mit kapsz a riportban?</div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="fpi-v429-feature-grid">
+          <div class="fpi-v429-dark-card"><div class="fpi-v429-icon">◉</div><h3>Heti állapotkép</h3><p>Readiness, terhelési kép, trendek és heti kockázati összefoglaló.</p></div>
+          <div class="fpi-v429-dark-card"><div class="fpi-v429-icon">♙</div><h3>Játékos-kockázat</h3><p>Magas/közepes jelzések, túl- vagy alulterhelési mintázatok és figyelendő játékosok.</p></div>
+          <div class="fpi-v429-dark-card"><div class="fpi-v429-icon">⌁</div><h3>Tactical Pro+ Intelligence Engine</h3><p><b>GPS + játékmodell + ellenfélanyag + heti periodizáció egy rendszerben.</b></p><ul><li><b>Ellenfél-specifikus edzésfókusz:</b> mire készüljön a stáb a héten.</li><li><b>Taktikai prioritások:</b> presszing, rest defense, átmenetek, szélső játék.</li><li><b>Játékosszintű veszélyek:</b> kulcsemberek, progresszorok, befejezők, gyenge láncszemek.</li><li><b>Mikrociklus-terv:</b> GPS-állapothoz és meccstervhez igazított napi fókusz.</li></ul><p style="margin-top:9px;"><b>Nem csak adatokat mutat: edzői döntéseket strukturál.</b></p></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="fpi-v429-section-head">Minta riportok – az éles exporttal azonos szerkezetben</div>', unsafe_allow_html=True)
+    m1, m2, m3, m4, m5 = st.columns(5)
+
+    def _fpi_safe_sample_v153(builder):
+        try:
+            value = builder()
+            return value if isinstance(value, (bytes, bytearray)) and len(value) > 1000 else None
+        except Exception:
+            return None
+
+    sample_gps_v156 = _fpi_safe_sample_v153(build_fpi_gps_only_sample_pdf_bytes)
+    sample_tactical_v156 = _fpi_safe_sample_v153(build_fpi_tactical_only_sample_pdf_bytes_v156)
+    sample_integrated_v156 = _fpi_safe_sample_v153(build_fpi_integrated_sample_pdf_bytes_v156)
+    sample_own_v156 = _fpi_safe_sample_v153(build_fpi_own_team_profile_sample_pdf_bytes)
+    sample_method_v156 = _fpi_safe_sample_v153(build_fpi_methodology_pdf_bytes_v143)
+
+    with m1:
+        if sample_gps_v156:
+            st.download_button("⬇️ GPS-only", sample_gps_v156, "fpi_minta_gps_only.pdf", "application/pdf", use_container_width=True, key="sample_gps_v156")
+        else:
+            st.error("GPS-only minta hiba.")
+    with m2:
+        if sample_tactical_v156:
+            st.download_button("⬇️ Taktikai-only", sample_tactical_v156, "fpi_minta_taktikai_only.pdf", "application/pdf", use_container_width=True, key="sample_tactical_v156")
+        else:
+            st.error("Taktikai-only minta hiba.")
+    with m3:
+        if sample_integrated_v156:
+            st.download_button("⬇️ GPS + taktikai", sample_integrated_v156, "fpi_minta_gps_taktikai.pdf", "application/pdf", use_container_width=True, key="sample_integrated_v156")
+        else:
+            st.error("Integrált minta hiba.")
+    with m4:
+        if sample_own_v156:
+            st.download_button("⬇️ Saját csapat", sample_own_v156, "fpi_minta_sajat_csapat.pdf", "application/pdf", use_container_width=True, key="sample_own_v156")
+        else:
+            st.error("Saját csapat minta hiba.")
+    with m5:
+        if sample_method_v156:
+            st.download_button("⬇️ Metodika", sample_method_v156, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="sample_method_v156")
+        else:
+            st.error("Metodika minta hiba.")
+
+
+def _fpi_v429_internal_page_css(hero_selector: str = "") -> None:
+    """Belső oldalakon fehér teljes-page card + koncepcióhoz illő sötét hero + olvasható CTA."""
+    logo_uri = _fpi_landing_logo_data_uri_v424()
+    logo_rule = ""
+    if logo_uri and hero_selector:
+        logo_rule = f"""
+        {hero_selector} {{position:relative !important;overflow:hidden !important;padding-right:300px !important;}}
+        {hero_selector}:after {{content:\"\";position:absolute;right:30px;top:50%;transform:translateY(-50%);width:235px;height:92px;background:url('{logo_uri}') center/contain no-repeat;filter:drop-shadow(0 11px 20px rgba(0,0,0,.20));opacity:.98;}}
+        """
+    st.markdown(
+        f"""
+        <style>
+        html,body,.stApp,[data-testid="stAppViewContainer"],.main {{background:linear-gradient(180deg,#EEF3F7,#E8EFF4) !important;}}
+        .block-container {{max-width:1510px !important;margin:1rem auto 2rem !important;padding:1.55rem 1.7rem 2.3rem !important;background:#FFFFFF !important;border:1px solid #D8E2E9 !important;border-radius:30px !important;box-shadow:0 24px 58px rgba(14,32,49,.12) !important;}}
+        .fpi-hub-hero,.fpi-method-hero,.fpi-work-hero,.fpi-hero-wow {{background:radial-gradient(circle at 88% 20%,rgba(15,167,122,.23),transparent 28%),linear-gradient(135deg,#071521 0%,#0B2235 58%,#103149 100%) !important;border:1px solid rgba(201,149,61,.28) !important;box-shadow:0 18px 46px rgba(7,21,33,.20) !important;color:#fff !important;border-radius:24px !important;}}
+        .fpi-hub-hero *,.fpi-method-hero *,.fpi-work-hero *,.fpi-hero-wow * {{color:#F7FAFC !important;-webkit-text-fill-color:#F7FAFC !important;opacity:1 !important;}}
+        .fpi-hub-sub,.fpi-method-sub,.fpi-work-sub,.fpi-hero-wow p {{color:#C7D6DF !important;-webkit-text-fill-color:#C7D6DF !important;}}
+        .fpi-hub-kicker,.fpi-method-kicker,.fpi-work-kicker {{color:#E4BF6B !important;-webkit-text-fill-color:#E4BF6B !important;border-color:rgba(228,191,107,.35) !important;background:rgba(255,255,255,.045) !important;}}
+        .fpi-hub-card,.fpi-step-card,.fpi-quick-panel,.fpi-top-nav-card,.fpi-summary-card,.fpi-action-card {{background:#FFFFFF !important;border:1px solid #D8E2E9 !important;box-shadow:0 10px 26px rgba(14,32,49,.07) !important;}}
+        .fpi-hub-card h3,.fpi-hub-card b,.fpi-step-card b,.fpi-quick-panel h3,.fpi-top-nav-card b,.fpi-summary-card h3 {{color:#0E2031 !important;-webkit-text-fill-color:#0E2031 !important;}}
+        .fpi-hub-card p,.fpi-step-card span,.fpi-quick-panel p,.fpi-top-nav-card span,.fpi-summary-card p {{color:#5B6D7E !important;-webkit-text-fill-color:#5B6D7E !important;}}
+        .stButton > button,button[data-testid^="baseButton"] {{background:linear-gradient(135deg,#0B2235,#16435E) !important;color:#FFFFFF !important;-webkit-text-fill-color:#FFFFFF !important;border:1px solid rgba(15,167,122,.30) !important;border-radius:15px !important;min-height:50px !important;font-weight:900 !important;}}
+        .stButton > button *,button[data-testid^="baseButton"] * {{background:transparent !important;background-color:transparent !important;background-image:none !important;color:#FFFFFF !important;-webkit-text-fill-color:#FFFFFF !important;fill:#FFFFFF !important;box-shadow:none !important;border:0 !important;}}
+        button[data-testid="baseButton-primary"],button[kind="primary"] {{background:linear-gradient(135deg,#E2B65E,#B77D29) !important;color:#08131D !important;-webkit-text-fill-color:#08131D !important;border-color:#E8C77F !important;}}
+        button[data-testid="baseButton-primary"] *,button[kind="primary"] * {{color:#08131D !important;-webkit-text-fill-color:#08131D !important;fill:#08131D !important;background:transparent !important;}}
+        div[data-testid="stExpander"],details[data-testid="stExpander"],[data-testid="stFileUploader"],div[data-testid="stVerticalBlockBorderWrapper"] {{background:#FFFFFF !important;border:1px solid #D8E2E9 !important;border-radius:18px !important;box-shadow:0 8px 22px rgba(14,32,49,.06) !important;}}
+        div[data-testid="stExpander"] *,details[data-testid="stExpander"] *,[data-testid="stFileUploader"] *,div[data-testid="stVerticalBlockBorderWrapper"] * {{color:#0E2031 !important;-webkit-text-fill-color:#0E2031 !important;}}
+        input,textarea,[data-baseweb="input"],[data-baseweb="input"] *,[data-baseweb="select"],[data-baseweb="select"] *,[role="listbox"],[role="listbox"] *,[role="option"],[role="option"] * {{background:#FFFFFF !important;color:#0E2031 !important;-webkit-text-fill-color:#0E2031 !important;}}
+        {logo_rule}
+        @media(max-width:900px){{{hero_selector}{{padding-right:24px !important}}{hero_selector}:after{{display:none !important}}.block-container{{border-radius:20px !important;padding:1rem !important}}}}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# Tartalom ugyanaz: közvetlenül az eredeti, V428 előtt elmentett renderelőket hívjuk.
+def render_fpi_clean_workspace_v101() -> None:
+    _fpi_v428_base_clean_workspace()
+    _fpi_v428_core_css()
+    _fpi_v429_internal_page_css(".fpi-work-hero")
+
+
+def render_fpi_app_hub_v137() -> None:
+    _fpi_v428_base_app_hub()
+    _fpi_v428_core_css()
+    _fpi_v429_internal_page_css(".fpi-hub-hero")
+
+
+def render_fpi_methodology_center_v138() -> None:
+    _fpi_v428_base_method_center()
+    _fpi_v428_core_css()
+    _fpi_v429_internal_page_css(".fpi-method-hero")
+
+
+def render_fpi_hero() -> None:
+    """V429 full-app hero – logo2.PNG domináns, de a tartalmi elemek változatlanok."""
+    logo_html = _fpi_v428_logo_html("fpi-v429-app-logo")
+    st.markdown(
+        f"""
+        <style>
+        .fpi-v429-app-hero{{position:relative;overflow:hidden;border-radius:25px;padding:24px 28px;margin:6px 0 15px;background:radial-gradient(circle at 87% 18%,rgba(15,167,122,.24),transparent 28%),linear-gradient(135deg,#071521,#0B2235 58%,#103149);border:1px solid rgba(201,149,61,.28);box-shadow:0 18px 46px rgba(7,21,33,.20)}}
+        .fpi-v429-app-hero-grid{{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:28px;align-items:center}}.fpi-v429-app-hero h1{{margin:0;color:#fff !important;-webkit-text-fill-color:#fff !important;font-size:2.35rem;letter-spacing:-.045em}}.fpi-v429-app-hero p{{color:#C7D6DF !important;-webkit-text-fill-color:#C7D6DF !important;line-height:1.5;margin:8px 0 12px}}.fpi-v429-app-chip{{display:inline-block;margin:4px 5px 0 0;padding:6px 10px;border-radius:999px;background:rgba(15,167,122,.12);border:1px solid rgba(66,215,165,.25);color:#E6F8F1 !important;-webkit-text-fill-color:#E6F8F1 !important;font-size:.82rem;font-weight:820}}.fpi-v429-app-logo{{display:block;width:285px;max-height:115px;object-fit:contain;margin-left:auto;filter:drop-shadow(0 12px 20px rgba(0,0,0,.22))}}
+        @media(max-width:780px){{.fpi-v429-app-hero-grid{{grid-template-columns:1fr}}.fpi-v429-app-logo{{margin:0;width:220px}}}}
+        </style>
+        <div class="fpi-v429-app-hero"><div class="fpi-v429-app-hero-grid"><div><h1>⚽ Football Performance Intelligence</h1><p>GPS adatokból és opcionális taktikai PDF/Excel inputból vezetői döntéstámogatás, edzői prioritások és exportálható performance riportok.</p><div><span class="fpi-v429-app-chip">⚡ Readiness</span><span class="fpi-v429-app-chip">🎯 Coaching priorities</span><span class="fpi-v429-app-chip">🧠 Smart mapper</span><span class="fpi-v429-app-chip">📄 Executive export</span><span class="fpi-v429-app-chip">🧩 Tactical Pro+ opcionális</span></div></div><div>{logo_html}</div></div></div>
+        """,
+        unsafe_allow_html=True,
+    )
+    _fpi_v428_core_css()
+    _fpi_v429_internal_page_css("")
+
+
+# =============================================================================
+# V429 PDF – concept-match white executive pages, fixed header/table contrast
+# =============================================================================
+def _fpi_v429_cell_plain_text(cell) -> str:
+    try:
+        if Paragraph is not None and isinstance(cell, Paragraph):
+            return str(cell.getPlainText() if hasattr(cell, "getPlainText") else getattr(cell, "text", "") or "")
+        if isinstance(cell, (list, tuple)):
+            return " ".join(_fpi_v429_cell_plain_text(x) for x in cell)
+        if cell is None:
+            return ""
+        return str(cell)
+    except Exception:
+        return ""
+
+
+def _fpi_v429_force_cell_color(cell, color_value, bold: bool = False) -> None:
+    try:
+        reg, bld = _register_pdf_font()
+    except Exception:
+        reg, bld = "Helvetica", "Helvetica-Bold"
+    if isinstance(cell, (list, tuple)):
+        for x in cell:
+            _fpi_v429_force_cell_color(x, color_value, bold)
+        return
+    try:
+        if Paragraph is not None and isinstance(cell, Paragraph):
+            from copy import copy as _copy
+            cell.style = _copy(cell.style)
+            cell.style.textColor = color_value
+            if bold:
+                cell.style.fontName = bld
+            for frag in getattr(cell, "frags", []) or []:
+                try:
+                    frag.textColor = color_value
+                    if bold:
+                        frag.fontName = bld
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+def _fpi_v428_pdf_theme_table(tbl_obj) -> None:
+    """V429 override: a table saját stílusa UTOLJÁRA fut, ezért nincs sötét szöveg navy fejlécen."""
+    try:
+        vals = getattr(tbl_obj, "_cellvalues", None)
+        if not vals or not isinstance(vals, list):
+            return
+        rows = len(vals)
+        cols = max((len(r) if isinstance(r, list) else 0) for r in vals) if rows else 0
+        if rows <= 0 or cols <= 0:
+            return
+        flat = [c for row in vals if isinstance(row, list) for c in row]
+        simple_ratio = sum(1 for c in flat if _fpi_v428_pdf_cell_is_simple(c)) / max(1, len(flat))
+        text_all = " ".join(_fpi_v429_cell_plain_text(c) for c in flat).strip()
+        first_text = " ".join(_fpi_v429_cell_plain_text(c) for c in (vals[0] if vals else [])).strip()
+        section_like = rows <= 2 and cols <= 3 and (
+            bool(re.match(r"^\s*\d+\s*[\.\)]", first_text))
+            or (len(first_text) <= 95 and any(k in _norm_mapping_text(first_text) for k in ["osszefoglalo","összefoglaló","profil","benchmark","fokusz","fókusz","mikrociklus","prioritas","prioritás","jatekos","játékos","modszertan","módszertan"]))
+        )
+        data_like = rows >= 2 and cols >= 2 and simple_ratio >= .70 and not section_like
+
+        # Előző LINE/BACKGROUND parancsokat nem töröljük (kompatibilitás), de a V429
+        # utolsó parancsai minden kritikus színt és vonalat felülírnak.
+        if section_like:
+            for c in vals[0]:
+                _fpi_v429_force_cell_color(c, colors.HexColor("#0E2031"), bold=True)
+            tbl_obj.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,-1),colors.white),
+                ("TEXTCOLOR",(0,0),(-1,-1),colors.HexColor("#0E2031")),
+                ("FONTNAME",(0,0),(-1,-1),_register_pdf_font()[1]),
+                ("LINEABOVE",(0,0),(-1,0),0,colors.white),
+                ("BOX",(0,0),(-1,-1),0,colors.white),
+                ("LINEBELOW",(0,-1),(-1,-1),0.9,colors.HexColor("#D1A24B")),
+                ("LEFTPADDING",(0,0),(-1,-1),0),
+                ("RIGHTPADDING",(0,0),(-1,-1),4),
+                ("TOPPADDING",(0,0),(-1,-1),7),
+                ("BOTTOMPADDING",(0,0),(-1,-1),7),
+                ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+            ]))
+            return
+
+        if data_like:
+            for c in vals[0]:
+                _fpi_v429_force_cell_color(c, colors.white, bold=True)
+            for row in vals[1:]:
+                for c in row:
+                    _fpi_v429_force_cell_color(c, colors.HexColor("#0E2031"), bold=False)
+            tbl_obj.repeatRows = max(int(getattr(tbl_obj, "repeatRows", 0) or 0), 1)
+            tbl_obj.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#10263A")),
+                ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                ("FONTNAME",(0,0),(-1,0),_register_pdf_font()[1]),
+                ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F7F9FB")]),
+                ("TEXTCOLOR",(0,1),(-1,-1),colors.HexColor("#0E2031")),
+                ("GRID",(0,0),(-1,-1),0.28,colors.HexColor("#D8E2E9")),
+                ("BOX",(0,0),(-1,-1),0.55,colors.HexColor("#CAD7E0")),
+                ("LINEBELOW",(0,0),(-1,0),1.2,colors.HexColor("#D1A24B")),
+                ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+                ("LEFTPADDING",(0,0),(-1,-1),7),
+                ("RIGHTPADDING",(0,0),(-1,-1),7),
+                ("TOPPADDING",(0,0),(-1,-1),6.5),
+                ("BOTTOMPADDING",(0,0),(-1,-1),6.5),
+            ]))
+            return
+
+        # Kis summary/KPI layoutok: fehér executive card. Semmilyen sötét body nem marad.
+        if rows <= 4 and simple_ratio >= .55:
+            for row in vals:
+                for c in row:
+                    _fpi_v429_force_cell_color(c, colors.HexColor("#0E2031"), bold=False)
+            tbl_obj.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,-1),colors.white),
+                ("TEXTCOLOR",(0,0),(-1,-1),colors.HexColor("#0E2031")),
+                ("BOX",(0,0),(-1,-1),0.55,colors.HexColor("#D5E0E7")),
+                ("INNERGRID",(0,0),(-1,-1),0.25,colors.HexColor("#E3EAF0")),
+                ("LINEABOVE",(0,0),(-1,0),1.15,colors.HexColor("#0FA77A")),
+                ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+                ("LEFTPADDING",(0,0),(-1,-1),8),
+                ("RIGHTPADDING",(0,0),(-1,-1),8),
+                ("TOPPADDING",(0,0),(-1,-1),7),
+                ("BOTTOMPADDING",(0,0),(-1,-1),7),
+            ]))
+    except Exception:
+        pass
+
+
+def _fpi_v428_pdf_theme_flowable(value) -> None:
+    """V429: előbb belső Paragraphok, UTÁNA a táblaszín – ez javítja a fejléc olvashatóságát."""
+    try:
+        if Table is not None and isinstance(value, Table):
+            vals = getattr(value, "_cellvalues", []) or []
+            for row in vals:
+                if not isinstance(row, list):
+                    continue
+                for cell in row:
+                    if isinstance(cell, (list, tuple)):
+                        for item in cell:
+                            _fpi_v428_pdf_theme_flowable(item)
+                    else:
+                        _fpi_v428_pdf_theme_flowable(cell)
+            _fpi_v428_pdf_theme_table(value)
+            return
+        keep_cls = globals().get("KeepTogether")
+        if keep_cls is not None and isinstance(value, keep_cls):
+            for item in getattr(value, "_content", []) or []:
+                _fpi_v428_pdf_theme_flowable(item)
+            return
+        _fpi_v428_pdf_theme_paragraph(value)
+    except Exception:
+        pass
+
+
+def _fpi_pdf_first_page_header_v426(doc_obj, story: list) -> list:
+    """V429: nagy, tiszta cím a brand banner alatt; nincs egymásra csúszó section-box."""
+    report_title, items = _fpi_v428_extract_report_title(story)
+    try:
+        regular_font, bold_font = _register_pdf_font()
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            "FPI_V429_REPORT_TITLE", parent=styles["Title"], fontName=bold_font,
+            fontSize=22.0, leading=25.0, textColor=colors.HexColor("#0E2031"),
+            spaceBefore=0, spaceAfter=7, alignment=0,
+        )
+        accent = Table([[""]], colWidths=[float(getattr(doc_obj,"width",16*cm) or 16*cm)], rowHeights=[0.035*cm])
+        accent.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#D1A24B")),("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0),("TOPPADDING",(0,0),(-1,-1),0),("BOTTOMPADDING",(0,0),(-1,-1),0)]))
+        return [Spacer(1, 1.88*cm), Paragraph(report_title, title_style), accent, Spacer(1,.22*cm)] + items
+    except Exception:
+        return story
+
+
+def _fpi_v429_pdf_canvas_base(canvas_obj, doc_obj, first_page: bool) -> None:
+    try:
+        canvas_obj.saveState()
+        page_w,page_h = canvas_obj._pagesize
+        navy=colors.HexColor("#071521"); navy2=colors.HexColor("#0B2235"); gold=colors.HexColor("#D1A24B"); emerald=colors.HexColor("#0FA77A")
+        canvas_obj.setFillColor(colors.white); canvas_obj.rect(0,0,page_w,page_h,stroke=0,fill=1)
+        band_h = 3.35*cm if first_page else 1.42*cm
+        canvas_obj.setFillColor(navy);canvas_obj.rect(0,page_h-band_h,page_w,band_h,stroke=0,fill=1)
+        # Jobb oldali mélyebb gradient-hatás lapos geometriai réteggel.
+        canvas_obj.setFillColor(navy2);canvas_obj.rect(page_w*.57,page_h-band_h,page_w*.43,band_h,stroke=0,fill=1)
+        # Finom tech körívek.
+        canvas_obj.setStrokeColor(colors.HexColor("#16485D"));canvas_obj.setLineWidth(.34)
+        r=2.6*cm if first_page else 1.05*cm
+        canvas_obj.circle(page_w-.65*cm,page_h-band_h*.10,r,stroke=1,fill=0);canvas_obj.circle(page_w-.65*cm,page_h-band_h*.10,r*.66,stroke=1,fill=0)
+        # Domináns első oldali logo2.PNG, később kompakt.
+        logo_x=.72*cm;center_y=page_h-band_h/2
+        used_w=_fpi_v428_pdf_draw_logo(canvas_obj,logo_x,center_y,5.7*cm if first_page else 2.55*cm,2.15*cm if first_page else .86*cm)
+        try: reg,bld=_register_pdf_font()
+        except Exception: reg,bld="Helvetica","Helvetica-Bold"
+        tx=logo_x+(used_w if used_w>0 else (4.2*cm if first_page else 1.8*cm))+(.44*cm if first_page else .30*cm)
+        canvas_obj.setFont(bld,9.5 if first_page else 7.2);canvas_obj.setFillColor(colors.white)
+        canvas_obj.drawString(tx,center_y+.03*cm,"FOOTBALL PERFORMANCE INTELLIGENCE")
+        # Két tónusú alsó brand-vonal, de nem lóg bele a tartalomba.
+        canvas_obj.setStrokeColor(gold);canvas_obj.setLineWidth(1.3);canvas_obj.line(0,page_h-band_h,page_w*.58,page_h-band_h)
+        canvas_obj.setStrokeColor(emerald);canvas_obj.line(page_w*.58,page_h-band_h,page_w,page_h-band_h)
+        # Footer: könnyű, tiszta, koncepciókép-szerű.
+        canvas_obj.setFont(reg,6.6);canvas_obj.setFillColor(colors.HexColor("#687A89"));canvas_obj.drawString(.72*cm,.34*cm,"FPI – Football Performance Intelligence");canvas_obj.drawRightString(page_w-.72*cm,.34*cm,f"{int(canvas_obj.getPageNumber())}. oldal")
+        canvas_obj.setStrokeColor(colors.HexColor("#DDE5EA"));canvas_obj.setLineWidth(.35);canvas_obj.line(.72*cm,.62*cm,page_w-.72*cm,.62*cm)
+        canvas_obj.restoreState()
+    except Exception:
+        try: canvas_obj.restoreState()
+        except Exception: pass
+
+
+def _fpi_pdf_first_page_branding_v426(canvas_obj, doc_obj) -> None:
+    _fpi_v429_pdf_canvas_base(canvas_obj,doc_obj,True)
+
+
+def _fpi_pdf_later_page_branding_v426(canvas_obj, doc_obj) -> None:
+    _fpi_v429_pdf_canvas_base(canvas_obj,doc_obj,False)
+
+
+def _fpi_pdf_build_v406(doc, story: list) -> None:
+    """V429 közös PDF kapu: tartalom azonos, vizuál közelebb a generált executive mintához."""
+    themed=_fpi_v428_pdf_theme_story(_fpi_v406_sanitize_pdf_story(list(story or [])))
+    branded=_fpi_pdf_first_page_header_v426(doc,themed)
+    try:
+        # 1.42 cm későbbi fejléc + legalább 0.45 cm légrés: nincs több vonal/section overlap.
+        doc.topMargin=max(float(getattr(doc,"topMargin",0.0) or 0.0),1.92*cm)
+        doc.bottomMargin=max(float(getattr(doc,"bottomMargin",0.0) or 0.0),.92*cm)
+        doc.leftMargin=max(float(getattr(doc,"leftMargin",0.0) or 0.0),.78*cm)
+        doc.rightMargin=max(float(getattr(doc,"rightMargin",0.0) or 0.0),.78*cm)
+    except Exception:
+        pass
+    doc.build(
+        _fpi_v406_sanitize_pdf_story(branded),
+        onFirstPage=_fpi_pdf_first_page_branding_v426,
+        onLaterPages=_fpi_pdf_later_page_branding_v426,
+    )
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
@@ -29704,4 +30279,4 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
 # - a korábbi, nem használt csapatszintű normalizálás eltávolítva
 # - aktív meccsreferencia: játékosonkénti /90 -> mezőnyjátékos-medián
 # =========================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V428_WOW_VISUAL_IDENTITY_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
