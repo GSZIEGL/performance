@@ -25433,46 +25433,92 @@ def render_fpi_landing_page_v100() -> None:
     )
 
     st.markdown('<div class="fpi-v429-section-head">Minta riportok – az éles exporttal azonos szerkezetben</div>', unsafe_allow_html=True)
-    m1, m2, m3, m4, m5 = st.columns(5)
 
-    def _fpi_safe_sample_v153(builder):
-        try:
-            value = builder()
-            return value if isinstance(value, (bytes, bytearray)) and len(value) > 1000 else None
-        except Exception:
-            return None
+    # V434 PERFORMANCE:
+    # A landing többé NEM rendereli le automatikusan mind az 5 PDF-et minden rerunnál.
+    # A felhasználó csak akkor indítja el az egyszeri generálást, ha valóban kéri a mintákat.
+    samples_ready_v434 = bool(st.session_state.get("fpi_v434_sample_reports_ready", False))
 
-    sample_gps_v156 = _fpi_safe_sample_v153(build_fpi_gps_only_sample_pdf_bytes)
-    sample_tactical_v156 = _fpi_safe_sample_v153(build_fpi_tactical_only_sample_pdf_bytes_v156)
-    sample_integrated_v156 = _fpi_safe_sample_v153(build_fpi_integrated_sample_pdf_bytes_v156)
-    sample_own_v156 = _fpi_safe_sample_v153(build_fpi_own_team_profile_sample_pdf_bytes)
-    sample_method_v156 = _fpi_safe_sample_v153(build_fpi_methodology_pdf_bytes_v143)
+    if not samples_ready_v434:
+        load_col_v434, note_col_v434 = st.columns([1.35, 3.65])
+        with load_col_v434:
+            if st.button(
+                "⚡ Minta riportok előkészítése",
+                use_container_width=True,
+                key="prepare_sample_reports_v434",
+            ):
+                st.session_state["fpi_v434_sample_reports_ready"] = True
+                samples_ready_v434 = True
+        with note_col_v434:
+            st.caption(
+                "A gyors indulás érdekében a minta PDF-ek csak kérésre készülnek el. "
+                "Az első előkészítés után cache-ből töltődnek, ezért a későbbi oldalfrissítések gyorsak."
+            )
 
-    with m1:
-        if sample_gps_v156:
-            st.download_button("⬇️ GPS-only", sample_gps_v156, "fpi_minta_gps_only.pdf", "application/pdf", use_container_width=True, key="sample_gps_v156")
-        else:
-            st.error("GPS-only minta hiba.")
-    with m2:
-        if sample_tactical_v156:
-            st.download_button("⬇️ Taktikai-only", sample_tactical_v156, "fpi_minta_taktikai_only.pdf", "application/pdf", use_container_width=True, key="sample_tactical_v156")
-        else:
-            st.error("Taktikai-only minta hiba.")
-    with m3:
-        if sample_integrated_v156:
-            st.download_button("⬇️ GPS + taktikai", sample_integrated_v156, "fpi_minta_gps_taktikai.pdf", "application/pdf", use_container_width=True, key="sample_integrated_v156")
-        else:
-            st.error("Integrált minta hiba.")
-    with m4:
-        if sample_own_v156:
-            st.download_button("⬇️ Saját csapat", sample_own_v156, "fpi_minta_sajat_csapat.pdf", "application/pdf", use_container_width=True, key="sample_own_v156")
-        else:
-            st.error("Saját csapat minta hiba.")
-    with m5:
-        if sample_method_v156:
-            st.download_button("⬇️ Metodika", sample_method_v156, "fpi_metodika.pdf", "application/pdf", use_container_width=True, key="sample_method_v156")
-        else:
-            st.error("Metodika minta hiba.")
+    if samples_ready_v434:
+        m1, m2, m3, m4, m5 = st.columns(5)
+
+        def _fpi_safe_sample_v153(builder):
+            try:
+                value = builder()
+                return value if isinstance(value, (bytes, bytearray)) and len(value) > 1000 else None
+            except Exception:
+                return None
+
+        # Ezek a builder-nevek V434-ben cache-elt wrapperre vannak átirányítva.
+        # Első kérés: render. Következő rerunok: cache-hit.
+        with st.spinner("Minta riportok egyszeri előkészítése…"):
+            sample_gps_v156 = _fpi_safe_sample_v153(build_fpi_gps_only_sample_pdf_bytes)
+            sample_tactical_v156 = _fpi_safe_sample_v153(build_fpi_tactical_only_sample_pdf_bytes_v156)
+            sample_integrated_v156 = _fpi_safe_sample_v153(build_fpi_integrated_sample_pdf_bytes_v156)
+            sample_own_v156 = _fpi_safe_sample_v153(build_fpi_own_team_profile_sample_pdf_bytes)
+            sample_method_v156 = _fpi_safe_sample_v153(build_fpi_methodology_pdf_bytes_v143)
+
+        with m1:
+            if sample_gps_v156:
+                st.download_button(
+                    "⬇️ GPS-only", sample_gps_v156, "fpi_minta_gps_only.pdf",
+                    "application/pdf", use_container_width=True,
+                    key="sample_gps_v156", on_click="ignore",
+                )
+            else:
+                st.error("GPS-only minta hiba.")
+        with m2:
+            if sample_tactical_v156:
+                st.download_button(
+                    "⬇️ Taktikai-only", sample_tactical_v156, "fpi_minta_taktikai_only.pdf",
+                    "application/pdf", use_container_width=True,
+                    key="sample_tactical_v156", on_click="ignore",
+                )
+            else:
+                st.error("Taktikai-only minta hiba.")
+        with m3:
+            if sample_integrated_v156:
+                st.download_button(
+                    "⬇️ GPS + taktikai", sample_integrated_v156, "fpi_minta_gps_taktikai.pdf",
+                    "application/pdf", use_container_width=True,
+                    key="sample_integrated_v156", on_click="ignore",
+                )
+            else:
+                st.error("Integrált minta hiba.")
+        with m4:
+            if sample_own_v156:
+                st.download_button(
+                    "⬇️ Saját csapat", sample_own_v156, "fpi_minta_sajat_csapat.pdf",
+                    "application/pdf", use_container_width=True,
+                    key="sample_own_v156", on_click="ignore",
+                )
+            else:
+                st.error("Saját csapat minta hiba.")
+        with m5:
+            if sample_method_v156:
+                st.download_button(
+                    "⬇️ Metodika", sample_method_v156, "fpi_metodika.pdf",
+                    "application/pdf", use_container_width=True,
+                    key="sample_method_v156", on_click="ignore",
+                )
+            else:
+                st.error("Metodika minta hiba.")
 
 
 def _fpi_v429_internal_page_css(hero_selector: str = "") -> None:
@@ -26462,6 +26508,106 @@ def _fpi_v429_landing_css() -> None:
     """V433 wrapper: V432 megjelenés + hero tartalom pontos illesztése."""
     _fpi_v433_base_landing_css()
     _fpi_v433_hero_fit_css()
+
+
+
+# =============================================================================
+# V434 – PERFORMANCE / FAST LANDING
+# =============================================================================
+# Fő probléma:
+# a landing minden Streamlit rerunnál 5 teljes ReportLab PDF-et renderelt.
+#
+# Új működés:
+# 1) A landing első megjelenésekor NINCS PDF-render.
+# 2) A minták csak a "Minta riportok előkészítése" gombra készülnek el.
+# 3) A kész bytes-ok st.cache_data mögött maradnak.
+# 4) A download_button on_click="ignore", így maga a letöltés sem indít
+#    felesleges teljes Streamlit rerunt.
+#
+# Tartalmi logika nem változik.
+# =============================================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V434_FAST_LANDING_CACHED_SAMPLES_2026_08_16"
+FPI_SAMPLE_CACHE_VERSION_V434 = "V434_PDF_VISUAL_2026_08_16"
+
+# Az aktuális, V433-ig felépített production sample builderek eltárolása.
+_fpi_v434_raw_gps_sample_builder = build_fpi_gps_only_sample_pdf_bytes
+_fpi_v434_raw_tactical_sample_builder = build_fpi_tactical_only_sample_pdf_bytes_v156
+_fpi_v434_raw_integrated_sample_builder = build_fpi_integrated_sample_pdf_bytes_v156
+_fpi_v434_raw_own_sample_builder = build_fpi_own_team_profile_sample_pdf_bytes
+_fpi_v434_raw_method_sample_builder = build_fpi_methodology_pdf_bytes_v143
+_fpi_v434_raw_generic_sample_builder = build_fpi_sample_pdf_bytes
+
+
+@st.cache_data(show_spinner=False)
+def _fpi_v434_cached_gps_sample(cache_version: str) -> Optional[bytes]:
+    return _fpi_v434_raw_gps_sample_builder()
+
+
+@st.cache_data(show_spinner=False)
+def _fpi_v434_cached_tactical_sample(cache_version: str) -> Optional[bytes]:
+    return _fpi_v434_raw_tactical_sample_builder()
+
+
+@st.cache_data(show_spinner=False)
+def _fpi_v434_cached_integrated_sample(cache_version: str) -> Optional[bytes]:
+    return _fpi_v434_raw_integrated_sample_builder()
+
+
+@st.cache_data(show_spinner=False)
+def _fpi_v434_cached_own_sample(cache_version: str) -> Optional[bytes]:
+    return _fpi_v434_raw_own_sample_builder()
+
+
+@st.cache_data(show_spinner=False)
+def _fpi_v434_cached_method_sample(cache_version: str) -> Optional[bytes]:
+    return _fpi_v434_raw_method_sample_builder()
+
+
+@st.cache_data(show_spinner=False)
+def _fpi_v434_cached_generic_sample(
+    report_type: str,
+    include_tactical: bool,
+    cache_version: str,
+) -> Optional[bytes]:
+    return _fpi_v434_raw_generic_sample_builder(
+        report_type=report_type,
+        include_tactical=include_tactical,
+    )
+
+
+# Az eredeti publikus neveket cache-elt wrapperre irányítjuk.
+# Így az app más részei is automatikusan profitálnak, ha ugyanazokat
+# a statikus mintariportokat kérik.
+def build_fpi_gps_only_sample_pdf_bytes() -> Optional[bytes]:
+    return _fpi_v434_cached_gps_sample(FPI_SAMPLE_CACHE_VERSION_V434)
+
+
+def build_fpi_tactical_only_sample_pdf_bytes_v156() -> Optional[bytes]:
+    return _fpi_v434_cached_tactical_sample(FPI_SAMPLE_CACHE_VERSION_V434)
+
+
+def build_fpi_integrated_sample_pdf_bytes_v156() -> Optional[bytes]:
+    return _fpi_v434_cached_integrated_sample(FPI_SAMPLE_CACHE_VERSION_V434)
+
+
+def build_fpi_own_team_profile_sample_pdf_bytes() -> Optional[bytes]:
+    return _fpi_v434_cached_own_sample(FPI_SAMPLE_CACHE_VERSION_V434)
+
+
+def build_fpi_methodology_pdf_bytes_v143() -> Optional[bytes]:
+    return _fpi_v434_cached_method_sample(FPI_SAMPLE_CACHE_VERSION_V434)
+
+
+def build_fpi_sample_pdf_bytes(
+    report_type: str = "full",
+    include_tactical: bool = True,
+) -> Optional[bytes]:
+    return _fpi_v434_cached_generic_sample(
+        str(report_type),
+        bool(include_tactical),
+        FPI_SAMPLE_CACHE_VERSION_V434,
+    )
+
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
