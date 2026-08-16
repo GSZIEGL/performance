@@ -76,7 +76,7 @@ try:
 except Exception:
     create_client = None
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
 
 # -----------------------------------------------------------------------------
 # Oldalbeállítás
@@ -22975,7 +22975,7 @@ def _fpi_v300_master_dataset(data: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str
 # 4) Hiányzó Sprint db nem lesz 0; csak teljes forráslefedettségnél jelenik meg.
 # 5) A játékostábla nem vág le 20 főnél.
 
-FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
 
 
 def _fpi_v417_field_players(df: pd.DataFrame) -> pd.DataFrame:
@@ -23267,7 +23267,7 @@ def _fpi_v304_player_charts(players: pd.DataFrame):
 # =============================================================================
 # V418 – production reference-consistency audit
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
 # Cél:
 # - Speed Exposure: ne csapatösszeg / aktuális meccs csapatösszeg legyen, hanem
 #   mezőnyjátékos session-medián / saját /90 meccsreferencia.
@@ -24293,7 +24293,7 @@ if st.session_state.get("_fpi_invite_pending_v421"):
 # - landing, clean workspace, hub, methodology és full app egy közös design systemet kap;
 # - minden PDF fehér report body + navy/emerald/gold executive brandinget kap.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
 
 FPI_V428_NAVY = "#071521"
 FPI_V428_NAVY_2 = "#0B2235"
@@ -25217,7 +25217,7 @@ def _fpi_pdf_build_v406(doc, story: list) -> None:
 # - a PDF-ek tipográfiáját, fejlécét, tábláit és oldalközöket újratémázza;
 # - elsődleges logó: logo2.PNG.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
 
 
 def _fpi_v429_landing_css() -> None:
@@ -25779,6 +25779,308 @@ def _fpi_pdf_build_v406(doc, story: list) -> None:
         onFirstPage=_fpi_pdf_first_page_branding_v426,
         onLaterPages=_fpi_pdf_later_page_branding_v426,
     )
+
+
+
+# =============================================================================
+# V430 – LANDING CONTRAST + FULL-PAGE SCROLL/CONTENT VISIBILITY FIX
+# =============================================================================
+# A V429 design és minden tartalmi/funkcionális elem változatlan marad.
+# Ez a réteg kizárólag:
+# - nagyobb CSS-specificityvel rögzíti a sötét hero olvasható betűszíneit;
+# - helyreállítja a teljes landing természetes magasságát és görgethetőségét;
+# - megszünteti a .block-container overflow clippinget;
+# - olvashatóvá teszi a sidebar mindkét belépési módját;
+# - biztosítja, hogy a CTA-k és minta-PDF letöltők a hero alatt megjelenjenek.
+# =============================================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
+
+_fpi_v430_base_landing_css = _fpi_v429_landing_css
+
+
+def _fpi_v430_landing_fix_css() -> None:
+    st.markdown(
+        """
+        <style>
+        /* -------------------------------------------------------------
+           V430 / 1. A teljes prémium oldal valóban a teljes tartalom köré nő.
+           A V429 overflow:hidden Streamlit alatt bizonyos viewportokon levágta
+           a hero alatt renderelt natív elemeket. A shell design megmarad,
+           de a tartalom természetesen tovább nő és görgethető.
+        ------------------------------------------------------------- */
+        [data-testid="stAppViewContainer"] > .main,
+        section.main {
+            overflow-y:auto !important;
+            overflow-x:hidden !important;
+        }
+        .stApp .block-container,
+        [data-testid="stAppViewContainer"] .block-container {
+            height:auto !important;
+            max-height:none !important;
+            min-height:calc(100vh - 5.5rem) !important;
+            overflow:visible !important;
+            padding-bottom:3.25rem !important;
+        }
+        /* A dekoratív kör korábban csak overflow:hidden mellett maradt a shellben.
+           A radial háttér önmagában megtartja ugyanazt a vizuális hangulatot. */
+        .stApp .block-container:before { display:none !important; }
+        .stApp .block-container:after {
+            z-index:0 !important;
+            pointer-events:none !important;
+        }
+        .stApp .block-container > div,
+        .stApp .block-container [data-testid="stVerticalBlock"] {
+            position:relative;
+            z-index:1;
+        }
+
+        /* -------------------------------------------------------------
+           V430 / 2. HERO – magas specificity. A régi global .stApp div/span
+           !important szabályok több helyen felülírták a V429 színeit.
+        ------------------------------------------------------------- */
+        .stApp .block-container .fpi-v429-kicker,
+        .stApp .block-container .fpi-v429-kicker * {
+            color:#E8C66F !important;
+            -webkit-text-fill-color:#E8C66F !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container .fpi-v429-title {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            opacity:1 !important;
+            text-shadow:0 2px 20px rgba(0,0,0,.15) !important;
+        }
+        .stApp .block-container .fpi-v429-title .accent {
+            color:#6BE6B8 !important;
+            -webkit-text-fill-color:#6BE6B8 !important;
+        }
+        .stApp .block-container .fpi-v429-sub,
+        .stApp .block-container .fpi-v429-sub * {
+            color:#D2DEE6 !important;
+            -webkit-text-fill-color:#D2DEE6 !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container .fpi-v429-contact,
+        .stApp .block-container .fpi-v429-contact * {
+            color:#C7D5DE !important;
+            -webkit-text-fill-color:#C7D5DE !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container .fpi-v429-contact b {
+            color:#E8C66F !important;
+            -webkit-text-fill-color:#E8C66F !important;
+        }
+        .stApp .block-container .fpi-v429-flow span {
+            color:#F7FBFD !important;
+            -webkit-text-fill-color:#F7FBFD !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container .fpi-v429-section-head,
+        .stApp .block-container .fpi-v429-section-head * {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container .fpi-v429-dark-card h3,
+        .stApp .block-container .fpi-v429-dark-card h3 *,
+        .stApp .block-container .fpi-v429-dark-card b {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container .fpi-v429-dark-card p,
+        .stApp .block-container .fpi-v429-dark-card li,
+        .stApp .block-container .fpi-v429-dark-card span {
+            color:#C7D7E1 !important;
+            -webkit-text-fill-color:#C7D7E1 !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container .fpi-v429-icon {
+            color:#6BE6B8 !important;
+            -webkit-text-fill-color:#6BE6B8 !important;
+        }
+
+        /* Dashboard preview – minden címke explicit, régi globális CSS-től független. */
+        .stApp .fpi-v429-preview-top b,
+        .stApp .fpi-v429-preview-title b,
+        .stApp .fpi-v429-mini strong {
+            color:#F8FAFC !important;
+            -webkit-text-fill-color:#F8FAFC !important;
+            opacity:1 !important;
+        }
+        .stApp .fpi-v429-preview-title span,
+        .stApp .fpi-v429-mini label,
+        .stApp .fpi-v429-preview-panel b {
+            color:#B9CBD6 !important;
+            -webkit-text-fill-color:#B9CBD6 !important;
+            opacity:1 !important;
+        }
+
+        /* -------------------------------------------------------------
+           V430 / 3. Natív main-area panelek. Sötét shellben világos szöveg,
+           fehér kontrollban sötét szöveg. A letöltő gombokat is felülírjuk.
+        ------------------------------------------------------------- */
+        .stApp .block-container div[data-testid="stVerticalBlockBorderWrapper"] {
+            overflow:visible !important;
+        }
+        .stApp .block-container div[data-testid="stVerticalBlockBorderWrapper"] h1,
+        .stApp .block-container div[data-testid="stVerticalBlockBorderWrapper"] h2,
+        .stApp .block-container div[data-testid="stVerticalBlockBorderWrapper"] h3,
+        .stApp .block-container div[data-testid="stVerticalBlockBorderWrapper"] p,
+        .stApp .block-container div[data-testid="stVerticalBlockBorderWrapper"] label,
+        .stApp .block-container div[data-testid="stVerticalBlockBorderWrapper"] span {
+            color:#F4F8FB !important;
+            -webkit-text-fill-color:#F4F8FB !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container input,
+        .stApp .block-container textarea,
+        .stApp .block-container [data-baseweb="input"] *,
+        .stApp .block-container [data-baseweb="select"] * {
+            color:#0E2031 !important;
+            -webkit-text-fill-color:#0E2031 !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container .stButton > button,
+        .stApp .block-container button[data-testid^="baseButton"] {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+        }
+        .stApp .block-container .stButton > button *,
+        .stApp .block-container button[data-testid^="baseButton"] * {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            fill:#FFFFFF !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container button[data-testid="baseButton-primary"],
+        .stApp .block-container button[kind="primary"] {
+            color:#071521 !important;
+            -webkit-text-fill-color:#071521 !important;
+        }
+        .stApp .block-container button[data-testid="baseButton-primary"] *,
+        .stApp .block-container button[kind="primary"] * {
+            color:#071521 !important;
+            -webkit-text-fill-color:#071521 !important;
+            fill:#071521 !important;
+        }
+        .stApp .block-container .stDownloadButton > button,
+        .stApp .block-container div[data-testid="stDownloadButton"] > button {
+            background:linear-gradient(135deg,#0FA77A,#08785C) !important;
+            border:1px solid rgba(107,230,184,.42) !important;
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            min-height:48px !important;
+            border-radius:14px !important;
+            font-weight:900 !important;
+            box-shadow:0 10px 24px rgba(5,74,57,.22) !important;
+            opacity:1 !important;
+        }
+        .stApp .block-container .stDownloadButton > button *,
+        .stApp .block-container div[data-testid="stDownloadButton"] > button * {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            fill:#FFFFFF !important;
+            opacity:1 !important;
+            background:transparent !important;
+        }
+
+        /* -------------------------------------------------------------
+           V430 / 4. Sidebar login. A két meglévő belépési mód változatlan,
+           csak a fehér sidebaron rögzítjük a sötét feliratokat.
+        ------------------------------------------------------------- */
+        [data-testid="stSidebar"] {
+            background:linear-gradient(180deg,#F9FBFC 0%,#F1F6F8 100%) !important;
+            border-right:1px solid #D6E0E7 !important;
+        }
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3,
+        [data-testid="stSidebar"] h4,
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] * {
+            color:#0E2031 !important;
+            -webkit-text-fill-color:#0E2031 !important;
+            opacity:1 !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stCaptionContainer"] *,
+        [data-testid="stSidebar"] small {
+            color:#526879 !important;
+            -webkit-text-fill-color:#526879 !important;
+            opacity:1 !important;
+        }
+        [data-testid="stSidebar"] input,
+        [data-testid="stSidebar"] [data-baseweb="input"] *,
+        [data-testid="stSidebar"] [data-baseweb="select"] * {
+            background:#FFFFFF !important;
+            color:#0E2031 !important;
+            -webkit-text-fill-color:#0E2031 !important;
+            opacity:1 !important;
+        }
+        [data-testid="stSidebar"] .stButton > button,
+        [data-testid="stSidebar"] button[data-testid^="baseButton"] {
+            background:linear-gradient(135deg,#0FA77A,#368D6D) !important;
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            border:0 !important;
+            border-radius:14px !important;
+            font-weight:900 !important;
+        }
+        [data-testid="stSidebar"] .stButton > button *,
+        [data-testid="stSidebar"] button[data-testid^="baseButton"] * {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            fill:#FFFFFF !important;
+            background:transparent !important;
+            opacity:1 !important;
+        }
+        [data-testid="stSidebar"] [role="radiogroup"] label,
+        [data-testid="stSidebar"] [role="radiogroup"] label * {
+            color:#0E2031 !important;
+            -webkit-text-fill-color:#0E2031 !important;
+            opacity:1 !important;
+        }
+        [data-testid="stSidebar"] .stAlert,
+        [data-testid="stSidebar"] .stAlert * {
+            color:#0E2031 !important;
+            -webkit-text-fill-color:#0E2031 !important;
+        }
+        [data-testid="stSidebarCollapsedControl"] button,
+        [data-testid="stSidebarCollapseButton"] button {
+            background:#0B2235 !important;
+            color:#FFFFFF !important;
+        }
+        [data-testid="stSidebarCollapsedControl"] button *,
+        [data-testid="stSidebarCollapseButton"] button * {
+            color:#FFFFFF !important;
+            -webkit-text-fill-color:#FFFFFF !important;
+            fill:#FFFFFF !important;
+        }
+
+        /* alsó szekciók biztosan a dokumentumfolyamban maradnak */
+        .stApp .block-container .fpi-v429-feature-grid,
+        .stApp .block-container .fpi-v429-section-head,
+        .stApp .block-container div[data-testid="stDownloadButton"] {
+            visibility:visible !important;
+            opacity:1 !important;
+        }
+
+        @media(max-width:1050px) {
+            .stApp .block-container { min-height:auto !important; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _fpi_v429_landing_css() -> None:
+    """V430 wrapper: V429 concept design + végső kontraszt/görgetés javítás."""
+    _fpi_v430_base_landing_css()
+    _fpi_v430_landing_fix_css()
+
 
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
@@ -30279,4 +30581,4 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
 # - a korábbi, nem használt csapatszintű normalizálás eltávolítva
 # - aktív meccsreferencia: játékosonkénti /90 -> mezőnyjátékos-medián
 # =========================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V429_CONCEPT_MATCH_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V430_CONTRAST_SCROLL_FIX_2026_08_16"
