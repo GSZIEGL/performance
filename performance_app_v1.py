@@ -7808,7 +7808,7 @@ def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
 
     # PAGE 1 - Executive cover/dashboard
     story.append(P("Football Performance Intelligence", title))
-    story.append(P("Teljes minta vezetői riport | Demo FC U19 | 2026-W22 | Játékmodell: Pressing | Minta GPS/terhelési adatok", subtitle))
+    story.append(P("Teljes minta vezetői riport | Minta FC U19 | 2026-W22 | Játékmodell: Pressing | Minta GPS/terhelési adatok", subtitle))
     story.append(Spacer(1, 7))
 
     story.append(Table([[
@@ -7839,7 +7839,7 @@ def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
             [P("1"), P("Heti terhelési kiugrás"), P("FIGYELMEZTETÉS"), P("A heti edzés terhelési pontértéke 27%-kal nőtt az előző héthez képest."), P("Következő edzésen terheléskontroll és egyéni reakciók figyelése.")],
             [P("2"), P("Alacsony sprintinger"), P("FIGYELMEZTETÉS"), P("A heti sprintprofil a meccsigény kb. 72%-a."), P("Rövid, kontrollált maximális sebességű blokk, ha a heti cél engedi.")],
             [P("3"), P("MD-2 terhelés magas lehet"), P("FIGYELMEZTETÉS"), P("Az MD-2 load közel volt a hét fő terhelési napjához."), P("Meccs előtt 48 órával alacsonyabb neuromuszkuláris terhelés.")],
-            [P("4"), P("Két játékos magas risk zónában"), P("KRITIKUS"), P("Molnár Dávid és Kiss Levente egyéni terhelése eltér a csapatprofiltól."), P("Egyéni terheléskorrekció és regenerációs visszajelzés ellenőrzése.")],
+            [P("4"), P("Két játékos magas risk zónában"), P("KRITIKUS"), P("Nagy Péter és Horváth László egyéni terhelése eltér a csapatprofiltól."), P("Egyéni terheléskorrekció és regenerációs visszajelzés ellenőrzése.")],
             [P("5"), P("Pozitív tapering jel"), P("INFORMÁCIÓ"), P("Az MD-1 terhelés alacsonyabb volt a hét fő napjához képest."), P("A struktúra megtartható, ha a meccsteljesítmény visszaigazolja.")],
         ], [1.0*cm, 5.0*cm, 3.0*cm, 9.0*cm, 9.2*cm], header_color="#0f172a")
     ]))
@@ -7856,9 +7856,9 @@ def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
         Spacer(1, 4),
         styled_table([
             [P("Prioritás", header), P("Teendő", header), P("Miért fontos?", header), P("Mikor?", header)],
-            [P("1. Sprintterhelés kontroll"), P("Molnár Dávid és Kiss Levente kapjon kontrollált nagysebességű ingert, de ne újabb volumennövelő blokkot."), P("Mindkét játékosnál magasabb sprinttáv és terhelési löket látható."), P("Következő edzés")],
+            [P("1. Sprintterhelés kontroll"), P("Nagy Péter és Horváth László kapjon kontrollált nagysebességű ingert, de ne újabb volumennövelő blokkot."), P("Mindkét játékosnál magasabb sprinttáv és terhelési löket látható."), P("Következő edzés")],
             [P("2. MD-2 frissesség"), P("A mérkőzés előtti 48 órában csökkenteni kell a teljes loadot és a lassítási terhelést."), P("A túl magas MD-2 terhelés ronthatja a meccsnapi frissességet."), P("Meccs előtt 2 nap")],
-            [P("3. Alacsony terhelésű játékosok"), P("Kiss R. és Horváth Zalán részére kiegészítő egyéni munka vagy fokozatos visszaterhelés."), P("Két hete csapatátlag alatti load, lemaradó inger alakulhat ki."), P("Következő 2 edzés")],
+            [P("3. Alacsony terhelésű játékosok"), P("Molnár Zoltán és Varga Tamás részére kiegészítő egyéni munka vagy fokozatos visszaterhelés."), P("Két hete csapatátlag alatti load, lemaradó inger alakulhat ki."), P("Következő 2 edzés")],
             [P("4. High effort monitoring"), P("A nagy intenzitású erőfeszítéseket játékosonként kell figyelni, nem csak csapatszinten."), P("A csapatátlag elfedhet egyéni neuromuszkuláris kockázatot."), P("Minden edzés után")],
             [P("5. Posztcsoport összevetés"), P("Szélsők és középpályások sprint/HSR arányát külön értékelni."), P("A játékmodell más fizikai profilt vár el posztonként."), P("Heti review")],
             [P("6. Frissességi kérdőív"), P("A két magas risk játékosnál rövid szubjektív frissességi check-in."), P("A GPS nem mutatja önmagában a belső terhelésérzetet."), P("Edzés előtt")],
@@ -7871,12 +7871,12 @@ def build_marketing_sample_pdf_bytes() -> Optional[bytes]:
         Spacer(1, 4),
         styled_table([
             [P("Játékos", header), P("Poszt", header), P("Risk", header), P("Fő eltérés", header), P("Ajánlott lépés", header)],
-            [P("Molnár Dávid"), P("CM"), P("Magas - 82"), P("Sprinttáv +55%, összterhelés +18%"), P("Load kontroll, regenerációs monitor, következő edzésen limitált extra munka.")],
-            [P("Kiss Levente"), P("W"), P("Magas - 79"), P("High effort és lassítás kiugrás"), P("Excentrikus terhelés csökkentése, frissesség ellenőrzés.")],
-            [P("Horváth Zalán"), P("DM"), P("Közepes - 63"), P("Max sebesség trend csökkenő"), P("Rövid, kontrollált max sebességű inger.")],
-            [P("Kiss R."), P("GK"), P("Közepes - 61"), P("Alacsony heti load"), P("Pozícióspecifikus kiegészítő blokk.")],
-            [P("Tóth B."), P("CB"), P("Alacsony - 38"), P("Stabil terhelés, nincs kiugrás"), P("Normál terhelés folytatható.")],
-            [P("Mészáros P."), P("ST"), P("Alacsony - 34"), P("Jó sprint kitettség, kontrollált load"), P("Jelenlegi struktúra megtartható.")],
+            [P("Nagy Péter"), P("CM"), P("Magas - 82"), P("Sprinttáv +55%, összterhelés +18%"), P("Load kontroll, regenerációs monitor, következő edzésen limitált extra munka.")],
+            [P("Horváth László"), P("W"), P("Magas - 79"), P("High effort és lassítás kiugrás"), P("Excentrikus terhelés csökkentése, frissesség ellenőrzés.")],
+            [P("Varga Tamás"), P("DM"), P("Közepes - 63"), P("Max sebesség trend csökkenő"), P("Rövid, kontrollált max sebességű inger.")],
+            [P("Molnár Zoltán"), P("GK"), P("Közepes - 61"), P("Alacsony heti load"), P("Pozícióspecifikus kiegészítő blokk.")],
+            [P("Farkas Attila"), P("CB"), P("Alacsony - 38"), P("Stabil terhelés, nincs kiugrás"), P("Normál terhelés folytatható.")],
+            [P("Balogh József"), P("ST"), P("Alacsony - 34"), P("Jó sprint kitettség, kontrollált load"), P("Jelenlegi struktúra megtartható.")],
         ], [3.4*cm, 2.0*cm, 2.8*cm, 8.2*cm, 10.8*cm], header_color="#7f1d1d", body_bg="#fff7ed")
     ]))
 
@@ -8941,7 +8941,7 @@ def build_demo_performance_data() -> pd.DataFrame:
     Direkt olyan mintákkal, amelyekből működő readiness, mikrociklus és risk riport készül.
     """
     rng = np.random.default_rng(42)
-    players = ["Kiss Márk", "Molnár Dávid", "Farkas Bence", "Varga Ádám", "Kiss Levente", "Horváth Zalán", "Takács Patrik", "Kiss R."]
+    players = ["Kovács István", "Nagy Péter", "Szabó János", "Tóth Gábor", "Horváth László", "Varga Tamás", "Kiss András", "Molnár Zoltán"]
     positions = ["CB", "FB", "CM", "AM", "W", "F", "DM", "GK"]
     start = pd.Timestamp("2026-05-18")
     rows = []
@@ -8965,7 +8965,7 @@ def build_demo_performance_data() -> pd.DataFrame:
                 dpm = total_distance / duration
                 sprint_dist = max(20, (180 if typ == "Edzés" else 520) * factor * role_factor * rng.normal(1, .18))
                 # direkt kiugrók: 2 játékos magas risk a 3. héten
-                if w == 2 and player in ["Molnár Dávid", "Kiss Levente"]:
+                if w == 2 and player in ["Nagy Péter", "Horváth László"]:
                     sprint_dist *= 1.55
                     total_distance *= 1.18
                 acc_high = max(0, rng.normal(14, 4) * factor)
@@ -10994,7 +10994,7 @@ def _fpi_match_context_label_v94() -> str:
 
 def _fpi_demo_match_context_label_v122() -> str:
     """Minta PDF-ekhez: konkrét, eladható meccskontextus N/A és technikai figyelmeztetés nélkül."""
-    return "Mérkőzés: KTE U19 – Soroksár SC | Meccsnap: 2026.06.06. szombat | Meccshét: 2026-W23"
+    return "Mérkőzés: Minta FC U19 – Ellenfél FC U19 | Meccsnap: 2026.06.06. szombat | Meccshét: 2026-W23"
 
 
 def _fpi_demo_week_check_text_v122() -> str:
@@ -12146,6 +12146,15 @@ def _build_demo_tactical_context() -> Dict[str, object]:
     return {
         "version": "DEMO_TACTICAL_CONTEXT_V1",
         "analysis_level": "Full Intelligence DEMO",
+        "teams": {
+            "team_a": "Minta FC",
+            "team_b": "Ellenfél FC",
+            "own_team": "Minta FC",
+            "opponent_team": "Ellenfél FC",
+            "own_side": "a",
+        },
+        "own_team": "Minta FC",
+        "opponent_team": "Ellenfél FC",
         "has_own_pdf": True,
         "has_opp_pdf": True,
         "has_own_team_excel": True,
@@ -12203,8 +12212,8 @@ def _build_demo_tactical_context() -> Dict[str, object]:
         ],
         "opponent_player_evaluation": [
             {"Játékos":"Kovács Péter","Poszt":"CF","Szerep":"Befejező / kapura veszélyes játékos","Bizonyíték":"lövés: 4.0; xG: 0.6","Értelmezés":"aktív befejező, kapura veszélyes","Javaslat":"Boxon belüli felvétel korlátozása, második labdák kontrollja."},
-            {"Játékos":"Nagy Bence","Poszt":"RM","Szerep":"Szélső / beadó veszély","Bizonyíték":"beadás: 8.0; kulcspassz: 3.0","Értelmezés":"oldali veszély / beadások jelentős száma","Javaslat":"Oldali 1v1 kontroll, beadásblokkolás, hosszú oldali zárás."},
-            {"Játékos":"Tóth Zoltán","Poszt":"AM","Szerep":"Kreatív kulcsjátékos","Bizonyíték":"kulcspassz: 4.0; progresszív passz: 7.0","Értelmezés":"jó kreatív kapcsolódási pont, több kulcspasszal","Javaslat":"Passzsáv zárása, testhelyzet kontroll, belső irány lezárása."},
+            {"Játékos":"Nagy László","Poszt":"RM","Szerep":"Szélső / beadó veszély","Bizonyíték":"beadás: 8.0; kulcspassz: 3.0","Értelmezés":"oldali veszély / beadások jelentős száma","Javaslat":"Oldali 1v1 kontroll, beadásblokkolás, hosszú oldali zárás."},
+            {"Játékos":"Tóth Miklós","Poszt":"AM","Szerep":"Kreatív kulcsjátékos","Bizonyíték":"kulcspassz: 4.0; progresszív passz: 7.0","Értelmezés":"jó kreatív kapcsolódási pont, több kulcspasszal","Javaslat":"Passzsáv zárása, testhelyzet kontroll, belső irány lezárása."},
         ],
     }
 
@@ -14013,7 +14022,7 @@ def build_fpi_gps_only_sample_pdf_bytes() -> Optional[bytes]:
         return None
     demo_df = add_position_group(demo_df)
     latest = _fpi_latest_week(demo_df)
-    return build_fpi_gps_only_pdf_bytes(demo_df, latest, "Magas presszing", demo_label="MINTA RIPORT / KTE U19 – GPS only")
+    return build_fpi_gps_only_pdf_bytes(demo_df, latest, "Magas presszing", demo_label="MINTA RIPORT / MINTA FC U19 – GPS only")
 
 
 def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool = True) -> Optional[bytes]:
@@ -14028,10 +14037,10 @@ def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool
         # V134: a minta Executive Summary-ben is legyen konkrét ellenfél-játékos értékelés referenciaértékekkel.
         if not tactical_ctx.get("opponent_player_evaluation"):
             tactical_ctx["opp_player_tables"] = {
-                "creators": pd.DataFrame([{"player":"Tóth Zoltán","position":"AM","key_passes":4.0,"progressive_passes":7.0,"shots":2.0,"xg":0.20}]),
-                "wide_players": pd.DataFrame([{"player":"Nagy Bence","position":"RM","crosses":8.0,"key_passes":3.0,"lost_balls":4.0}]),
+                "creators": pd.DataFrame([{"player":"Tóth Miklós","position":"AM","key_passes":4.0,"progressive_passes":7.0,"shots":2.0,"xg":0.20}]),
+                "wide_players": pd.DataFrame([{"player":"Nagy László","position":"RM","crosses":8.0,"key_passes":3.0,"lost_balls":4.0}]),
                 "finishers": pd.DataFrame([{"player":"Kovács Péter","position":"CF","shots":4.0,"xg":0.60,"goals":1.0}]),
-                "weak_links": pd.DataFrame([{"player":"Márk Helembai","position":"CB","lost_balls":7.0,"passes":42.0}]),
+                "weak_links": pd.DataFrame([{"player":"Szabó Ferenc","position":"CB","lost_balls":7.0,"passes":42.0}]),
             }
             tactical_ctx["opponent_player_evaluation"] = _fpi_build_player_evaluation_v132(tactical_ctx["opp_player_tables"], side="opp", max_rows=8)
         else:
@@ -14045,7 +14054,7 @@ def build_fpi_sample_pdf_bytes(report_type: str = "full", include_tactical: bool
                         rr["Bizonyíték"] = "beadás: 8.0 (ref: 3–6; magas beadási volumen); kulcspassz: 3.0 (ref: 1–3; referenciatartományban)"
                     elif "kreatív" in role:
                         rr["Bizonyíték"] = "kulcspassz: 4.0 (ref: 1–3; kiemelt kreatív akció); progresszív passz: 7.0 (ref: 4–8; referenciatartományban)"
-    label = "MINTA RIPORT / KTE U19 – GPS + Tactical" if include_tactical else "MINTA RIPORT / KTE U19 – GPS only"
+    label = "MINTA RIPORT / MINTA FC U19 – GPS + Tactical" if include_tactical else "MINTA RIPORT / MINTA FC U19 – GPS only"
     return build_fpi_product_pdf_bytes(demo_df, latest, "Magas presszing", report_type=report_type, demo_label=label, tactical_context=tactical_ctx)
 
 
@@ -14654,28 +14663,28 @@ def build_fpi_own_team_profile_sample_pdf_bytes() -> Optional[bytes]:
 
         tactical_ctx["own_player_tables"] = {
             "creators": pd.DataFrame([
-                {"player": "Kiss Márk", "position": "AM", "key_passes": 4.0, "xg": 0.22, "shots": 2},
-                {"player": "Farkas Bence", "position": "W", "key_passes": 3.0, "crosses": 7},
+                {"player": "Kovács István", "position": "AM", "key_passes": 4.0, "xg": 0.22, "shots": 2},
+                {"player": "Szabó János", "position": "W", "key_passes": 3.0, "crosses": 7},
             ]),
             "progressors": pd.DataFrame([
-                {"player": "Molnár Dávid", "position": "CM", "progressive_passes": 9.0, "passes": 58},
-                {"player": "Varga Ádám", "position": "DM", "progressive_passes": 7.0, "recoveries": 8},
+                {"player": "Nagy Péter", "position": "CM", "progressive_passes": 9.0, "passes": 58},
+                {"player": "Tóth Gábor", "position": "DM", "progressive_passes": 7.0, "recoveries": 8},
             ]),
             "build_up": pd.DataFrame([
-                {"player": "Kiss Levente", "position": "CB", "passes": 62.0, "progressive_passes": 6},
-                {"player": "Varga Ádám", "position": "DM", "passes": 55.0, "lost_balls": 3},
+                {"player": "Horváth László", "position": "CB", "passes": 62.0, "progressive_passes": 6},
+                {"player": "Tóth Gábor", "position": "DM", "passes": 55.0, "lost_balls": 3},
             ]),
             "finishers": pd.DataFrame([
-                {"player": "Horváth Zalán", "position": "F", "shots": 5, "xg": 0.75, "goals": 0},
+                {"player": "Varga Tamás", "position": "F", "shots": 5, "xg": 0.75, "goals": 0},
             ]),
             "wide_players": pd.DataFrame([
-                {"player": "Farkas Bence", "position": "W", "crosses": 7, "key_passes": 3},
+                {"player": "Szabó János", "position": "W", "crosses": 7, "key_passes": 3},
             ]),
             "defenders": pd.DataFrame([
-                {"player": "Kiss Levente", "position": "CB", "interceptions": 6.0, "recoveries": 9},
+                {"player": "Horváth László", "position": "CB", "interceptions": 6.0, "recoveries": 9},
             ]),
             "duel_players": pd.DataFrame([
-                {"player": "Takács Patrik", "position": "FB", "defensive_challenges": 11.0, "recoveries": 6},
+                {"player": "Kiss András", "position": "FB", "defensive_challenges": 11.0, "recoveries": 6},
             ]),
         }
         tactical_ctx["own_player_evaluation"] = _fpi_build_player_evaluation_v132(
@@ -20804,7 +20813,7 @@ def build_fpi_tactical_only_sample_pdf_bytes_v156() -> Optional[bytes]:
     """Tactical-only minta: pontosan az éles Tactical-only renderelővel."""
     return build_fpi_tactical_only_pdf_bytes_v156(
         _build_demo_tactical_context(),
-        demo_label="MINTA RIPORT / DEMO FC – TACTICAL-ONLY",
+        demo_label="MINTA RIPORT / MINTA FC – TACTICAL-ONLY",
     )
 
 
@@ -20818,7 +20827,7 @@ def build_fpi_integrated_sample_pdf_bytes_v156() -> Optional[bytes]:
         demo_df, latest, "Magas letámadás",
         report_type="executive",
         tactical_context=_build_demo_tactical_context(),
-        demo_label="MINTA RIPORT / DEMO FC – GPS + TAKTIKAI",
+        demo_label="MINTA RIPORT / MINTA FC – GPS + TAKTIKAI",
     )
 
 
@@ -21970,14 +21979,14 @@ def _fpi_v423_production_like_sample_df() -> pd.DataFrame:
 
     # Éleshez hasonló keretméret: 20 mezőnyjátékos + 3 kapus.
     roster = [
-        ("Nagy Bence", "CB"), ("Kovács Márk", "CB"), ("Tóth Ádám", "FB"),
-        ("Szabó Levente", "FB"), ("Varga Dávid", "DM"), ("Molnár Máté", "CM"),
-        ("Farkas Bálint", "CM"), ("Horváth Patrik", "AM"), ("Kiss Zalán", "W"),
-        ("Takács Dániel", "W"), ("Balogh Gergő", "F"), ("Papp András", "F"),
-        ("Lakatos Milán", "CB"), ("Juhász Roland", "FB"), ("Oláh Kristóf", "DM"),
-        ("Simon Áron", "CM"), ("Fehér Botond", "AM"), ("Sipos Noel", "W"),
-        ("Kelemen Zsombor", "CM"), ("Bíró Dominik", "F"),
-        ("Pálfi Kristóf", "GK"), ("Ruisz Barnabás", "GK"), ("Szabados István", "GK"),
+        ("Kovács István", "CB"), ("Nagy Péter", "CB"), ("Szabó János", "FB"),
+        ("Tóth Gábor", "FB"), ("Horváth László", "DM"), ("Varga Tamás", "CM"),
+        ("Kiss András", "CM"), ("Molnár Zoltán", "AM"), ("Farkas Attila", "W"),
+        ("Balogh József", "W"), ("Papp Ferenc", "F"), ("Juhász Sándor", "F"),
+        ("Takács László", "CB"), ("Lakatos István", "FB"), ("Oláh Péter", "DM"),
+        ("Simon János", "CM"), ("Fehér Gábor", "AM"), ("Bíró Tamás", "W"),
+        ("Kelemen András", "CM"), ("Szabó László", "F"),
+        ("Kovács János", "GK"), ("Nagy István", "GK"), ("Tóth Péter", "GK"),
     ]
     source_players = demo_df["player_name"].dropna().astype(str).drop_duplicates().tolist()
     if not source_players:
@@ -22070,6 +22079,7 @@ def build_fpi_gps_only_sample_pdf_bytes() -> Optional[bytes]:
     # A letöltési fájlnév és a szintetikus Demo FC adatok jelzik, hogy mintáról van szó.
     return build_fpi_gps_only_pdf_bytes(
         demo_df, latest, "Magas letámadás",
+        demo_label="MINTA RIPORT / MINTA FC U19 – GPS ONLY",
     )
 
 
@@ -26623,8 +26633,8 @@ def _fpi_v429_landing_css() -> None:
 #
 # Tartalmi logika nem változik.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V437_INPUT_OUTPUT_READABILITY_2026_08_16"
-FPI_SAMPLE_CACHE_VERSION_V434 = "V434_PDF_VISUAL_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V438_ANONYMIZED_SAMPLES_2026_08_17"
+FPI_SAMPLE_CACHE_VERSION_V434 = "V438_ANONYMIZED_SAMPLE_2026_08_17"
 
 # Az aktuális, V433-ig felépített production sample builderek eltárolása.
 _fpi_v434_raw_gps_sample_builder = build_fpi_gps_only_sample_pdf_bytes
@@ -26713,7 +26723,7 @@ def build_fpi_sample_pdf_bytes(
 # Ugyanaz a jól látható forgó státuszjelző minden FPI oldalon:
 # landing / Input-Output / Metodika / Haladó elemző app.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V437_INPUT_OUTPUT_READABILITY_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V438_ANONYMIZED_SAMPLES_2026_08_17"
 
 
 def _fpi_v435_global_running_indicator_css() -> None:
@@ -26812,7 +26822,7 @@ _fpi_v435_global_running_indicator_css()
 # =============================================================================
 # V436 – FAST INPUT / OUTPUT PERFORMANCE LAYER
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V437_INPUT_OUTPUT_READABILITY_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V438_ANONYMIZED_SAMPLES_2026_08_17"
 FPI_V436_CACHE_VERSION = "2026_08_16_A"
 
 
@@ -27024,7 +27034,7 @@ def _fpi_v436_clean_report_signature(df: pd.DataFrame, settings: Dict[str, objec
 # Csak vizuális javítás a vezetői döntéselőkészítő oldalon.
 # A V436 performance-optimalizálás és minden funkció változatlan.
 # =============================================================================
-FPI_IMPORT_ENGINE_VERSION = "FPI_V437_INPUT_OUTPUT_READABILITY_2026_08_16"
+FPI_IMPORT_ENGINE_VERSION = "FPI_V438_ANONYMIZED_SAMPLES_2026_08_17"
 
 _fpi_v437_base_clean_workspace = render_fpi_clean_workspace_v101
 
@@ -27216,6 +27226,16 @@ def render_fpi_clean_workspace_v101() -> None:
     _fpi_v437_base_clean_workspace()
     _fpi_v437_clean_readability_css()
 
+
+
+# =============================================================================
+# V438 – ANONYMIZED SAMPLE / DEMO REPORT DATA
+# - Built-in sample/demo PDFs use generic synthetic Hungarian names only.
+# - Generic club labels: Minta FC / Ellenfél FC.
+# - Live uploaded data and live KTE/Kecskemét recognition are unchanged.
+# - Sample cache version bumped so previously cached sample PDFs are rebuilt.
+# =============================================================================
+FPI_IMPORT_ENGINE_VERSION = "FPI_V438_ANONYMIZED_SAMPLES_2026_08_17"
 
 # Default: első oldal / landing page. A teljes import-export app csak gomb után indul.
 if "fpi_active_page_v100" not in st.session_state:
@@ -31716,3 +31736,4 @@ with st.expander("🧩 Smart Excel Mapper + License / oszlopmapping ellenőrzés
 # - aktív meccsreferencia: játékosonkénti /90 -> mezőnyjátékos-medián
 # =========================================================
 FPI_IMPORT_ENGINE_VERSION = "FPI_V433_HERO_FIT_2026_08_16"
+
